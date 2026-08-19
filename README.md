@@ -1,8 +1,11 @@
 # PiVPN Web UI
 
 A small Flask admin panel for a PiVPN (OpenVPN mode) install: create/renew/
-remove VPN clients, download their `.ovpn` files, and manage iptables
-FORWARD accept/drop rules, DNAT port-forwards, and per-client block/unblock.
+remove VPN clients, download their `.ovpn` files, per-client block/unblock,
+manage iptables FORWARD rules and DNAT port-forwards, control what
+destinations get routed into the tunnel, and view VPN/system/auth logs.
+Ships with a manual-trigger CD pipeline (`git push` → `Deploy` button →
+live on the server) for keeping a running install in sync with this repo.
 
 ## What this actually does
 
@@ -372,6 +375,9 @@ reinstall steps exist.
 - VPN Sessions tab parsing is best-effort: it depends on OpenVPN's log line
   format, which isn't strictly standardized. Unrecognized lines still show
   up (event "other", raw text in Detail) rather than being silently dropped.
+  Client Sessions pairs the same parsed events, so it inherits the same
+  fragility — a missed connect/disconnect line there shows as a session
+  with no matching end (or start) rather than a wrong duration.
 - If you installed this app before the Logs page existed, rerun the two
   `sudo install ...pivpn-webui-log-helper.sh...` / sudoers steps from
   `setup.sh` manually, or just rerun `./setup.sh` — it's safe to re-run.
