@@ -1,0 +1,15 @@
+name: Deploy
+
+on:
+  workflow_dispatch:   # manual trigger only — nothing touches the server automatically
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to <server-1-ip>
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no <user>@<server-1-ip> "ignored, server runs a forced command"
