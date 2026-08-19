@@ -79,30 +79,37 @@ firewall logic) is independent of it.
 ## Setup
 
 On the Pi (or any Debian/Ubuntu box PiVPN is on), as the user that installed
-PiVPN. Debian/Ubuntu's base Python doesn't always ship the `venv` module —
-if `./setup.sh` fails with "ensurepip is not available", run
+PiVPN — not root. Debian/Ubuntu's base Python doesn't always ship the `venv`
+module — if `./setup.sh` fails with "ensurepip is not available", run
 `sudo apt install python3-venv` first, then retry:
 
 ```bash
+git clone https://github.com/vannyratanak/pivpn-webui.git
 cd pivpn-webui
 ./setup.sh
 ```
 
-This creates a venv, installs dependencies, generates your admin password
-hash and a secret key into `.env`, installs the ccd and log root-helper
-scripts to `/usr/local/sbin/`, installs a scoped `/etc/sudoers.d/pivpn-webui`
-entry, and installs (but doesn't yet start) a systemd unit.
+`setup.sh` will prompt you for an admin username/password and a couple of
+paths (defaults are usually fine), then it creates a venv, installs
+dependencies, generates your admin password hash and a secret key into
+`.env`, installs all four root-helper scripts to `/usr/local/sbin/`,
+installs a scoped `/etc/sudoers.d/pivpn-webui` entry, and installs (but
+doesn't yet start) a systemd unit.
 
 The log helper (`deploy/pivpn-webui-log-helper.sh`) hardcodes the OpenVPN
 systemd unit name (`openvpn@server`) for the Sessions tab — verify it with
 `systemctl list-units | grep openvpn` and update+reinstall the script if
-your install uses a different unit name.
+your install uses a different unit name. Same caution applies to the
+`pivpn` CLI flags `app/pivpn_ctl.py` assumes — run `pivpn -h && pivpn add -h`
+and compare before relying on client add/remove/renew.
 
 ```bash
 sudo systemctl enable --now pivpn-webui
 ```
 
-By default it binds to `127.0.0.1:8443` only.
+By default it binds to `127.0.0.1:8443` only — see
+[Accessing it remotely](#accessing-it-remotely) below (`./setup-nginx.sh`
+is the quickest path to real browser access with TLS).
 
 ## Accessing it remotely
 
