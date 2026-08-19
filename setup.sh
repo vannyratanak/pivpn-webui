@@ -78,7 +78,8 @@ sudo install -m 0750 -o root -g root deploy/pivpn-webui-client-script-helper.sh 
 CURRENT_USER="$(whoami)"
 
 SUDOERS_TMP="$(mktemp)"
-sed "s/__USER__/${CURRENT_USER}/g" deploy/sudoers-pivpn-webui.template > "$SUDOERS_TMP"
+sed -e "s/__USER__/${CURRENT_USER}/g" -e "s#__APP_DIR__#${APP_DIR}#g" \
+  deploy/sudoers-pivpn-webui.template > "$SUDOERS_TMP"
 sudo visudo -cf "$SUDOERS_TMP"
 sudo install -m 0440 -o root -g root "$SUDOERS_TMP" /etc/sudoers.d/pivpn-webui
 rm -f "$SUDOERS_TMP"

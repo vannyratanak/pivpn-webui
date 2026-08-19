@@ -14,10 +14,20 @@ __USER__ ALL=(root) NOPASSWD: /usr/sbin/netfilter-persistent
 # unreadable and the Saved column shows "Unsaved" even right after a
 # successful Save Rules.
 __USER__ ALL=(root) NOPASSWD: /bin/cat
-# For the CD deploy workflow's forced-command SSH key (see
-# deploy/deploy-key-setup notes in README) — scoped to restarting only
-# this one service, nothing else systemctl can do.
+# For the CD deploy workflow's forced-command SSH key (see setup-cd-deploy.sh
+# and README) — scoped to restarting only this one service, nothing else
+# systemctl can do.
 __USER__ ALL=(root) NOPASSWD: /usr/bin/systemctl restart pivpn-webui
+# Same forced-command key also needs to reinstall the 4 helper scripts above
+# after every git pull — a plain `git pull` only updates files inside the
+# repo checkout, it never touches /usr/local/sbin/ (only setup.sh does
+# that), so without this grant a helper-script change would silently never
+# take effect through the Deploy workflow even though it reports success.
+# Source and destination are both fully pinned per script, not wildcarded.
+__USER__ ALL=(root) NOPASSWD: /usr/bin/install -m 0750 -o root -g root __APP_DIR__/deploy/pivpn-webui-ccd-helper.sh /usr/local/sbin/pivpn-webui-ccd-helper.sh
+__USER__ ALL=(root) NOPASSWD: /usr/bin/install -m 0750 -o root -g root __APP_DIR__/deploy/pivpn-webui-log-helper.sh /usr/local/sbin/pivpn-webui-log-helper.sh
+__USER__ ALL=(root) NOPASSWD: /usr/bin/install -m 0750 -o root -g root __APP_DIR__/deploy/pivpn-webui-routes-helper.sh /usr/local/sbin/pivpn-webui-routes-helper.sh
+__USER__ ALL=(root) NOPASSWD: /usr/bin/install -m 0750 -o root -g root __APP_DIR__/deploy/pivpn-webui-client-script-helper.sh /usr/local/sbin/pivpn-webui-client-script-helper.sh
 # /usr/local/bin/pivpn itself doesn't need sudo to invoke — but it internally
 # runs each real subcommand as `sudo /opt/pivpn/openvpn/<script>.sh`, and
 # those inner sudo calls are what actually need this grant. On Raspberry Pi
