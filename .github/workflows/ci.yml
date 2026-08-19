@@ -12,5 +12,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-      - run: pip install -r requirements.txt
+      - run: pip install -r requirements.txt pytest
       - run: SECRET_KEY=ci ADMIN_PASSWORD_HASH=ci python -c "from app import create_app; create_app()"
+      - run: pytest tests/ -v
