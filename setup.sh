@@ -89,7 +89,19 @@ sed -e "s#__APP_DIR__#${APP_DIR}#g" -e "s/__USER__/${CURRENT_USER}/g" \
   deploy/pivpn-webui.service.template > "$SERVICE_TMP"
 sudo install -m 0644 "$SERVICE_TMP" /etc/systemd/system/pivpn-webui.service
 rm -f "$SERVICE_TMP"
+
+echo "== Installing CRL permission watcher =="
+# PiVPN's own removeOVPN.sh does `cp -a .../pki/crl.pem /etc/openvpn/crl.pem`
+# on every revoke (which Renew also triggers, via revoke+reissue) — `-a`
+# preserves Easy-RSA's restrictive 0600 root:root source permissions, which
+# the unprivileged `openvpn` daemon can't read, silently breaking every
+# client's TLS handshake (`VERIFY ERROR: CRL not loaded`) until something
+# re-chmods it. This watches the file and fixes it within about a second of
+# any change, regardless of what triggered it (this app, raw CLI, cron).
+sudo install -m 0644 deploy/fix-crl-perms.service /etc/systemd/system/fix-crl-perms.service
+sudo install -m 0644 deploy/fix-crl-perms.path /etc/systemd/system/fix-crl-perms.path
 sudo systemctl daemon-reload
+sudo systemctl enable --now fix-crl-perms.path
 
 mkdir -p instance
 
@@ -110,3 +122,8 @@ echo "systemd unit name (run: systemctl list-units | grep openvpn) against"
 echo "OPENVPN_UNIT in deploy/pivpn-webui-log-helper.sh — update and reinstall"
 echo "with 'sudo install -m 0750 -o root -g root deploy/pivpn-webui-log-helper.sh"
 echo "/usr/local/sbin/pivpn-webui-log-helper.sh' if it differs."
+echo
+echo "The CRL permission watcher (fix-crl-perms.path) assumes PiVPN's default"
+echo "crl-verify path, /etc/openvpn/crl.pem — check crl-verify in"
+echo "/etc/openvpn/server.conf matches; update PathModified in"
+echo "deploy/fix-crl-perms.path and reinstall if it doesn't."

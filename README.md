@@ -46,6 +46,19 @@ FORWARD accept/drop rules, DNAT port-forwards, and per-client block/unblock.
   narrowly-scoped root helper (see below) — three fixed `journalctl`
   invocations, no caller-supplied arguments.
 
+- **CRL permission watcher** (`fix-crl-perms.path`/`.service`, installed by
+  `setup.sh`, running independently of the webui itself) — works around a
+  real bug in PiVPN's own `removeOVPN.sh`: it regenerates
+  `/etc/openvpn/crl.pem` via `cp -a`, which preserves Easy-RSA's restrictive
+  `0600 root:root` source permissions. The unprivileged `openvpn` daemon
+  can't read that, so every `pivpn revoke` (which *Renew* also triggers,
+  via revoke+reissue) silently breaks **every** client's TLS handshake
+  (`VERIFY ERROR: CRL not loaded`) until something re-`chmod`s the file. A
+  `systemd` path unit watches `/etc/openvpn/crl.pem` and fixes it within
+  about a second of any change, regardless of what triggered it (this app,
+  raw CLI, cron) — see [Known limitations](#known-limitations--things-to-check)
+  for the one thing to verify before trusting it on a different install.
+
 ## ⚠️ Verified against one real install — other PiVPN versions may differ
 
 The `pivpn_ctl.py` invocations (`add`/`revoke`/`list` flags, `pivpn list`'s
@@ -105,10 +118,12 @@ and [First login](#first-login) below for the full detail behind each step.
 │ • sudo installs 4 helper scripts → /usr/local/sbin/             │
 │ • sudo installs sudoers rule (visudo -cf validated first)      │
 │ • sudo installs systemd unit + daemon-reload                   │
+│ • sudo installs + starts a CRL permission watcher (see below)  │
 │ • creates empty instance/ dir                                  │
 │                                                                  │
-│ Touches nothing PiVPN owns. No iptables. No VPN impact —        │
-│ this step is 100% new files.                                   │
+│ Touches nothing PiVPN owns, no iptables, no VPN impact — except │
+│ the CRL watcher, which starts running immediately (protects     │
+│ against a real PiVPN bug even before the webui itself starts).  │
 └────────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -291,3 +306,10 @@ thought than a weekend project gets. Options, easiest first:
 - If you installed this app before the Logs page existed, rerun the two
   `sudo install ...pivpn-webui-log-helper.sh...` / sudoers steps from
   `setup.sh` manually, or just rerun `./setup.sh` — it's safe to re-run.
+- The CRL permission watcher assumes PiVPN's default `crl-verify` path,
+  `/etc/openvpn/crl.pem` — check `crl-verify` in `/etc/openvpn/server.conf`
+  matches on your install; if it doesn't, update `PathModified` in
+  `deploy/fix-crl-perms.path` and reinstall
+  (`sudo install -m 0644 deploy/fix-crl-perms.path
+  /etc/systemd/system/fix-crl-perms.path && sudo systemctl daemon-reload
+  && sudo systemctl restart fix-crl-perms.path`).

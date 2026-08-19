@@ -1,0 +1,6 @@
+[Unit]
+Description=Fix OpenVPN CRL file permissions
+
+[Service]
+Type=oneshot
+ExecStart=/bin/chmod 644 /etc/openvpn/crl.pem

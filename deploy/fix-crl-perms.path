@@ -1,0 +1,8 @@
+[Unit]
+Description=Watch OpenVPN CRL for permission resets
+
+[Path]
+PathModified=/etc/openvpn/crl.pem
+
+[Install]
+WantedBy=multi-user.target
