@@ -139,6 +139,34 @@ thought than a weekend project gets. Options, easiest first:
 - This app never serves HTTPS itself — anything beyond the SSH-tunnel option
   is sending the login password in plaintext unless you put TLS in front.
 
+## First login
+
+1. Log in with the admin username/password you set during `./setup.sh`.
+2. **Visit Clients first.** It's read-only — just `pivpn list` plus a CCD
+   read — a safe first check that the app can see your real clients before
+   you touch anything that writes.
+3. **Visit Firewall next, at a quiet moment rather than peak VPN usage.**
+   The first time this page loads, it scans your live iptables (`FORWARD`,
+   `INPUT`, and the `nat` table's `PREROUTING`/`POSTROUTING` chains) for any
+   rule that isn't already tagged `pivpn-webui:<id>` — on a box that's never
+   run this app before, that includes whatever PiVPN's own installer set up
+   (its `MASQUERADE`/`FORWARD` rules) plus anything added by hand over the
+   years. Each one gets adopted: recorded into the app's database, then
+   deleted and immediately re-added with the same match and action, just
+   now tagged. It's a live iptables write, but a same-rule swap, not a
+   behavior change — the OpenVPN daemon itself is never touched or
+   restarted, so connected clients' tunnels aren't affected. A rule shape
+   the parser doesn't recognize (`REJECT`, `LOG`, an unusual multi-match
+   rule) is left alone entirely — it keeps working, it just never shows up
+   in this app's table.
+4. **Review the Active Rules table against what you expect to be there,
+   then click "Save Rules."** Everything just discovered shows as
+   "Unsaved" until you do — that button persists the newly-tagged version
+   into the reboot-survival snapshot (`netfilter-persistent save`, so
+   `iptables-persistent` needs to be installed). Skip this and a reboot
+   brings back the original untagged rules, which just get rediscovered
+   (and re-tagged with fresh IDs) the next time you visit.
+
 ## Known limitations / things to check
 
 - Single static admin user — fine for one operator, not built for a team.
