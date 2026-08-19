@@ -5,7 +5,11 @@ on:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    # self-hosted, not ubuntu-latest: GitHub's cloud runners can't reach
+    # <server-1-ip> at all (it's a private-network address, confirmed by a
+    # real connection timeout when this ran on ubuntu-latest) — this has to
+    # run from a machine that's already on the same network as the server.
+    runs-on: [self-hosted, macos]
     steps:
       - name: Deploy to <server-1-ip>
         run: |
