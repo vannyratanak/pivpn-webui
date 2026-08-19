@@ -96,7 +96,10 @@ mkdir -p instance
 echo
 echo "Setup complete."
 echo "  Start it:  sudo systemctl enable --now pivpn-webui"
-echo "  Then:      http://127.0.0.1:${BIND_PORT}  (bound to localhost only — see README.md for remote access)"
+echo "  Then:      http://127.0.0.1:${BIND_PORT}  (bound to localhost only)"
+echo
+echo "For remote/browser access, put nginx + TLS in front of it next:"
+echo "  ./deploy/setup-nginx-tls.sh"
 echo
 echo "Before relying on client add/remove/renew, verify the exact pivpn CLI"
 echo "syntax on this machine (run: pivpn -h && pivpn add -h) against what's"

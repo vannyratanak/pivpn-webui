@@ -122,9 +122,13 @@ thought than a weekend project gets. Options, easiest first:
   sudo iptables -A INPUT -p tcp --dport 8443 -j DROP
   sudo netfilter-persistent save   # survive reboot
   ```
-- **Reverse proxy with TLS** (nginx/Caddy) in front of it, with its own auth
-  layer if you want defense in depth — the real move if this needs to be
-  reachable beyond a LAN you already trust.
+- **Reverse proxy with TLS** in front of it — the real move if this needs to
+  be reachable beyond a LAN you already trust. `./deploy/setup-nginx-tls.sh`
+  installs nginx if needed, generates a self-signed cert (or leaves an
+  existing one at `/etc/nginx/ssl/pivpn-webui.{crt,key}` alone if you
+  supplied a real one first), and installs the reverse-proxy vhost. Add its
+  own auth layer in front too if you want defense in depth. Caddy is a fine
+  alternative if you prefer it, just not what this script automates.
 - This app never serves HTTPS itself — anything beyond the SSH-tunnel option
   is sending the login password in plaintext unless you put TLS in front.
 
