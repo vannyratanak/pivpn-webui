@@ -76,6 +76,107 @@ firewall logic) is independent of it.
 - Firewall/port-forward rules live in `instance/pivpn_webui.db` (SQLite) —
   the DB is the source of truth, iptables is just where it gets applied.
 
+## Complete setup, start to finish
+
+The two sudo password prompts noted below are once per script run (sudo
+caches your password for its default ~15 minutes), not once per command.
+Zero iptables rules get added until you deliberately visit the Firewall
+page in step 6 — everything before that is new files and process startup
+only. See [Setup](#setup), [Accessing it remotely](#accessing-it-remotely),
+and [First login](#first-login) below for the full detail behind each step.
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│  On the box, as your normal sudo user (not root)                │
+└────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+        git clone https://github.com/vannyratanak/pivpn-webui.git
+        cd pivpn-webui
+                              │
+                              ▼
+┌────────────────────────────────────────────────────────────────┐
+│ STEP 1 — ./setup.sh                        [sudo password: 1x]  │
+├────────────────────────────────────────────────────────────────┤
+│ • creates venv/, installs Python deps                          │
+│ • prompts: admin username, admin password ×2, ovpn dir,        │
+│   OpenVPN subnet base                                          │
+│ • writes .env (chmod 600) — secrets, paths, helper locations   │
+│ • sudo installs 4 helper scripts → /usr/local/sbin/             │
+│ • sudo installs sudoers rule (visudo -cf validated first)      │
+│ • sudo installs systemd unit + daemon-reload                   │
+│ • creates empty instance/ dir                                  │
+│                                                                  │
+│ Touches nothing PiVPN owns. No iptables. No VPN impact —        │
+│ this step is 100% new files.                                   │
+└────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌────────────────────────────────────────────────────────────────┐
+│ STEP 2 — sudo systemctl enable --now pivpn-webui                │
+├────────────────────────────────────────────────────────────────┤
+│ • gunicorn starts, binds 127.0.0.1:8443 only                   │
+│ • creates instance/pivpn_webui.db (empty tables)                │
+│ • sync_all() runs → loops over DB rules → DB is empty →         │
+│   does nothing                                                 │
+│                                                                  │
+│ Still zero iptables rules — nothing in the DB yet to sync.      │
+└────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌────────────────────────────────────────────────────────────────┐
+│ STEP 3 — ./setup-nginx.sh                  [sudo password: 1x]  │
+├────────────────────────────────────────────────────────────────┤
+│ • installs nginx via apt if missing                             │
+│ • prompts for server name (auto-detects your IP as default)    │
+│ • generates a self-signed cert (or leaves a real one alone)    │
+│ • installs the reverse-proxy vhost → nginx -t → reload          │
+│                                                                  │
+│ Separate port (443, admin panel) from OpenVPN's tunnel port —  │
+│ zero effect on connected VPN clients.                          │
+└────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+                  https://<server-name>/
+                              │
+                              ▼
+┌────────────────────────────────────────────────────────────────┐
+│ STEP 4 — Log in with the credentials from Step 1                │
+└────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌────────────────────────────────────────────────────────────────┐
+│ STEP 5 — Visit Clients page first                                │
+├────────────────────────────────────────────────────────────────┤
+│ Read-only — runs `pivpn list` + reads CCD files. Confirms the  │
+│ app sees your real clients correctly. Nothing is written.      │
+└────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌────────────────────────────────────────────────────────────────┐
+│ STEP 6 — Visit Firewall page (pick a quiet moment)               │
+├────────────────────────────────────────────────────────────────┤
+│ discover_cli_rules() adopts every untagged rule it finds        │
+│ (e.g. PiVPN's own MASQUERADE/FORWARD rules from original        │
+│ install): delete → re-add same rule, now tagged.                │
+│ Sub-millisecond per rule. OpenVPN daemon never touched —        │
+│ tunnel sessions unaffected.                                     │
+│                                                                  │
+│ Table now shows everything found, marked "Unsaved."             │
+└────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌────────────────────────────────────────────────────────────────┐
+│ STEP 7 — Review the table, then click "Save Rules"               │
+├────────────────────────────────────────────────────────────────┤
+│ Locks the tagged version in as what survives a reboot           │
+│ (needs iptables-persistent installed for this to work).         │
+└────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+                     ✅  Fully installed
+```
+
 ## Setup
 
 On the Pi (or any Debian/Ubuntu box PiVPN is on), as the user that installed
