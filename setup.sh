@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Run this ON THE PI, as the same non-root user that installed PiVPN
-# (typically `pi`). Sets up the venv, generates admin credentials, installs
-# the root-helper script + sudoers rule + systemd unit.
+# Run this on the server PiVPN is installed on, as the same non-root user
+# that installed PiVPN. Sets up the venv, generates admin credentials,
+# installs the root-helper script + sudoers rule + systemd unit.
 set -euo pipefail
 
 if [[ $EUID -eq 0 ]]; then

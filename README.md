@@ -179,9 +179,10 @@ and [First login](#first-login) below for the full detail behind each step.
 
 ## Setup
 
-On the Pi (or any Debian/Ubuntu box PiVPN is on), as the user that installed
-PiVPN — not root. Debian/Ubuntu's base Python doesn't always ship the `venv`
-module — if `./setup.sh` fails with "ensurepip is not available", run
+On the server PiVPN is installed on (Raspberry Pi, Ubuntu, or any other
+Debian-based system), as the user that installed PiVPN — not root.
+Debian/Ubuntu's base Python doesn't always ship the `venv` module — if
+`./setup.sh` fails with "ensurepip is not available", run
 `sudo apt install python3-venv` first, then retry:
 
 ```bash
@@ -218,8 +219,9 @@ It's bound to localhost on purpose — this panel can revoke certs and edit
 your firewall, so it shouldn't be reachable from the internet without more
 thought than a weekend project gets. Options, easiest first:
 
-- **SSH tunnel**: `ssh -L 8443:127.0.0.1:8443 pi@yourpi`, then browse to
-  `https://127.0.0.1:8443` from your laptop. Simplest, no extra exposure.
+- **SSH tunnel**: `ssh -L 8443:127.0.0.1:8443 youruser@yourserver`, then
+  browse to `https://127.0.0.1:8443` from your laptop. Simplest, no extra
+  exposure.
 - **LAN-only**: set `BIND_HOST=0.0.0.0` in `.env`, restart the service, and
   add a host-firewall rule scoping port `BIND_PORT` to your LAN subnet
   specifically — don't just open the bind address and rely on there being
@@ -272,16 +274,17 @@ thought than a weekend project gets. Options, easiest first:
 
 - Single static admin user — fine for one operator, not built for a team.
 - `renew_client` fully revokes before reissuing; if `add_client` then fails
-  (e.g. a Pi resource hiccup), the client is left removed with no new cert.
+  (e.g. a server resource hiccup), the client is left removed with no new
+  cert.
   The UI will show an error — check `pivpn list` to confirm state.
 - Per-client block needs a ccd-assigned IP, which PiVPN only writes once a
   client has been through `add`. Clients created before this tool (or before
   PiVPN itself added ccd pinning, if you're on an old version) may show no
   IP and thus no block/unblock option until renewed.
 - `add_portforward_rule` opens the DNAT target as ACCEPT in FORWARD for that
-  IP:port — it does not also open your router's WAN port; if the Pi isn't
-  your edge device, you still need a port-forward on whatever actually faces
-  the internet.
+  IP:port — it does not also open your router's WAN port; if this server
+  isn't your edge device, you still need a port-forward on whatever
+  actually faces the internet.
 - VPN Sessions tab parsing is best-effort: it depends on OpenVPN's log line
   format, which isn't strictly standardized. Unrecognized lines still show
   up (event "other", raw text in Detail) rather than being silently dropped.
