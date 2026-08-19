@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}VPN Routes — PiVPN Web UI{% endblock %}
+{% block content %}
+<div class="page-header-row">
+  <h1>VPN Routes</h1>
+  {% if vpn_routes %}
+    <input type="text" id="routes-filter" class="log-filter-input filter-input-inline" placeholder="Search…" aria-label="Search VPN routes">
+  {% endif %}
+</div>
+
+<section class="card">
+  <details class="collapsible">
+    <summary><h2>Push a new route</h2></summary>
+    <form method="post" action="{{ url_for('main.add_vpn_route') }}" class="inline-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label><span class="label-text">Network<span class="required-star">*</span></span>
+        <input type="text" name="network" required placeholder="192.168.100.0">
+      </label>
+      <label><span class="label-text">Netmask<span class="required-star">*</span></span>
+        <input type="text" name="netmask" required placeholder="255.255.255.0">
+      </label>
+      <button type="submit">Push route</button>
+    </form>
+    <p class="hint">Applies immediately and restarts the OpenVPN service to take effect &mdash; already-connected clients will briefly reconnect.</p>
+  </details>
+</section>
+
+<section class="card">
+  <h2>Routes pushed to clients</h2>
+  <p class="hint">Controls what destinations VPN clients send into the tunnel at all. Without a route here, a client never attempts to reach that network through the VPN &mdash; see the <a href="{{ url_for('main.firewall_rules') }}">Firewall</a> page's NAT/SNAT rules, which handle the return path once traffic arrives.</p>
+
+  {% if not vpn_routes %}
+    <p class="empty">No extra routes pushed yet (VPN clients only reach the VPN's own subnet).</p>
+  {% else %}
+  <div class="table-scroll">
+  <table id="routes-table">
+    <thead>
+      <tr>
+        <th scope="col">Network</th>
+        <th scope="col">Netmask</th>
+        <th scope="col">Actions</th>
+      </tr>
+    </thead>
+    <tbody id="routes-tbody">
+      {% for r in vpn_routes %}
+      <tr>
+        <td>{{ r.network }}</td>
+        <td>{{ r.netmask }}</td>
+        <td>
+          <div class="actions">
+          <form method="post" action="{{ url_for('main.remove_vpn_route') }}" class="btn-form"
+                onsubmit="return confirm('Remove this route? Connected clients will stop routing this network into the tunnel.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="network" value="{{ r.network }}">
+            <input type="hidden" name="netmask" value="{{ r.netmask }}">
+            <button type="submit" class="btn btn-danger">Remove</button>
+          </form>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <script>attachLogFilter('routes-filter', '#routes-tbody', 'tr', '#routes-table thead th:not(:last-child)');</script>
+  {% endif %}
+</section>
+{% endblock %}

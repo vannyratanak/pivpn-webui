@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Log in — PiVPN Web UI{% endblock %}
+{% block content %}
+<div class="login-wrap">
+  <form class="login-card" method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <h1>PiVPN Web UI</h1>
+    <label>Username
+      <input type="text" name="username" autocomplete="username" required autofocus>
+    </label>
+    <label>Password
+      <input type="password" name="password" autocomplete="current-password" required>
+    </label>
+    <button type="submit">Log in</button>
+  </form>
+</div>
+{% endblock %}

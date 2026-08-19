@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% block title %}Clients — PiVPN Web UI{% endblock %}
+{% block content %}
+<div class="page-header-row">
+  <h1>VPN Clients</h1>
+  {% if clients %}
+    <input type="text" id="clients-filter" class="log-filter-input filter-input-inline" placeholder="Search…" aria-label="Search clients">
+  {% endif %}
+</div>
+
+<section class="card">
+  <details class="collapsible">
+    <summary><h2>Add client</h2></summary>
+    <form method="post" action="{{ url_for('main.add_client') }}" class="inline-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label>Name
+        <input type="text" name="name" pattern="[A-Za-z0-9_-]{1,32}" required placeholder="e.g. laptop-anna">
+      </label>
+      <label>Passphrase <span class="hint">(optional — leave blank for a passwordless cert)</span>
+        <input type="password" name="passphrase" autocomplete="new-password">
+      </label>
+      <button type="submit">Create client</button>
+    </form>
+  </details>
+</section>
+
+<section class="card">
+  <div class="card-header-row">
+    <h2>Existing clients</h2>
+    <div class="btn-group">
+      {% if clients %}<span class="hint">{{ connected_count }} connected / {{ total_count }} total</span>{% endif %}
+      <button type="button" class="btn" onclick="document.getElementById('import-clients-dialog').showModal()">Import Client</button>
+      <form method="post" action="{{ url_for('main.bulk_remove_clients') }}" id="bulk-remove-form" class="btn-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-danger" id="bulk-remove-btn" disabled>Remove selected (<span id="bulk-remove-count">0</span>)</button>
+      </form>
+    </div>
+  </div>
+
+  <dialog id="import-clients-dialog" class="modal" onclick="if (event.target === this) this.close()">
+    <button type="button" class="modal-close-btn" onclick="document.getElementById('import-clients-dialog').close()" aria-label="Close">&times;</button>
+    <h2>Import clients from file</h2>
+    <p class="hint">One client per line: <code>name=laptop-anna passphrase=optional</code>. Blank lines and lines starting with <code>#</code> are ignored. Leave out <code>passphrase</code> for a passwordless cert. Quote values with spaces.</p>
+    <p class="hint">Example:</p>
+    <p class="hint"><code>name=laptop-anna</code><br><code>name=phone-anna passphrase="correct horse battery staple"</code></p>
+
+    <form method="post" action="{{ url_for('main.import_clients') }}" enctype="multipart/form-data" class="inline-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label>File
+        <input type="file" name="clients_file" accept=".txt" required>
+      </label>
+      <div class="btn-group">
+        <button type="submit">Import</button>
+        <button type="button" class="btn" onclick="document.getElementById('import-clients-dialog').close()">Cancel</button>
+      </div>
+    </form>
+  </dialog>
+  {% if not clients %}
+    <p class="empty">No clients found (or `pivpn list` returned nothing parseable — check the server logs).</p>
+  {% else %}
+  <div class="table-scroll">
+  <table id="clients-table">
+    <thead>
+      <tr>
+        <th scope="col"><input type="checkbox" id="clients-select-all" aria-label="Select all visible clients"></th>
+        <th scope="col">Name</th>
+        <th scope="col">Status</th>
+        <th scope="col">Expiration</th>
+        <th scope="col">VPN IP</th>
+        <th scope="col">Session</th>
+        <th scope="col">Actions</th>
+      </tr>
+    </thead>
+    <tbody id="clients-tbody">
+      {% for c in clients %}
+      <tr class="{{ 'blocked-row' if c.blocked }}">
+        <td><input type="checkbox" name="client_names" value="{{ c.name }}" form="bulk-remove-form" class="client-select-checkbox" aria-label="Select client {{ c.name }}"></td>
+        <td>{{ c.name }}</td>
+        <td>{{ c.status }}</td>
+        <td>{{ c.expiration }}</td>
+        <td>{{ c.ip or '—' }}</td>
+        <td>
+          {% if c.session %}
+            <span class="badge badge-connected">connected</span>
+          {% else %}
+            <span class="badge badge-inactive">inactive</span>
+          {% endif %}
+        </td>
+        <td>
+          <div class="actions">
+          <a class="btn btn-sm" href="{{ url_for('main.download_client', name=c.name) }}">Download</a>
+
+          <form method="post" action="{{ url_for('main.renew_client', name=c.name) }}" class="btn-form"
+                onsubmit="return confirm('Renew {{ c.name }}? This revokes the current cert and issues a new one — the old .ovpn will stop working immediately.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-sm btn-warn">Renew</button>
+          </form>
+
+          <form method="post" action="{{ url_for('main.block_client', name=c.name) }}" class="btn-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="blocked" value="{{ '0' if c.blocked else '1' }}">
+            <button type="submit" class="btn btn-sm {{ 'btn-ok' if c.blocked else 'btn-warn' }}">
+              {{ 'Unblock' if c.blocked else 'Block' }}
+            </button>
+          </form>
+
+          <form method="post" action="{{ url_for('main.remove_client', name=c.name) }}" class="btn-form"
+                onsubmit="return confirm('Permanently remove {{ c.name }}? This cannot be undone.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-sm btn-danger">Remove</button>
+          </form>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <div class="pagination" id="clients-pagination">
+    <label class="pagination-size">Show
+      <select id="clients-page-size">
+        <option value="10">10</option>
+        <option value="25" selected>25</option>
+        <option value="50">50</option>
+        <option value="100">100</option>
+      </select>
+    </label>
+    <div class="pagination-nav">
+      <button type="button" class="btn btn-sm" data-page-prev>Prev</button>
+      <span data-page-status class="hint"></span>
+      <button type="button" class="btn btn-sm" data-page-next>Next</button>
+    </div>
+  </div>
+  <script>
+    const clientsPager = attachPagination('#clients-tbody', 'tr', 'clients-page-size', 'clients-pagination');
+    attachLogFilter('clients-filter', '#clients-tbody', 'tr', '#clients-table thead th:not(:first-child):not(:last-child)', () => clientsPager && clientsPager.refresh());
+
+    (function() {
+      const selectAll = document.getElementById('clients-select-all');
+      const bulkBtn = document.getElementById('bulk-remove-btn');
+      const bulkForm = document.getElementById('bulk-remove-form');
+      const countSpan = document.getElementById('bulk-remove-count');
+      if (!selectAll || !bulkBtn || !bulkForm) return;
+
+      const checkboxes = () => Array.from(document.querySelectorAll('#clients-tbody .client-select-checkbox'));
+      const visibleCheckboxes = () => checkboxes().filter((cb) => cb.closest('tr').style.display !== 'none');
+
+      function updateCount() {
+        const checked = checkboxes().filter((cb) => cb.checked).length;
+        countSpan.textContent = checked;
+        bulkBtn.disabled = checked === 0;
+      }
+
+      // "Select all" only selects currently-visible rows — respects
+      // whatever the search box / pagination currently narrowed to.
+      selectAll.addEventListener('change', () => {
+        visibleCheckboxes().forEach((cb) => { cb.checked = selectAll.checked; });
+        updateCount();
+      });
+      checkboxes().forEach((cb) => cb.addEventListener('change', updateCount));
+
+      bulkForm.addEventListener('submit', (e) => {
+        const selected = checkboxes().filter((cb) => cb.checked).map((cb) => cb.value);
+        if (selected.length === 0) { e.preventDefault(); return; }
+        if (!confirm(`Permanently remove ${selected.length} client(s) — ${selected.join(', ')}? This revokes their certificates and cannot be undone.`)) {
+          e.preventDefault();
+        }
+      });
+    })();
+  </script>
+  {% endif %}
+</section>
+{% endblock %}

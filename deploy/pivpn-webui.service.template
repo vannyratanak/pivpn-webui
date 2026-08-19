@@ -1,0 +1,20 @@
+[Unit]
+Description=PiVPN Web UI
+After=network.target openvpn.service
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__APP_DIR__
+EnvironmentFile=__APP_DIR__/.env
+ExecStart=__APP_DIR__/venv/bin/gunicorn -w 2 -b ${BIND_HOST}:${BIND_PORT} wsgi:app
+Restart=on-failure
+RestartSec=5
+# Must stay false: this service calls `sudo` for the privileged operations
+# in app/privileged.py, and sudo's setuid needs NoNewPrivileges off to work
+# under systemd. The privilege boundary here is the narrow sudoers allowlist
+# in /etc/sudoers.d/pivpn-webui, not this setting.
+NoNewPrivileges=false
+
+[Install]
+WantedBy=multi-user.target

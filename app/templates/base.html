@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}PiVPN Web UI{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script src="{{ url_for('static', filename='js/select-enhance.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/log-filter.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/pagination.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/select-filter.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/nav-loading.js') }}"></script>
+</head>
+<body>
+  <a href="#main-content" class="skip-link">Skip to content</a>
+  {% if current_user.is_authenticated %}
+  <header class="topbar">
+    <div class="brand">PiVPN Web UI</div>
+    <nav>
+      <a href="{{ url_for('main.clients') }}" class="{{ 'active' if request.endpoint == 'main.clients' }}" {% if request.endpoint == 'main.clients' %}aria-current="page"{% endif %}>Clients</a>
+      <a href="{{ url_for('main.firewall_rules') }}" class="{{ 'active' if request.endpoint == 'main.firewall_rules' }}" {% if request.endpoint == 'main.firewall_rules' %}aria-current="page"{% endif %}>Firewall Rules</a>
+      <a href="{{ url_for('main.vpn_routes_page') }}" class="{{ 'active' if request.endpoint == 'main.vpn_routes_page' }}" {% if request.endpoint == 'main.vpn_routes_page' %}aria-current="page"{% endif %}>VPN Routes</a>
+      <a href="{{ url_for('main.logs') }}" class="{{ 'active' if request.endpoint == 'main.logs' }}" {% if request.endpoint == 'main.logs' %}aria-current="page"{% endif %}>Logs</a>
+    </nav>
+    <a href="{{ url_for('main.logout') }}" class="logout">Log out</a>
+  </header>
+  {% endif %}
+
+  <main class="content" id="main-content">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="flashes">
+          {% for category, message in messages %}
+            <div class="flash flash-{{ category }}">{{ message }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

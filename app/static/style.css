@@ -1,0 +1,790 @@
+:root {
+  --bg: #0f1420;
+  --panel: #161d2e;
+  --panel-2: #1c2438;
+  --border: #2a3550;
+  --text: #e6e9f0;
+  --muted: #8a93a8;
+  --accent: #4f8cff;
+  --ok: #3ecf8e;
+  --warn: #f5a623;
+  --danger: #f0556c;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+#nav-loading-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 3px;
+  width: 0%;
+  background: var(--accent);
+  z-index: 9999;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 14px 24px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.topbar .brand { font-weight: 600; }
+
+.topbar nav { display: flex; gap: 16px; flex: 1; }
+
+.topbar nav a {
+  display: inline-block;
+  color: var(--muted);
+  text-decoration: none;
+  padding: 4px 2px;
+  border-bottom: 2px solid transparent;
+}
+
+.topbar nav a.active, .topbar nav a:hover {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.topbar nav a:focus-visible, .topbar .logout:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.topbar .logout {
+  display: inline-block;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 13px;
+  padding: 9px 12px;
+}
+.skip-link {
+  position: absolute;
+  top: -48px;
+  left: 8px;
+  z-index: 200;
+  background: var(--accent);
+  color: #fff;
+  padding: 10px 16px;
+  border-radius: 6px;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 600;
+  transform: translateY(0);
+  transition: transform 0.15s ease;
+}
+.skip-link:focus {
+  top: -48px;
+  transform: translateY(56px);
+}
+@media (max-width: 640px) {
+  .topbar {
+    flex-wrap: wrap;
+    row-gap: 10px;
+    justify-content: space-between;
+  }
+  .topbar nav {
+    order: 3;
+    flex: 0 0 100%;
+    flex-wrap: wrap;
+    gap: 12px 16px;
+  }
+}
+
+.content {
+  max-width: 1020px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+h1 { font-size: 22px; margin: 0 0 16px; }
+h2 { font-size: 16px; margin: 0 0 12px; color: var(--text); }
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.card-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.card-header-row h1,
+.card-header-row h2 {
+  margin: 0;
+}
+
+/* Firewall Rules' "Active rules" header only — Clients' "Existing clients"
+   header keeps the shared .card-header-row's align-items: center. */
+.firewall-rules-header { align-items: flex-end; }
+
+@media (max-width: 520px) {
+  .card-header-row { flex-wrap: wrap; row-gap: 10px; }
+  .card-header-row .btn-group { flex-wrap: wrap; }
+}
+
+/* Page title + search row (Clients/Firewall/VPN Routes h1) — distinct from
+   .card-header-row (used inside cards, e.g. "Existing clients" + buttons),
+   since this one has a fixed column proportion instead of space-between:
+   title takes a col-3-of-12 share, search takes col-2-of-12, both left-
+   aligned rather than stretched to fill the row. */
+.page-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.page-header-row h1 {
+  flex: 0 0 16.6667%;
+  margin: 0;
+}
+
+.page-header-row input[type="text"].filter-input-inline {
+  flex: 0 0 33.3333%;
+  width: auto;
+}
+
+@media (max-width: 520px) {
+  .page-header-row { flex-wrap: wrap; row-gap: 10px; }
+  .page-header-row h1,
+  .page-header-row input[type="text"].filter-input-inline {
+    flex-basis: 100%;
+  }
+}
+
+.collapsible summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  /* .card has 20px of padding around everything, which otherwise sits outside
+     this element's own clickable box — pull summary out to the card's edges
+     on all sides and pad it back in, so the whole visible header bar (edges
+     included, above and below the title text) is part of the clickable
+     toggle, not just the text/chevron in the middle. */
+  margin: -20px -20px -20px;
+  padding: 20px 20px 20px;
+}
+
+.collapsible summary::-webkit-details-marker { display: none; }
+
+.collapsible summary h2 { margin: 0; }
+
+.collapsible summary::after {
+  content: '';
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  margin-left: 12px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'><path fill='none' stroke='%238a93a8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' d='M6 8l4 4 4-4'/></svg>");
+  background-repeat: no-repeat;
+  background-size: 14px;
+  transition: transform 0.15s ease;
+}
+
+.collapsible[open] summary::after {
+  transform: rotate(180deg);
+}
+
+.collapsible > :not(summary) {
+  margin-top: 20px;
+}
+
+.hint { color: var(--muted); font-size: 12px; font-weight: normal; }
+.cell-note { color: var(--muted); font-style: italic; }
+.hint-block { display: block; }
+
+.inline-form {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  align-items: end;
+}
+
+.inline-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--muted);
+  min-width: 0;
+}
+
+.inline-form button,
+.inline-form .btn-group {
+  grid-column: 1 / -1;
+  justify-self: end;
+}
+
+@media (max-width: 900px) {
+  .inline-form { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* Hidden by default so there's no flash before the sync script (which also
+   controls this via inline style.display) runs on page load. */
+.fwd-src-custom-wrap { display: none; }
+
+@media (max-width: 520px) {
+  .inline-form { grid-template-columns: 1fr; }
+}
+
+input, select, button {
+  font: inherit;
+}
+
+input[type="text"], input[type="password"], select {
+  width: 100%;
+  min-width: 160px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 14px;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+input[type="text"]:focus, input[type="password"]:focus, select:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-color: var(--accent);
+}
+
+/* This icon's stroke color (%238a93a8) is the URL-encoded hex for
+   var(--muted) — hardcoded rather than tokenized, since a data-URI can't
+   reference a CSS custom property. Same tradeoff repeats for the custom-
+   select arrow, the collapsible chevron, and the search icon below. Only
+   matters if --muted's value ever changes; accepted as-is for a single-
+   theme admin app rather than adding a build step or JS-generated SVG. */
+select {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'><path fill='none' stroke='%238a93a8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' d='M6 8l4 4 4-4'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 12px;
+  padding-right: 34px;
+}
+
+/* Custom dropdown component (static/js/select-enhance.js). A native <select>'s open
+   popup is drawn entirely by the OS and no CSS can reach inside it — this replaces that
+   native popup with a plain div drawn ourselves, so it looks the same everywhere. */
+.custom-select-wrapper {
+  position: relative;
+  width: 100%;
+  min-width: 160px;
+}
+
+.custom-select-native {
+  display: none;
+}
+
+.custom-select-trigger {
+  width: 100%;
+  text-align: left;
+  padding: 10px 34px 10px 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'><path fill='none' stroke='%238a93a8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' d='M6 8l4 4 4-4'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 12px;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.custom-select-trigger:hover,
+.custom-select-trigger.open {
+  border-color: var(--accent);
+}
+
+.custom-select-trigger:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.custom-select-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  width: 100%;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  max-height: 240px;
+  overflow-y: auto;
+  z-index: 1200;
+}
+
+.custom-select-menu.hidden {
+  display: none;
+}
+
+/* Applied by select-enhance.js when there's no room below the trigger (e.g. a table's
+   last row) — opens the menu upward instead of downward. */
+.custom-select-menu.menu-flip-up {
+  top: auto;
+  bottom: calc(100% + 4px);
+}
+
+.custom-select-option {
+  padding: 9px 12px;
+  font-size: 14px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.custom-select-option:hover,
+.custom-select-option.active {
+  background: var(--panel-2);
+}
+
+.custom-select-option.selected {
+  background: rgba(79, 140, 255, 0.18);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+button, .btn {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 14px;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+  font-weight: 500;
+}
+
+button:hover, .btn:hover { filter: brightness(1.1); }
+
+.btn-warn { background: var(--warn); color: #241a00; }
+.btn-danger { background: var(--danger); color: #2a0007; }
+.btn-ok { background: var(--ok); color: #04241a; }
+
+.btn-sm { padding: 5px 8px; font-size: 11.5px; }
+
+/* .btn-sm trades touch-target size for fitting 4 actions on one row (see
+   the Clients table) — below the ~44px touch-target guideline at rest.
+   Restore a comfortable tap size once there's no longer pressure to fit
+   everything in one dense desktop row. */
+@media (max-width: 600px) {
+  .btn-sm {
+    padding: 10px 14px;
+    font-size: 14px;
+    min-height: 44px;
+  }
+  .actions .btn:not(.btn-sm) {
+    min-height: 44px;
+  }
+}
+
+.btn-form { display: inline; }
+.btn-group { display: flex; align-items: center; gap: 10px; }
+.btn-group-stack { display: flex; flex-direction: column; align-items: stretch; gap: 10px; }
+.header-col { display: flex; flex-direction: column; gap: 10px; }
+
+/* Bulk disable/delete stretch to fill the same width as the row of
+   buttons above them (Reapply all / Save Rules / Import Rules), instead
+   of sitting narrower and left-aligned within the stack. */
+#bulk-disable-form,
+#bulk-delete-form {
+  flex: 1;
+}
+#bulk-disable-btn,
+#bulk-delete-btn {
+  width: 100%;
+}
+
+.table-scroll {
+  max-height: 60vh;
+  overflow-y: auto;
+  overflow-x: auto;
+  scrollbar-width: thin;                    /* Firefox */
+  scrollbar-color: var(--border) transparent;
+}
+
+/* A fully hidden scrollbar leaves desktop mouse users with no visual cue
+   that a table scrolls horizontally — kept thin and low-contrast instead
+   of invisible, so the overflow affordance survives without looking
+   heavy. */
+.table-scroll::-webkit-scrollbar {
+  height: 6px;
+  width: 6px;
+}
+.table-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.table-scroll::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 14px;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.pagination-size {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.pagination-size .custom-select-wrapper { width: 80px; min-width: 80px; }
+
+/* .rule-client-filter reuses .pagination-size's label+select layout, but
+   needs a much wider select than the page-size dropdown's 80px — client
+   names + IPs don't fit in that. */
+.rule-client-filter .custom-select-wrapper { width: 240px; min-width: 240px; }
+
+.pagination-nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pagination-nav [data-page-status] { white-space: nowrap; }
+
+.pagination-nav .btn-sm:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+}
+
+th, td {
+  text-align: left;
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+th {
+  color: var(--muted);
+  font-weight: 500;
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+  z-index: 1;
+}
+
+.actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+
+/* 9-col grid: Name 2, Status 1, Expiration 1, VPN IP 1, Session 1, Actions 3 —
+   plus a checkbox column (nth-child(1)) for bulk-select, everything else
+   shifted one position. All columns fixed px (not %) so mobile never
+   shrinks columns below this desktop size; .table-scroll handles overflow
+   on narrow viewports. Button width is set per-breakpoint (not one shared
+   value) because .btn-sm's font and padding differ desktop vs mobile: 71px
+   is the minimum that fits "Download" (the widest label) at desktop's
+   11.5px font without wrapping and keeps the table inside .content's
+   1020px cap (no scrollbar); mobile's 44px-touch-target font needs 96px
+   for the same label, which .table-scroll handles by scrolling instead of
+   shrinking. */
+#clients-table { table-layout: fixed; min-width: 927px; }
+#clients-table th:nth-child(1) { width: 36px; }
+#clients-table th:nth-child(2) { width: 202px; }
+#clients-table th:nth-child(3) { width: 68px; }
+#clients-table th:nth-child(4) { width: 101px; }
+#clients-table th:nth-child(5) { width: 101px; }
+#clients-table th:nth-child(6) { width: 101px; }
+#clients-table th:nth-child(7) { width: 318px; }
+
+#clients-table .actions {
+  justify-content: flex-start;
+}
+#clients-table .actions .btn {
+  width: 71px;
+  text-align: center;
+}
+
+@media (max-width: 600px) {
+  #clients-table { min-width: 1033px; }
+  #clients-table th:nth-child(7) { width: 424px; }
+  #clients-table .actions .btn { width: 96px; }
+}
+
+/* rules-table is auto-layout (not fixed like clients-table), and .actions'
+   flex-wrap lets its column collapse to one button's width instead of
+   fitting both Disable/Enable + Delete side by side — give it a floor. */
+#rules-table th:last-child { min-width: 190px; }
+
+/* Native checkboxes default to ~13x13px. Sized up slightly for tap-ability,
+   but kept below the WCAG 2.5.8 24px floor by explicit choice — a visually
+   lighter box in a dense table, traded against the stricter touch-target
+   minimum. Shared by every bulk-select table (Firewall Rules, Clients) so
+   the same control looks and behaves identically everywhere it appears. */
+.rule-select-checkbox,
+#rules-select-all,
+.client-select-checkbox,
+#clients-select-all {
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+
+#rules-table .actions {
+  justify-content: flex-start;
+}
+#rules-table .actions .btn {
+  width: 80px;
+  text-align: center;
+}
+
+#routes-table .actions {
+  justify-content: flex-start;
+}
+
+.blocked-row { background: rgba(240, 85, 108, 0.08); }
+/* Dim only the data cells, not the whole row — opacity on the <tr> itself
+   would also fade the Enable/Delete buttons in the last cell, since opacity
+   compounds through descendants and can't be un-done by a child's own
+   opacity:1. */
+.disabled-row td:not(:last-child) { opacity: 0.5; }
+
+.saved-yes { color: var(--ok); font-weight: 600; }
+
+.saved-no {
+  display: inline-block;
+  color: var(--warn);
+  font-weight: 600;
+  animation: rule-unsaved-jump 1s ease-in-out infinite;
+}
+
+@keyframes rule-unsaved-jump {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+.btn-unsaved-jump { animation: rule-unsaved-jump 1s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .saved-no,
+  .btn-unsaved-jump {
+    animation: none;
+  }
+}
+
+.required-star {
+  color: var(--danger);
+  font-weight: 700;
+  margin-left: 3px;
+  vertical-align: super;
+  font-size: 0.75em;
+  line-height: 0;
+}
+
+dialog.modal {
+  position: relative;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 24px;
+  max-width: 640px;
+  width: 90vw;
+}
+
+dialog.modal::backdrop {
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.modal-close-btn {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 22px;
+  line-height: 1;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.modal-close-btn:hover { color: var(--text); }
+
+dialog.modal .inline-form .btn-group { justify-self: end; }
+
+dialog.modal code {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0;
+  color: var(--accent);
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  line-height: 1.6;
+  word-break: break-all;
+}
+
+.import-example-table {
+  font-size: 12px;
+}
+
+.import-example-table th,
+.import-example-table td {
+  padding: 6px 8px;
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.badge-connected { background: rgba(62, 207, 142, 0.18); color: var(--ok); }
+.badge-inactive { background: rgba(138, 147, 168, 0.15); color: var(--muted); }
+
+.empty { color: var(--muted); }
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 20px;
+}
+
+.tabs a {
+  color: var(--muted);
+  text-decoration: none;
+  padding: 8px 14px;
+  border-bottom: 2px solid transparent;
+  font-size: 14px;
+}
+
+.tabs a.active, .tabs a:hover {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.log-pre {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+  max-height: 480px;
+  overflow-y: auto;
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--text);
+  margin: 0;
+}
+
+.log-line {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.log-filter-input {
+  width: 100%;
+  margin: 10px 0;
+}
+
+input[type="text"].filter-input-inline {
+  width: 240px;
+  margin: 0;
+  padding-left: 34px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238a93a8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='11' cy='11' r='8'/><line x1='21' y1='21' x2='16.65' y2='16.65'/></svg>");
+  background-repeat: no-repeat;
+  background-position: 10px center;
+  background-size: 14px;
+}
+
+.sort-header {
+  cursor: pointer;
+  user-select: none;
+}
+
+.sort-header:hover { color: var(--text); }
+
+.sort-asc::after { content: " \25B2"; }
+.sort-desc::after { content: " \25BC"; }
+
+.sort-asc, .sort-desc { color: var(--accent); }
+
+.flashes { margin-bottom: 16px; }
+
+.flash {
+  padding: 10px 14px;
+  border-radius: 6px;
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+
+.flash-success { background: rgba(62, 207, 142, 0.15); border: 1px solid var(--ok); color: var(--ok); }
+.flash-error { background: rgba(240, 85, 108, 0.15); border: 1px solid var(--danger); color: var(--danger); }
+
+.login-wrap {
+  min-height: 80vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.login-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 32px;
+  width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.login-card h1 { font-size: 18px; text-align: center; }
+
+.login-card label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.login-card input { width: 100%; }

@@ -1,0 +1,180 @@
+{% extends "base.html" %}
+{% block title %}Logs — PiVPN Web UI{% endblock %}
+{% block content %}
+<h1>Logs</h1>
+
+<div class="tabs">
+  <a href="{{ url_for('main.logs', tab='sessions') }}" class="{{ 'active' if tab == 'sessions' }}">VPN Sessions</a>
+  <a href="{{ url_for('main.logs', tab='client_sessions') }}" class="{{ 'active' if tab == 'client_sessions' }}">Client Sessions</a>
+  <a href="{{ url_for('main.logs', tab='system') }}" class="{{ 'active' if tab == 'system' }}">System</a>
+  <a href="{{ url_for('main.logs', tab='auth') }}" class="{{ 'active' if tab == 'auth' }}">User Auth</a>
+</div>
+
+{% if tab == 'sessions' %}
+<section class="card">
+  <p class="hint">Client connect/disconnect events parsed from the OpenVPN service journal, most recent first (last 300). Parsing is best-effort — lines that don't match a known OpenVPN log format show up with event "other" and the raw message in Detail.</p>
+  {% if not sessions %}
+    <p class="empty">No session events found (or the log helper isn't installed/configured yet — see deploy/pivpn-webui-log-helper.sh).</p>
+  {% else %}
+  <input type="text" id="sessions-filter" class="log-filter-input" placeholder="Search…" aria-label="Search VPN sessions">
+  <div class="table-scroll">
+  <table id="sessions-table">
+    <thead>
+      <tr>
+        <th scope="col">Time</th>
+        <th scope="col">Event</th>
+        <th scope="col">Client</th>
+        <th scope="col">Address</th>
+        <th scope="col">Detail</th>
+      </tr>
+    </thead>
+    <tbody id="sessions-tbody">
+      {% for e in sessions %}
+      <tr>
+        <td>{{ e.ts }}</td>
+        <td>
+          {% if e.event == 'connected' %}
+            <span class="badge badge-connected">connected</span>
+          {% elif e.event == 'disconnected' %}
+            <span class="badge badge-inactive">disconnected</span>
+          {% else %}
+            <span class="badge badge-inactive">other</span>
+          {% endif %}
+        </td>
+        <td>{{ e.client }}</td>
+        <td>{{ e.address }}</td>
+        <td>{{ e.detail }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <script>attachLogFilter('sessions-filter', '#sessions-tbody', 'tr', '#sessions-table thead th');</script>
+  {% endif %}
+</section>
+{% endif %}
+
+{% if tab == 'client_sessions' %}
+<section class="card">
+  <p class="hint">Each client's login sessions — when, how long, and how many — paired from the same connect/disconnect journal events as VPN Sessions. A session still in progress shows as "ongoing" with no end time or duration yet.</p>
+  {% if not client_sessions %}
+    <p class="empty">No session events found (or the log helper isn't installed/configured yet — see deploy/pivpn-webui-log-helper.sh).</p>
+  {% else %}
+  <input type="text" id="client-sessions-filter" class="log-filter-input" placeholder="Search…" aria-label="Search client sessions">
+  <div class="table-scroll">
+  <table id="client-sessions-table">
+    <thead>
+      <tr>
+        <th scope="col">Client</th>
+        <th scope="col">Start</th>
+        <th scope="col">End</th>
+        <th scope="col">Duration</th>
+        <th scope="col">Address</th>
+      </tr>
+    </thead>
+    <tbody id="client-sessions-tbody">
+      {% for s in client_sessions %}
+      <tr>
+        <td>{{ s.client }}</td>
+        <td>{{ s.start or '—' }}</td>
+        <td>
+          {% if s.ongoing %}
+            <span class="badge badge-connected">ongoing</span>
+          {% elif s.status_note %}
+            <span class="cell-note">{{ s.status_note }}</span>
+          {% else %}
+            {{ s.end or '—' }}
+          {% endif %}
+        </td>
+        <td>{{ s.duration or '—' }}</td>
+        <td>{{ s.address or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <div class="pagination" id="client-sessions-pagination">
+    <label class="pagination-size">Show
+      <select id="client-sessions-page-size">
+        <option value="10">10</option>
+        <option value="25" selected>25</option>
+        <option value="50">50</option>
+        <option value="100">100</option>
+      </select>
+    </label>
+    <div class="pagination-nav">
+      <button type="button" class="btn btn-sm" data-page-prev>Prev</button>
+      <span data-page-status class="hint"></span>
+      <button type="button" class="btn btn-sm" data-page-next>Next</button>
+    </div>
+  </div>
+  <script>
+    const clientSessionsPager = attachPagination('#client-sessions-tbody', 'tr', 'client-sessions-page-size', 'client-sessions-pagination');
+    attachLogFilter('client-sessions-filter', '#client-sessions-tbody', 'tr', '#client-sessions-table thead th', () => clientSessionsPager && clientSessionsPager.refresh());
+  </script>
+  {% endif %}
+</section>
+{% endif %}
+
+{% if tab == 'system' %}
+<section class="card">
+  <h2>PiVPN Web UI service</h2>
+  <p class="hint">journalctl -u pivpn-webui, most recent first (last 300).</p>
+  {% if not webui_log %}
+    <p class="empty">No log lines found (or the log helper isn't installed/configured yet).</p>
+  {% else %}
+  <input type="text" id="webui-log-filter" class="log-filter-input" placeholder="Search…" aria-label="Search PiVPN Web UI service log">
+  <div class="log-pre" id="webui-log-pre">{% for line in webui_log %}<div class="log-line">{{ line }}</div>{% endfor %}</div>
+  <script>attachLogFilter('webui-log-filter', '#webui-log-pre', '.log-line');</script>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>System journal</h2>
+  <p class="hint">journalctl (whole system), most recent first (last 300).</p>
+  {% if not system_log %}
+    <p class="empty">No log lines found (or the log helper isn't installed/configured yet).</p>
+  {% else %}
+  <input type="text" id="system-log-filter" class="log-filter-input" placeholder="Search…" aria-label="Search system journal">
+  <div class="log-pre" id="system-log-pre">{% for line in system_log %}<div class="log-line">{{ line }}</div>{% endfor %}</div>
+  <script>attachLogFilter('system-log-filter', '#system-log-pre', '.log-line');</script>
+  {% endif %}
+</section>
+{% endif %}
+
+{% if tab == 'auth' %}
+<section class="card">
+  <p class="hint">Login and logout events for the admin account, most recent first (last 200).</p>
+  {% if not auth_entries %}
+    <p class="empty">No auth activity yet.</p>
+  {% else %}
+  <input type="text" id="auth-filter" class="log-filter-input" placeholder="Search…" aria-label="Search user auth log">
+  <div class="table-scroll">
+  <table id="auth-table">
+    <thead>
+      <tr>
+        <th scope="col">Time</th>
+        <th scope="col">Actor</th>
+        <th scope="col">Action</th>
+        <th scope="col">Result</th>
+        <th scope="col">Detail</th>
+      </tr>
+    </thead>
+    <tbody id="auth-tbody">
+      {% for e in auth_entries %}
+      <tr class="{{ 'blocked-row' if e.result == 'error' }}">
+        <td>{{ e.ts }}</td>
+        <td>{{ e.actor }}</td>
+        <td>{{ e.action }}</td>
+        <td>{{ e.result }}</td>
+        <td>{{ e.detail or '' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <script>attachLogFilter('auth-filter', '#auth-tbody', 'tr', '#auth-table thead th');</script>
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,21 @@
+# Installed to /etc/sudoers.d/pivpn-webui by setup.sh (with __USER__
+# substituted). Deliberately scoped to exact binaries, not "ALL" — the app
+# only ever calls these things as root, and never with shell-interpolated
+# arguments (see app/privileged.py).
+__USER__ ALL=(root) NOPASSWD: /usr/local/sbin/pivpn-webui-ccd-helper.sh
+__USER__ ALL=(root) NOPASSWD: /usr/local/sbin/pivpn-webui-log-helper.sh
+__USER__ ALL=(root) NOPASSWD: /usr/local/sbin/pivpn-webui-routes-helper.sh
+__USER__ ALL=(root) NOPASSWD: /usr/local/sbin/pivpn-webui-client-script-helper.sh
+__USER__ ALL=(root) NOPASSWD: /usr/sbin/iptables
+__USER__ ALL=(root) NOPASSWD: /usr/sbin/iptables-save
+__USER__ ALL=(root) NOPASSWD: /usr/sbin/netfilter-persistent
+# /usr/local/bin/pivpn itself doesn't need sudo to invoke — but it internally
+# runs each real subcommand as `sudo /opt/pivpn/openvpn/<script>.sh`, and
+# those inner sudo calls are what actually need this grant. On Raspberry Pi
+# OS the default 'pi' user already has NOPASSWD sudo out of the box, which is
+# why this normally isn't needed; on a generic Debian/Ubuntu box (no such
+# default) the web UI's non-interactive systemd service has no TTY to answer
+# a sudo password prompt, so every add/list/revoke call fails outright
+# without this. /opt/pivpn is root-owned and not writable by __USER__, so
+# this wildcard can't be used to sudo arbitrary attacker-planted scripts.
+__USER__ ALL=(root) NOPASSWD: /opt/pivpn/*.sh, /opt/pivpn/openvpn/*.sh, /opt/pivpn/wireguard/*.sh

@@ -1,0 +1,331 @@
+{% extends "base.html" %}
+{% block title %}Firewall — PiVPN Web UI{% endblock %}
+{% block content %}
+<div class="page-header-row">
+  <h1>Firewall Rules</h1>
+  {% if rules %}
+    <input type="text" id="rules-filter" class="log-filter-input filter-input-inline" placeholder="Search…" aria-label="Search firewall rules">
+  {% endif %}
+</div>
+
+<section class="card">
+  <details class="collapsible" name="firewall-add-rule">
+    <summary><h2>Add forward / drop rule</h2></summary>
+    <p class="hint">Controls what's allowed through the FORWARD chain — e.g. drop a subnet, or explicitly accept traffic between two ranges.</p>
+    <form method="post" action="{{ url_for('main.add_forward') }}" class="inline-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label>Action
+        <select name="action">
+          <option value="ACCEPT">Forward (ACCEPT)</option>
+          <option value="DROP">Drop</option>
+        </select>
+      </label>
+      <label>Protocol
+        <select name="protocol">
+          <option value="all">Any</option>
+          <option value="tcp">tcp</option>
+          <option value="udp">udp</option>
+        </select>
+      </label>
+      <label>Source
+        <select id="fwd-src-select">
+          <option value="">Any (0.0.0.0/0)</option>
+          {% for c in vpn_clients %}
+          <option value="{{ c.ip }}">{{ c.name }} ({{ c.ip }})</option>
+          {% endfor %}
+          <option value="__custom__">Custom IP/CIDR…</option>
+        </select>
+      </label>
+      <label id="fwd-src-custom-wrap" class="fwd-src-custom-wrap">Custom source <span class="hint">(IP/CIDR, blank = any)</span>
+        <input type="text" id="fwd-src-custom-input" placeholder="10.202.226.0/24">
+      </label>
+      <input type="hidden" name="src" id="fwd-src-hidden">
+      <label>Destination <span class="hint">(IP/CIDR, blank = any)</span>
+        <input type="text" name="dst" placeholder="192.168.1.0/24">
+      </label>
+      <label>Dest. port <span class="hint">(blank = any)</span>
+        <input type="text" name="dport" placeholder="443">
+      </label>
+      <label>Comment
+        <input type="text" name="comment" placeholder="optional note">
+      </label>
+      <button type="submit">Add rule</button>
+    </form>
+  </details>
+  <script>
+    (function() {
+      const select = document.getElementById('fwd-src-select');
+      const customWrap = document.getElementById('fwd-src-custom-wrap');
+      const customInput = document.getElementById('fwd-src-custom-input');
+      const hidden = document.getElementById('fwd-src-hidden');
+
+      function sync() {
+        if (select.value === '__custom__') {
+          customWrap.style.display = '';
+          hidden.value = customInput.value;
+        } else {
+          customWrap.style.display = 'none';
+          hidden.value = select.value;
+        }
+      }
+      select.addEventListener('change', sync);
+      customInput.addEventListener('input', sync);
+      sync();
+    })();
+  </script>
+</section>
+
+<section class="card">
+  <details class="collapsible" name="firewall-add-rule">
+    <summary><h2>Add port-forward rule</h2></summary>
+    <p class="hint">DNAT: forward an external port to a VPN client's internal IP.</p>
+    <form method="post" action="{{ url_for('main.add_portforward') }}" class="inline-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label><span class="label-text">External port<span class="required-star">*</span></span>
+        <input type="text" name="ext_port" required placeholder="8080">
+      </label>
+      <label><span class="label-text">Target IP<span class="required-star">*</span></span> <span class="hint">(VPN client's internal IP)</span>
+        <input type="text" name="target_ip" required placeholder="10.8.0.5">
+      </label>
+      <label>Target port <span class="hint">(blank = same as external)</span>
+        <input type="text" name="target_port" placeholder="80">
+      </label>
+      <label>Protocol
+        <select name="protocol">
+          <option value="tcp">tcp</option>
+          <option value="udp">udp</option>
+        </select>
+      </label>
+      <label>Incoming interface <span class="hint">(optional, e.g. eth0)</span>
+        <input type="text" name="ext_iface" placeholder="eth0">
+      </label>
+      <label>Comment
+        <input type="text" name="comment" placeholder="optional note">
+      </label>
+      <button type="submit">Add rule</button>
+    </form>
+  </details>
+</section>
+
+<section class="card">
+  <details class="collapsible" name="firewall-add-rule">
+    <summary><h2>Add SNAT rule</h2></summary>
+    <p class="hint">Like the automatic outbound NAT, but with a fixed exit IP instead of whatever address the outgoing interface currently has.</p>
+    <form method="post" action="{{ url_for('main.add_snat') }}" class="inline-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label>Source <span class="hint">(subnet whose outbound traffic gets rewritten)</span>
+        <input type="text" name="src" placeholder="10.202.226.0/24">
+      </label>
+      <label><span class="label-text">Fixed exit IP<span class="required-star">*</span></span><span class="hint hint-block">(what the source gets rewritten to)</span>
+        <input type="text" name="snat_ip" required placeholder="10.255.50.10">
+      </label>
+      <label>Outgoing interface <span class="hint">(optional, e.g. ens18)</span>
+        <input type="text" name="out_iface" placeholder="ens18">
+      </label>
+      <label>Comment
+        <input type="text" name="comment" placeholder="optional note">
+      </label>
+      <button type="submit">Add rule</button>
+    </form>
+  </details>
+</section>
+
+<section class="card">
+  <div class="card-header-row firewall-rules-header">
+    <div class="header-col">
+      <h2>Active rules</h2>
+      {% if rules and vpn_clients %}
+      <div class="pagination-size rule-client-filter">
+        <label>Filter by client
+          <select id="rules-client-filter">
+            <option value="">All Rules</option>
+            {% for c in vpn_clients %}
+            <option value="{{ c.ip }}">{{ c.name }} ({{ c.ip }})</option>
+            {% endfor %}
+          </select>
+        </label>
+      </div>
+      {% endif %}
+    </div>
+    <div class="btn-group-stack">
+      <div class="btn-group">
+        <form method="post" action="{{ url_for('main.resync_rules') }}" class="btn-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn">Reapply all</button>
+        </form>
+        <form method="post" action="{{ url_for('main.persist_rules') }}" class="btn-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn {{ 'btn-warn btn-unsaved-jump' if has_unsaved else '' }}">Save Rules</button>
+        </form>
+        <button type="button" class="btn" onclick="document.getElementById('import-rules-dialog').showModal()">Import Rules</button>
+      </div>
+      <div class="btn-group">
+        <form method="post" action="{{ url_for('main.bulk_disable_rules') }}" id="bulk-disable-form" class="btn-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn btn-warn" id="bulk-disable-btn" disabled>Bulk disable (<span id="bulk-disable-count">0</span>)</button>
+        </form>
+        <form method="post" action="{{ url_for('main.bulk_delete_rules') }}" id="bulk-delete-form" class="btn-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn btn-danger" id="bulk-delete-btn" disabled>Bulk delete (<span id="bulk-delete-count">0</span>)</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <dialog id="import-rules-dialog" class="modal" onclick="if (event.target === this) this.close()">
+    <button type="button" class="modal-close-btn" onclick="document.getElementById('import-rules-dialog').close()" aria-label="Close">&times;</button>
+    <h2>Import rules from file</h2>
+    <p class="hint">One rule per line: <code>kind key=value key=value ...</code>. Blank lines and lines starting with <code>#</code> are ignored. Quote values with spaces, e.g. <code>comment="block guest wifi"</code>.</p>
+
+    <table class="import-example-table">
+      <thead>
+        <tr><th scope="col">Kind</th><th scope="col">Fields</th><th scope="col">Example line</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>forward</td>
+          <td>action, protocol, src, dst, dport, comment</td>
+          <td><code>forward action=DROP protocol=tcp src=10.8.0.5 dst=192.168.1.0/24 dport=443</code></td>
+        </tr>
+        <tr>
+          <td>portforward</td>
+          <td>ext_port*, target_ip*, target_port, protocol, ext_iface, comment</td>
+          <td><code>portforward ext_port=8080 target_ip=10.8.0.5 target_port=80 protocol=tcp</code></td>
+        </tr>
+        <tr>
+          <td>snat</td>
+          <td>src, snat_ip*, out_iface, comment</td>
+          <td><code>snat src=10.202.226.0/24 snat_ip=192.168.100.12 out_iface=ens19 comment="cluster access"</code></td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="hint">* required. Any field can be left out where the "Add ___ rule" forms above also allow it blank.</p>
+    <p class="hint">Reusable template: a line <code>NAME=value</code> (no rule kind) defines a variable — reference it as <code>$NAME</code> in any rule line after it. E.g. put <code>CLIENT_IP=10.202.226.21</code> at the top, then use <code>src=$CLIENT_IP</code> in every rule below.</p>
+    <p class="hint">A rule's <code>src</code>/<code>dst</code> can also just be a VPN client's name instead of an IP — e.g. <code>src=nurak</code> resolves to that client's current VPN IP automatically.</p>
+    <p class="hint">Lines can also be raw <code>iptables -A FORWARD ...</code> / <code>-A INPUT ...</code> commands instead of <code>kind key=value</code> syntax — an existing shell script's rule lines can be uploaded close to verbatim ($VAR and client-name resolution both still apply). Non-<code>-A</code> lines (e.g. a "clean old rules" <code>-S | grep | ... -D</code> pipeline) are skipped, not an error — this app's own rule sync already replaces the need for that cleanup step.</p>
+
+    <form method="post" action="{{ url_for('main.import_rules') }}" enctype="multipart/form-data" class="inline-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label>File
+        <input type="file" name="rules_file" accept=".txt" required>
+      </label>
+      <div class="btn-group">
+        <button type="submit">Import</button>
+        <button type="button" class="btn" onclick="document.getElementById('import-rules-dialog').close()">Cancel</button>
+      </div>
+    </form>
+  </dialog>
+
+  {% if not rules %}
+    <p class="empty">No rules yet.</p>
+  {% else %}
+  <div class="table-scroll">
+  <table id="rules-table">
+    <thead>
+      <tr>
+        <th scope="col"><input type="checkbox" id="rules-select-all" aria-label="Select all visible rules"></th>
+        <th scope="col">Kind</th>
+        <th scope="col">Action</th>
+        <th scope="col">Details</th>
+        <th scope="col">Comment</th>
+        <th scope="col">Source</th>
+        <th scope="col">Enabled</th>
+        <th scope="col">Saved</th>
+        <th scope="col">Actions</th>
+      </tr>
+    </thead>
+    <tbody id="rules-tbody">
+      {% for r in rules %}
+      <tr class="{{ '' if r.enabled else 'disabled-row' }}">
+        <td><input type="checkbox" class="rule-select-checkbox" data-rule-id="{{ r.id }}" aria-label="Select rule {{ r.id }}"></td>
+        <td>{{ r.kind }}</td>
+        <td>{{ r.action }}</td>
+        <td>{{ r.detail }}</td>
+        <td>{{ r.comment or '' }}</td>
+        <td>{{ 'CLI' if r.source == 'cli' else 'webui' }}</td>
+        <td>{{ 'yes' if r.enabled else 'no' }}</td>
+        <td><span class="{{ 'saved-yes' if r.persisted else 'saved-no' }}">{{ 'Saved' if r.persisted else 'Unsaved' }}</span></td>
+        <td>
+          <div class="actions">
+          <form method="post" action="{{ url_for('main.toggle_rule', rule_id=r.id) }}" class="btn-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn {{ 'btn-warn' if r.enabled else 'btn-ok' }}">{{ 'Disable' if r.enabled else 'Enable' }}</button>
+          </form>
+          <form method="post" action="{{ url_for('main.delete_rule', rule_id=r.id) }}" class="btn-form"
+                onsubmit="return confirm('Delete this rule?');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-danger">Delete</button>
+          </form>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <script>
+    const rulesClientFilter = attachSelectFilter('rules-client-filter', '#rules-tbody', 'tr');
+    attachLogFilter('rules-filter', '#rules-tbody', 'tr', '#rules-table thead th:not(:first-child):not(:last-child)', () => rulesClientFilter && rulesClientFilter.refresh());
+
+    (function() {
+      const selectAll = document.getElementById('rules-select-all');
+      const disableBtn = document.getElementById('bulk-disable-btn');
+      const disableForm = document.getElementById('bulk-disable-form');
+      const disableCount = document.getElementById('bulk-disable-count');
+      const deleteBtn = document.getElementById('bulk-delete-btn');
+      const deleteForm = document.getElementById('bulk-delete-form');
+      const deleteCount = document.getElementById('bulk-delete-count');
+      if (!selectAll || !disableBtn || !disableForm || !deleteBtn || !deleteForm) return;
+
+      const checkboxes = () => Array.from(document.querySelectorAll('#rules-tbody .rule-select-checkbox'));
+      const visibleCheckboxes = () => checkboxes().filter((cb) => cb.closest('tr').style.display !== 'none');
+
+      function updateCount() {
+        const checked = checkboxes().filter((cb) => cb.checked).length;
+        disableCount.textContent = checked;
+        disableBtn.disabled = checked === 0;
+        deleteCount.textContent = checked;
+        deleteBtn.disabled = checked === 0;
+      }
+
+      // "Select all" only selects currently-visible rows — respects
+      // whatever the search box / client filter currently narrowed to.
+      selectAll.addEventListener('change', () => {
+        visibleCheckboxes().forEach((cb) => { cb.checked = selectAll.checked; });
+        updateCount();
+      });
+      checkboxes().forEach((cb) => cb.addEventListener('change', updateCount));
+
+      // Checkboxes aren't nested in either form (they'd need to submit to
+      // both), so on submit each form gets its own hidden rule_ids inputs
+      // built from whatever's checked right now.
+      function injectSelectedIds(form) {
+        form.querySelectorAll('input[name="rule_ids"]').forEach((el) => el.remove());
+        checkboxes().filter((cb) => cb.checked).forEach((cb) => {
+          const hidden = document.createElement('input');
+          hidden.type = 'hidden';
+          hidden.name = 'rule_ids';
+          hidden.value = cb.dataset.ruleId;
+          form.appendChild(hidden);
+        });
+      }
+
+      disableForm.addEventListener('submit', (e) => {
+        const checked = checkboxes().filter((cb) => cb.checked).length;
+        if (checked === 0) { e.preventDefault(); return; }
+        injectSelectedIds(disableForm);
+      });
+
+      deleteForm.addEventListener('submit', (e) => {
+        const checked = checkboxes().filter((cb) => cb.checked).length;
+        if (checked === 0 || !confirm(`Delete ${checked} selected rule(s)? This cannot be undone.`)) {
+          e.preventDefault();
+          return;
+        }
+        injectSelectedIds(deleteForm);
+      });
+    })();
+  </script>
+  {% endif %}
+</section>
+{% endblock %}
