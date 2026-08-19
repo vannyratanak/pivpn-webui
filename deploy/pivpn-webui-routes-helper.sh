@@ -8,7 +8,9 @@
 # Manages `push "route <network> <netmask>"` lines, each tagged with a
 # marker comment so add/remove only ever touch lines this script wrote
 # itself — any route already in server.conf before this script existed is
-# left untouched, list only surfaces the ones it manages.
+# left untouched. `list` surfaces every push-route line either way (tagged
+# ones as "managed", anything else as "unmanaged") so the UI reflects
+# server.conf's real state; only add/remove are scoped to tagged lines.
 set -euo pipefail
 
 CONF="/etc/openvpn/server.conf"
@@ -28,8 +30,16 @@ action="${1:-}"
 
 case "$action" in
   list)
-    grep -F "$MARKER" "$CONF" 2>/dev/null \
-      | sed -nE "s/^push \"route ([0-9.]+) ([0-9.]+)\".*/\1 \2/p" || true
+    grep -E '^push "route [0-9.]+ [0-9.]+"' "$CONF" 2>/dev/null | while IFS= read -r cfg_line; do
+      network="$(sed -nE 's/^push "route ([0-9.]+) [0-9.]+".*/\1/p' <<<"$cfg_line")"
+      netmask="$(sed -nE 's/^push "route [0-9.]+ ([0-9.]+)".*/\1/p' <<<"$cfg_line")"
+      [[ -n "$network" && -n "$netmask" ]] || continue
+      if [[ "$cfg_line" == *"$MARKER"* ]]; then
+        echo "$network $netmask managed"
+      else
+        echo "$network $netmask unmanaged"
+      fi
+    done || true
     ;;
   add)
     network="${2:-}"; netmask="${3:-}"

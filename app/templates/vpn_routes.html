@@ -38,6 +38,7 @@
       <tr>
         <th scope="col">Network</th>
         <th scope="col">Netmask</th>
+        <th scope="col">Source</th>
         <th scope="col">Actions</th>
       </tr>
     </thead>
@@ -46,8 +47,10 @@
       <tr>
         <td>{{ r.network }}</td>
         <td>{{ r.netmask }}</td>
+        <td>{{ "Web UI" if r.managed else "server.conf (unmanaged)" }}</td>
         <td>
           <div class="actions">
+          {% if r.managed %}
           <form method="post" action="{{ url_for('main.remove_vpn_route') }}" class="btn-form"
                 onsubmit="return confirm('Remove this route? Connected clients will stop routing this network into the tunnel.');">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -55,6 +58,9 @@
             <input type="hidden" name="netmask" value="{{ r.netmask }}">
             <button type="submit" class="btn btn-danger">Remove</button>
           </form>
+          {% else %}
+          <span class="hint">Edit server.conf directly to change</span>
+          {% endif %}
           </div>
         </td>
       </tr>
