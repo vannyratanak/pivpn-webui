@@ -12,7 +12,7 @@ if [[ $EUID -eq 0 ]]; then
   exit 1
 fi
 
-APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$APP_DIR"
 
 echo "== PiVPN Web UI: nginx + TLS setup =="

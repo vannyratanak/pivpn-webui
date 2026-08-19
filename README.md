@@ -123,7 +123,7 @@ thought than a weekend project gets. Options, easiest first:
   sudo netfilter-persistent save   # survive reboot
   ```
 - **Reverse proxy with TLS** in front of it — the real move if this needs to
-  be reachable beyond a LAN you already trust. `./deploy/setup-nginx-tls.sh`
+  be reachable beyond a LAN you already trust. `./setup-nginx.sh`
   installs nginx if needed, generates a self-signed cert (or leaves an
   existing one at `/etc/nginx/ssl/pivpn-webui.{crt,key}` alone if you
   supplied a real one first), and installs the reverse-proxy vhost. Add its
