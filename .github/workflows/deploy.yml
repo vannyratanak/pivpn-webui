@@ -6,14 +6,18 @@ on:
 jobs:
   deploy:
     # self-hosted, not ubuntu-latest: GitHub's cloud runners can't reach
-    # <server-1-ip> at all (it's a private-network address, confirmed by a
-    # real connection timeout when this ran on ubuntu-latest) — this has to
-    # run from a machine that's already on the same network as the server.
+    # <server-1-ip>/<server-2-ip> at all (private-network addresses,
+    # confirmed by a real connection timeout when this ran on ubuntu-latest)
+    # — this has to run from a machine that's already on the same network
+    # as the servers.
     runs-on: [self-hosted, macos]
     steps:
-      - name: Deploy to <server-1-ip>
+      - name: Write deploy key
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no <user>@<server-1-ip> "ignored, server runs a forced command"
+      - name: Deploy to <server-1-ip>
+        run: ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no <user>@<server-1-ip> "ignored, server runs a forced command"
+      - name: Deploy to <server-2-ip>
+        run: ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no <user>@<server-2-ip> "ignored, server runs a forced command"
