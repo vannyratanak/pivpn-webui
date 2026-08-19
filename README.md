@@ -109,12 +109,18 @@ firewall logic) is independent of it.
 
 ## Complete setup, start to finish
 
+Run this on the server PiVPN is installed on (Raspberry Pi, Ubuntu, or any
+other Debian-based system), **as the user that installed PiVPN — not
+root**. Debian/Ubuntu's base Python doesn't always ship the `venv` module —
+if `./setup.sh` fails with "ensurepip is not available", run
+`sudo apt install python3-venv` first, then retry.
+
 The two sudo password prompts noted below are once per script run (sudo
 caches your password for its default ~15 minutes), not once per command.
 Zero iptables rules get added until you deliberately visit the Firewall
 page in step 6 — everything before that is new files and process startup
-only. See [Setup](#setup), [Accessing it remotely](#accessing-it-remotely),
-and [First login](#first-login) below for the full detail behind each step.
+only. See [Accessing it remotely](#accessing-it-remotely) and
+[First login](#first-login) below for the full detail behind those steps.
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
@@ -143,6 +149,16 @@ and [First login](#first-login) below for the full detail behind each step.
 │ the CRL watcher, which starts running immediately (protects     │
 │ against a real PiVPN bug even before the webui itself starts).  │
 └────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+      Before trusting client add/remove/renew or the Sessions/System
+      log tabs, verify two things PiVPN versions can differ on:
+        pivpn -h && pivpn add -h        (vs. app/pivpn_ctl.py's flags)
+        systemctl list-units | grep openvpn   (vs. OPENVPN_UNIT in
+                                        deploy/pivpn-webui-log-helper.sh)
+      Mismatch on either? Only that one file needs to change — update
+      it and reinstall: sudo install -m 0750 -o root -g root
+      deploy/pivpn-webui-log-helper.sh /usr/local/sbin/pivpn-webui-log-helper.sh
                               │
                               ▼
 ┌────────────────────────────────────────────────────────────────┐
@@ -213,42 +229,6 @@ and [First login](#first-login) below for the full detail behind each step.
 Optional, separate from the above: if you want the `git push` → auto-deploy
 CD pipeline too (not required for the app to work), see
 [CD: deploying code changes to a running server](#cd-deploying-code-changes-to-a-running-server).
-
-## Setup
-
-On the server PiVPN is installed on (Raspberry Pi, Ubuntu, or any other
-Debian-based system), as the user that installed PiVPN — not root.
-Debian/Ubuntu's base Python doesn't always ship the `venv` module — if
-`./setup.sh` fails with "ensurepip is not available", run
-`sudo apt install python3-venv` first, then retry:
-
-```bash
-git clone https://github.com/vannyratanak/pivpn-webui.git
-cd pivpn-webui
-./setup.sh
-```
-
-`setup.sh` will prompt you for an admin username/password and a couple of
-paths (defaults are usually fine), then it creates a venv, installs
-dependencies, generates your admin password hash and a secret key into
-`.env`, installs all four root-helper scripts to `/usr/local/sbin/`,
-installs a scoped `/etc/sudoers.d/pivpn-webui` entry, and installs (but
-doesn't yet start) a systemd unit.
-
-The log helper (`deploy/pivpn-webui-log-helper.sh`) hardcodes the OpenVPN
-systemd unit name (`openvpn@server`) for the Sessions tab — verify it with
-`systemctl list-units | grep openvpn` and update+reinstall the script if
-your install uses a different unit name. Same caution applies to the
-`pivpn` CLI flags `app/pivpn_ctl.py` assumes — run `pivpn -h && pivpn add -h`
-and compare before relying on client add/remove/renew.
-
-```bash
-sudo systemctl enable --now pivpn-webui
-```
-
-By default it binds to `127.0.0.1:8443` only — see
-[Accessing it remotely](#accessing-it-remotely) below (`./setup-nginx.sh`
-is the quickest path to real browser access with TLS).
 
 ## Accessing it remotely
 
