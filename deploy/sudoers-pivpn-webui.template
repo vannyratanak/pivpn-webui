@@ -9,6 +9,11 @@ __USER__ ALL=(root) NOPASSWD: /usr/local/sbin/pivpn-webui-client-script-helper.s
 __USER__ ALL=(root) NOPASSWD: /usr/sbin/iptables
 __USER__ ALL=(root) NOPASSWD: /usr/sbin/iptables-save
 __USER__ ALL=(root) NOPASSWD: /usr/sbin/netfilter-persistent
+# persisted_rule_ids() reads the saved-rules snapshot back via this, as
+# root, since the file is root:root 640 — without this grant it's always
+# unreadable and the Saved column shows "Unsaved" even right after a
+# successful Save Rules.
+__USER__ ALL=(root) NOPASSWD: /bin/cat
 # /usr/local/bin/pivpn itself doesn't need sudo to invoke — but it internally
 # runs each real subcommand as `sudo /opt/pivpn/openvpn/<script>.sh`, and
 # those inner sudo calls are what actually need this grant. On Raspberry Pi
