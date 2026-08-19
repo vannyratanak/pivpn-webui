@@ -35,9 +35,24 @@ FORWARD accept/drop rules, DNAT port-forwards, and per-client block/unblock.
     click repeatedly). "Save for reboot" calls `netfilter-persistent save`,
     which requires `iptables-persistent` to be installed.
 
-- **Logs** page has three tabs:
-  - *VPN Sessions* — client connect/disconnect events, best-effort parsed
-    from the OpenVPN service journal (`app/vpnlog.py`).
+- **VPN Routes** page manages `push "route ..."` lines in `server.conf` —
+  what destinations get routed into the tunnel at all for every client
+  (separate from the Firewall page's NAT/SNAT rules, which handle the
+  return path once traffic arrives). Only ever adds/removes lines it
+  tagged itself (`# pivpn-webui-route` marker) via
+  `pivpn-webui-routes-helper.sh`; a route already in `server.conf` before
+  the app touched it (e.g. added by hand) shows up read-only, tagged
+  "unmanaged" — the page reflects `server.conf`'s real state either way,
+  it just can't remove what it can't prove it created. Adding a route
+  restarts the OpenVPN service to push it to clients.
+
+- **Logs** page has four tabs:
+  - *VPN Sessions* — raw client connect/disconnect events, best-effort
+    parsed from the OpenVPN service journal (`app/vpnlog.py`).
+  - *Client Sessions* — the same connect/disconnect events paired into
+    per-client session records (when, how long, how many) instead of a raw
+    event stream. A session still in progress shows "ongoing" with no end
+    time yet.
   - *System* — raw tail of the `pivpn-webui` and system journals, for when
     you don't have SSH handy.
   - *User Auth* — login/logout history for the admin account, from the
@@ -192,6 +207,10 @@ and [First login](#first-login) below for the full detail behind each step.
                      ✅  Fully installed
 ```
 
+Optional, separate from the above: if you want the `git push` → auto-deploy
+CD pipeline too (not required for the app to work), see
+[CD: deploying code changes to a running server](#cd-deploying-code-changes-to-a-running-server).
+
 ## Setup
 
 On the server PiVPN is installed on (Raspberry Pi, Ubuntu, or any other
@@ -256,6 +275,56 @@ thought than a weekend project gets. Options, easiest first:
   alternative if you prefer it, just not what this script automates.
 - This app never serves HTTPS itself — anything beyond the SSH-tunnel option
   is sending the login password in plaintext unless you put TLS in front.
+
+## CD: deploying code changes to a running server
+
+`.github/workflows/deploy.yml` is a **manual-trigger only** workflow
+(`workflow_dispatch` — nothing runs automatically on push, only `CI`/tests
+do). Running it from GitHub Actions SSHes into each configured server with
+a dedicated deploy key; each server's `authorized_keys` entry has a
+**forced command** on that key, so whatever the workflow actually sends is
+ignored — the server always runs exactly this, regardless:
+
+```
+cd <app dir> && git pull \
+  && sudo -n install -m 0750 -o root -g root deploy/pivpn-webui-ccd-helper.sh /usr/local/sbin/pivpn-webui-ccd-helper.sh \
+  && sudo -n install -m 0750 -o root -g root deploy/pivpn-webui-log-helper.sh /usr/local/sbin/pivpn-webui-log-helper.sh \
+  && sudo -n install -m 0750 -o root -g root deploy/pivpn-webui-routes-helper.sh /usr/local/sbin/pivpn-webui-routes-helper.sh \
+  && sudo -n install -m 0750 -o root -g root deploy/pivpn-webui-client-script-helper.sh /usr/local/sbin/pivpn-webui-client-script-helper.sh \
+  && sudo -n systemctl restart pivpn-webui
+```
+
+**Why the reinstall steps matter**: `git pull` alone only updates files
+inside the repo checkout. It does **not** touch `/usr/local/sbin/` —
+only `setup.sh` (or this forced command) does that. A change to any of the
+4 privileged helper scripts would silently never take effect through
+Deploy without this — the workflow would report success while the live
+server kept running the old script. Hit this for real once; it's why the
+reinstall steps exist.
+
+### Adding a new server to this pipeline
+
+1. `./setup.sh` on the server as usual — the sudoers grants for the
+   `sudo -n install ...` calls above are included automatically (they
+   need `__APP_DIR__` substituted to that server's real checkout path,
+   which `setup.sh` now does).
+2. `./setup-cd-deploy.sh` — installs the forced-command deploy key.
+   Prompts for the public key; use the same one already on other servers
+   (`grep -oP 'ssh-ed25519 \S+ github-actions-deploy@pivpn-webui'
+   ~/.ssh/authorized_keys` on an existing server) so one GitHub secret
+   covers every server. **Not idempotent for updates** — if a server
+   already has this key installed, the script detects the exact key
+   string and skips, even if the forced command itself should change
+   (e.g. after a future edit to the reinstall-steps list above). Remove
+   the old `authorized_keys` line by hand first if the command itself
+   needs to change on an already-configured server.
+3. Add a matching `- name: Deploy to <ip>` step to `.github/workflows/deploy.yml`,
+   copying an existing step's pattern (same deploy key, different host).
+4. Before trusting the button: manually run the exact forced-command
+   sequence over SSH once (steps 1-2 above, pasted directly) — this is
+   the one thing worth verifying by hand rather than assuming, since a
+   path mismatch between the sudoers grant and the forced command fails
+   silently as "needs a password" rather than a clear error.
 
 ## First login
 
