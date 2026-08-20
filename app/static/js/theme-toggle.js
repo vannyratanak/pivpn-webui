@@ -5,18 +5,20 @@
 // keeps aria state in sync with whatever that inline script already set.
 document.addEventListener('DOMContentLoaded', () => {
   const btn = document.getElementById('theme-toggle');
+  const label = document.getElementById('theme-toggle-label');
   if (!btn) return;
 
   function isLight() {
     return document.documentElement.getAttribute('data-theme') === 'light';
   }
 
-  function syncAria(light) {
+  function sync(light) {
     btn.setAttribute('aria-pressed', String(light));
     btn.setAttribute('aria-label', light ? 'Switch to dark mode' : 'Switch to light mode');
+    if (label) label.textContent = light ? 'Light' : 'Dark';
   }
 
-  syncAria(isLight());
+  sync(isLight());
 
   btn.addEventListener('click', () => {
     const next = !isLight();
@@ -26,6 +28,6 @@ document.addEventListener('DOMContentLoaded', () => {
       document.documentElement.removeAttribute('data-theme');
     }
     localStorage.setItem('pivpn-webui-theme', next ? 'light' : 'dark');
-    syncAria(next);
+    sync(next);
   });
 });

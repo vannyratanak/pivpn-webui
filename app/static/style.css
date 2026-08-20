@@ -2,7 +2,12 @@
   --bg: #0f1420;
   --panel: #161d2e;
   --panel-2: #1c2438;
-  --border: #2a3550;
+  /* WCAG 1.4.11 Non-text Contrast needs 3:1 for UI-component boundaries
+     (input/card borders). The original #2a3550 measured ~1.4:1 against
+     --panel — found during /impeccable audit, fixed 2026-08-20. This
+     value clears 3:1 (3.14:1) while staying a subtle divider, not a bold
+     line. */
+  --border: #5a6a94;
   --text: #e6e9f0;
   --muted: #8a93a8;
   --muted-rgb: 138, 147, 168;
@@ -31,10 +36,17 @@
   --bg: #f1f4fa;
   --panel: #ffffff;
   --panel-2: #eef1f7;
-  --border: #dbe2ee;
+  /* Same 1.4.11 fix as dark mode's --border above — original #dbe2ee
+     measured ~1.3:1 against --panel. #8290ab clears 3:1 (3.22:1). */
+  --border: #8290ab;
   --text: #0f172a;
-  --muted: #64748b;
-  --muted-rgb: 100, 116, 139;
+  /* Original #64748b measured 4.32:1 against --bg — under the 4.5:1
+     WCAG 1.4.3 needs for normal-size text (this is used at 12-13px in
+     .hint/table headers, not "large text"). #475569 clears 4.5:1 on both
+     --bg (6.88:1) and --panel (7.58:1) — found during /impeccable audit,
+     fixed 2026-08-20. */
+  --muted: #475569;
+  --muted-rgb: 71, 85, 105;
   --accent: #2f5fd6;
   --accent-rgb: 47, 95, 214;
   --ok: #15803d;
@@ -312,7 +324,7 @@ input[type="text"]:focus, input[type="password"]:focus, select:focus {
    select arrow, the collapsible chevron, and the search icon below. Now
    that there's a light theme too, each of these 4 has an explicit
    [data-theme="light"] override further down using --muted's light-mode
-   hex (%2364748b) instead — still hand-kept-in-sync, not tokenized, just
+   hex (%23475569) instead — still hand-kept-in-sync, not tokenized, just
    duplicated per theme rather than per rule. */
 select {
   -webkit-appearance: none;
@@ -423,6 +435,18 @@ button, .btn {
 
 button:hover, .btn:hover { filter: brightness(1.1); }
 
+/* Only 5 selectors (nav links, logout, inputs/select, custom-select-
+   trigger, theme-toggle) had explicit :focus-visible before this — every
+   other button (Disable, Delete, Save Rules, Download, Renew, bulk
+   actions, modal close) relied on the browser's unstyled default, which
+   can be low-contrast against a colored button background and is
+   inconsistent with the deliberate focus treatment everywhere else —
+   found during /impeccable audit, fixed 2026-08-20. */
+button:focus-visible, .btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 /* Bulk disable/delete (Firewall Rules) and any other <button disabled> use
    this — previously only .pagination-nav .btn-sm:disabled had a visual
    disabled state, so e.g. "Bulk delete (0)" looked identical whether it
@@ -439,6 +463,20 @@ button:disabled:hover, .btn:disabled:hover { filter: none; }
 .btn-warn { background: var(--warn); color: #241a00; }
 .btn-danger { background: var(--danger); color: #2a0007; }
 .btn-ok { background: var(--ok); color: #04241a; }
+
+/* Light mode's warn/danger/ok are deliberately darker than dark mode's
+   (needed for their standalone-text use in badges/flash messages — see
+   the [data-theme="light"] token block) — but that same darkening drops
+   the near-black button text above from ~8:1 to ~3.3-4:1 against these
+   buttons specifically, under the 4.5:1 WCAG 1.4.3 needs. White clears
+   4.5:1 against light mode's versions (4.83-5.02:1) but fails against
+   dark mode's brighter ones (2.0-3.4:1), so this can't be a shared
+   value — found during /impeccable audit, fixed 2026-08-20. */
+[data-theme="light"] .btn-warn,
+[data-theme="light"] .btn-danger,
+[data-theme="light"] .btn-ok {
+  color: #fff;
+}
 
 .btn-sm { padding: 5px 8px; font-size: 11.5px; }
 
@@ -784,20 +822,20 @@ input[type="text"].filter-input-inline {
 }
 
 /* Light-mode versions of the 4 hardcoded-color icons above — same SVGs,
-   stroke swapped from %238a93a8 (dark theme's --muted) to %2364748b
+   stroke swapped from %238a93a8 (dark theme's --muted) to %23475569
    (light theme's --muted). See the comment near the `select` rule for why
    these can't just reference the custom property directly. */
 [data-theme="light"] .collapsible summary::after {
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'><path fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' d='M6 8l4 4 4-4'/></svg>");
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'><path fill='none' stroke='%23475569' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' d='M6 8l4 4 4-4'/></svg>");
 }
 [data-theme="light"] select {
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'><path fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' d='M6 8l4 4 4-4'/></svg>");
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'><path fill='none' stroke='%23475569' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' d='M6 8l4 4 4-4'/></svg>");
 }
 [data-theme="light"] .custom-select-trigger {
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'><path fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' d='M6 8l4 4 4-4'/></svg>");
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'><path fill='none' stroke='%23475569' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' d='M6 8l4 4 4-4'/></svg>");
 }
 [data-theme="light"] input[type="text"].filter-input-inline {
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='11' cy='11' r='8'/><line x1='21' y1='21' x2='16.65' y2='16.65'/></svg>");
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23475569' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='11' cy='11' r='8'/><line x1='21' y1='21' x2='16.65' y2='16.65'/></svg>");
 }
 
 .sort-header {
@@ -854,22 +892,23 @@ input[type="text"].filter-input-inline {
 
 .login-card input { width: 100%; }
 
-/* Light/dark toggle (static/js/theme-toggle.js). Lives inside .topbar as a
-   normal flex item on authenticated pages (gap: 24px there spaces it from
-   brand/nav/logout automatically); .theme-toggle-floating is the same
-   button positioned standalone for the login page, which has no topbar to
-   sit inside. */
+/* Light/dark toggle (static/js/theme-toggle.js). Icon + text-label pill,
+   not a bare icon button — the visible "Dark"/"Light" word means the
+   current state reads at a glance, not just from the icon shape. Lives
+   inside .topbar as a normal flex item on authenticated pages (gap: 24px
+   there spaces it from brand/nav/logout automatically); .theme-toggle-
+   floating is the same button positioned standalone for the login page,
+   which has no topbar to sit inside. */
 .theme-toggle {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
+  gap: 6px;
   flex-shrink: 0;
-  width: 34px;
-  height: 34px;
-  padding: 0;
   background: var(--panel-2);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 13px;
   color: var(--muted);
   cursor: pointer;
 }
@@ -879,6 +918,15 @@ input[type="text"].filter-input-inline {
 .theme-toggle:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+.theme-toggle .icon-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
 }
 
 .theme-toggle-floating {
