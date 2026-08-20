@@ -1,5 +1,17 @@
 [Unit]
 Description=Fix OpenVPN CRL file permissions
+# Removing several clients in a row (e.g. a bulk remove in the web UI)
+# re-triggers this once per removeOVPN.sh call, since each one resets the
+# CRL's permissions again. Without this, systemd's default rate limit (5
+# starts / 10s) trips after ~5 removals in quick succession, and the
+# service — and the .path unit watching it — goes permanently "failed"
+# until someone manually runs `systemctl reset-failed`. Every trigger of
+# this service just re-runs a harmless, idempotent chmod, so there's no
+# real "runaway restart loop" risk to guard against here — hit live on
+# .12 2026-08-20 (a 6-client bulk remove killed the watcher, and the CRL
+# stayed unreadable — breaking every VPN connection attempt — until
+# fixed by hand).
+StartLimitIntervalSec=0
 
 [Service]
 Type=oneshot
