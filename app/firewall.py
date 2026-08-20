@@ -654,6 +654,25 @@ def _server_ip() -> str:
         return "this server"
 
 
+def list_interfaces() -> list[str]:
+    """Real network interfaces on this box, for the SNAT rule form's
+    Outgoing interface dropdown — loopback excluded (never a meaningful
+    NAT exit), everything else included (ens18/ens19-style NICs and tun*
+    VPN interfaces alike), since this app doesn't get to assume which one
+    an admin's topology needs. Not cached like _server_ip/_iface_ip: unlike
+    those, this reads the interface *list itself*, which the whole reason
+    someone plugs in a NIC or brings up a new tunnel is to change."""
+    try:
+        out = subprocess.run(
+            ["ip", "-o", "link", "show"],
+            capture_output=True, text=True, timeout=3,
+        ).stdout
+        names = re.findall(r"^\d+:\s+([^:@]+)[:@]", out, re.MULTILINE)
+        return sorted(n for n in names if n != "lo")
+    except (OSError, subprocess.SubprocessError):
+        return []
+
+
 @functools.lru_cache(maxsize=None)
 def _iface_ip(iface: str) -> str:
     """Current IPv4 address of a network interface, e.g. what MASQUERADE on

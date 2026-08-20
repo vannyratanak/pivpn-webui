@@ -119,8 +119,13 @@
       <label><span class="label-text">Fixed exit IP<span class="required-star" aria-hidden="true">*</span></span><span class="hint hint-block">(what the source gets rewritten to)</span>
         <input type="text" name="snat_ip" required placeholder="10.255.50.10">
       </label>
-      <label>Outgoing interface <span class="hint">(optional, e.g. ens18)</span>
-        <input type="text" name="out_iface" placeholder="ens18">
+      <label>Outgoing interface <span class="hint">(optional — omit to use the server's default route)</span>
+        <select name="out_iface">
+          <option value="">Not set</option>
+          {% for i in interfaces %}
+          <option value="{{ i }}">{{ i }}</option>
+          {% endfor %}
+        </select>
       </label>
       <label>Comment
         <input type="text" name="comment" placeholder="optional note">

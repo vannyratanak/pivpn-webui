@@ -233,6 +233,7 @@ def firewall_rules():
 
     return render_template(
         "firewall.html", rules=rules, has_unsaved=has_unsaved, vpn_clients=vpn_clients,
+        interfaces=firewall.list_interfaces(),
     )
 
 

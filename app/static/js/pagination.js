@@ -30,12 +30,14 @@ function attachPagination(containerSelector, itemSelector, pageSizeId, controlsI
       item.style.display = (i >= start && i < end) ? '' : 'none';
     });
 
+    // Stays visible (not hidden) even with nothing to page through — Prev/Next
+    // just go disabled, same as any other control with nothing to do, rather
+    // than the whole row disappearing and shifting the layout around it.
     prevBtn.disabled = currentPage <= 1;
     nextBtn.disabled = currentPage >= totalPages;
     status.textContent = matching.length === 0
       ? 'No results'
       : `Page ${currentPage} of ${totalPages} (${matching.length} total)`;
-    controls.hidden = totalPages <= 1;
   }
 
   prevBtn.addEventListener('click', () => { currentPage -= 1; refresh(); });
