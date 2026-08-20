@@ -479,7 +479,13 @@ button:disabled, .btn:disabled {
 button:disabled:hover, .btn:disabled:hover { filter: none; }
 
 .btn-warn { background: var(--warn); color: #241a00; }
-.btn-danger { background: var(--danger); color: #2a0007; }
+/* Fixed color, not var(--danger) — dark mode's token value (#f0556c) is
+   too bright for white text (3.38:1, fails 4.5:1), which is why this
+   button used to fall back to dark text there. #dc2626 is light mode's
+   --danger value, already proven to clear 4.5:1 with white (4.83:1);
+   reusing it unconditionally gives both themes the same white-text
+   Remove/Delete button instead of just light mode. */
+.btn-danger { background: #dc2626; color: #fff; }
 .btn-ok { background: var(--ok); color: #04241a; }
 
 /* Neutral action that isn't primary, destructive, or a warning state (e.g.
@@ -502,30 +508,34 @@ button:disabled:hover, .btn:disabled:hover { filter: none; }
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.12);
 }
 
-/* Light mode's warn/danger/ok are deliberately darker than dark mode's
+/* Light mode's warn/ok tokens are deliberately darker than dark mode's
    (needed for their standalone-text use in badges/flash messages — see
    the [data-theme="light"] token block) — but that same darkening drops
    the near-black button text above from ~8:1 to ~3.3-4:1 against these
    buttons specifically, under the 4.5:1 WCAG 1.4.3 needs. White clears
    4.5:1 against light mode's versions (4.83-5.02:1) but fails against
    dark mode's brighter ones (2.0-3.4:1), so this can't be a shared
-   value — found during /impeccable audit, fixed 2026-08-20. */
-[data-theme="light"] .btn-danger,
+   value — found during /impeccable audit, fixed 2026-08-20. .btn-danger
+   isn't here: it has its own fixed color now (see above), not this
+   token-driven light/dark split. */
+[data-theme="light"] .btn-warn,
 [data-theme="light"] .btn-ok {
   color: #fff;
 }
 
-/* Disable/Block (.btn-warn) specifically reuses dark mode's own amber +
-   dark text (#f5a623/#241a00, ~8.5:1 contrast) instead of --warn's
-   light-mode value + white text like danger/ok above — --warn is forced
-   dark in light mode for standalone-text uses (badges, .saved-no, flash
-   messages), which made this button read as a heavy brown rather than
-   the friendlier amber "warning" reads as everywhere else. Decoupled
-   from the --warn token; only affects the button, same color in both
-   themes now. */
+/* Disable/Block (.btn-warn) gets its own, slightly lighter amber instead
+   of --warn's light-mode value directly — --warn itself has to stay
+   dark for standalone-text uses (badges, .saved-no, flash messages),
+   which left almost no headroom to lighten while white text (kept for
+   consistency with every other button) still clears 4.5:1: the original
+   #b45309 was already at 5.02:1, and white fails past roughly #bf590a
+   (4.52:1, too close to the floor to be safe). #b95609 lands at a
+   comfortable 4.78:1 with real margin, and is the most daylight this
+   hue has room for without dropping text color or contrast safety —
+   tried a dark-text/#f5a623 version with much more headroom first, but
+   white-text consistency with Download/Danger/Ok won out. */
 [data-theme="light"] .btn-warn {
-  background: #f5a623;
-  color: #241a00;
+  background: #b95609;
 }
 
 .btn-sm { height: 26px; padding: 0 8px; font-size: 11.5px; }
