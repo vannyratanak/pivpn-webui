@@ -37,6 +37,16 @@ live on the server) for keeping a running install in sync with this repo.
   - "Reapply all" reconciles iptables against the DB (idempotent — safe to
     click repeatedly). "Save for reboot" calls `netfilter-persistent save`,
     which requires `iptables-persistent` to be installed.
+  - SNAT rules' "Outgoing interface" is a dropdown of the server's real
+    network interfaces (`ip -o link show`, loopback excluded), not free
+    text — populated live on each page load, so it always reflects
+    whatever NICs actually exist on that box.
+  - "Import Rules" detects one common mistake: a file in the *Clients*
+    page's import format (`name=foo passphrase=bar` per line) uploaded
+    here by accident, since both pages phrase their dialog the same way
+    ("Import ... from file"). Instead of a generic "Unknown rule kind"
+    error per line, it says so directly and points at the Clients page's
+    Import Client dialog instead.
 
 - **VPN Routes** page manages `push "route ..."` lines in `server.conf` —
   what destinations get routed into the tunnel at all for every client
@@ -76,6 +86,15 @@ live on the server) for keeping a running install in sync with this repo.
   about a second of any change, regardless of what triggered it (this app,
   raw CLI, cron) — see [Known limitations](#known-limitations--things-to-check)
   for the one thing to verify before trusting it on a different install.
+  The fix service also has `StartLimitIntervalSec=0`: a *bulk* remove (many
+  clients in quick succession) re-triggers the watcher once per revoke, and
+  without this, systemd's default rate limit (5 starts/10s) would put the
+  watcher itself into a permanent `failed` state after ~5 rapid triggers —
+  silently leaving the CRL unreadable, breaking every VPN connection
+  attempt, until someone runs `systemctl reset-failed` by hand. Hit this
+  for real on a 6-client bulk remove; every trigger is just a harmless,
+  idempotent `chmod`, so there's no real runaway-restart risk in disabling
+  the limit entirely.
 
 ## ⚠️ Verified against one real install — other PiVPN versions may differ
 
@@ -233,6 +252,21 @@ thought than a weekend project gets. Options, easiest first:
   is sending the login password in plaintext unless you put TLS in front.
 
 ## CD: deploying code changes to a running server
+
+This repo is public and its `Deploy` workflow runs on a **self-hosted**
+runner (has to — the deploy targets are private-network addresses no
+GitHub-hosted runner can reach). That combination is normally the classic
+"fork a public repo, open a PR, get code execution on someone's runner"
+risk — it doesn't apply here because `deploy.yml`'s only trigger is
+`workflow_dispatch`, which requires the invoker to already have write
+access to the repo; a stranger's fork PR can't make it run. Fork PR
+workflows are also disabled repo-wide as a second, independent layer
+(Settings → Actions → General → "Run workflows from fork pull requests"),
+so even a future workflow added with a `pull_request` trigger by mistake
+wouldn't run from a fork without that box being checked first. Deploy
+targets and the SSH username live in GitHub secrets
+(`DEPLOY_TARGET_1`/`_2`/...), not hardcoded in the workflow file, so
+nothing about the network layout is visible to a public reader either.
 
 `.github/workflows/deploy.yml` is a **manual-trigger only** workflow
 (`workflow_dispatch` — nothing runs automatically on push, only `CI`/tests
