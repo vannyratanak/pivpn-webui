@@ -479,13 +479,15 @@ button:disabled, .btn:disabled {
 button:disabled:hover, .btn:disabled:hover { filter: none; }
 
 .btn-warn { background: var(--warn); color: #241a00; }
-/* Fixed color, not var(--danger) — dark mode's token value (#f0556c) is
+/* Fixed colors, not var(--danger) — dark mode's token value (#f0556c) is
    too bright for white text (3.38:1, fails 4.5:1), which is why this
-   button used to fall back to dark text there. #dc2626 is light mode's
-   --danger value, already proven to clear 4.5:1 with white (4.83:1);
-   reusing it unconditionally gives both themes the same white-text
-   Remove/Delete button instead of just light mode. */
-.btn-danger { background: #dc2626; color: #fff; }
+   button used to fall back to dark text there. #df2d30 is 15% of the way
+   from light mode's --danger (#dc2626, the safe end) toward dark mode's
+   own too-bright token — enough to read as its own shade per theme
+   (not identical across both, like a straight #dc2626 reuse would be)
+   while staying at a real 4.61:1 margin above the 4.5:1 floor. */
+.btn-danger { background: #df2d30; color: #fff; }
+[data-theme="light"] .btn-danger { background: #dc2626; }
 .btn-ok { background: var(--ok); color: #04241a; }
 
 /* Neutral action that isn't primary, destructive, or a warning state (e.g.
