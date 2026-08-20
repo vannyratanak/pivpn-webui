@@ -162,11 +162,11 @@
       <div class="btn-group">
         <form method="post" action="{{ url_for('main.bulk_disable_rules') }}" id="bulk-disable-form" class="btn-form">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <button type="submit" class="btn btn-warn" id="bulk-disable-btn" disabled>Bulk disable (<span id="bulk-disable-count">0</span>)</button>
+          <button type="submit" class="btn btn-warn" id="bulk-disable-btn" disabled>Disable (<span id="bulk-disable-count">0</span>)</button>
         </form>
         <form method="post" action="{{ url_for('main.bulk_delete_rules') }}" id="bulk-delete-form" class="btn-form">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <button type="submit" class="btn btn-danger" id="bulk-delete-btn" disabled>Bulk delete (<span id="bulk-delete-count">0</span>)</button>
+          <button type="submit" class="btn btn-danger" id="bulk-delete-btn" disabled>Delete (<span id="bulk-delete-count">0</span>)</button>
         </form>
       </div>
     </div>
