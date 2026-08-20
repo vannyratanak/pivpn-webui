@@ -421,6 +421,14 @@ select {
   font-weight: 600;
 }
 
+/* line-height + vertical-align are explicit (not left to the UA default)
+   because <button> and <a class="btn"> otherwise render at different
+   heights with identical padding/font-size — a browser form-control
+   quirk, not a font-size difference (both already share font: inherit
+   via the input/select/button rule below, or plain inheritance for <a>).
+   Visible wherever a link-styled action (Download) sits next to real
+   <button>s in the same row (e.g. the Clients table's Actions column) —
+   found live via a zoomed screenshot comparison, not a spec read. */
 button, .btn {
   background: var(--accent);
   color: #fff;
@@ -431,9 +439,15 @@ button, .btn {
   text-decoration: none;
   display: inline-block;
   font-weight: 500;
+  line-height: 1.2;
+  vertical-align: middle;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
 }
 
-button:hover, .btn:hover { filter: brightness(1.1); }
+button:hover, .btn:hover {
+  filter: brightness(1.1);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+}
 
 /* Only 5 selectors (nav links, logout, inputs/select, custom-select-
    trigger, theme-toggle) had explicit :focus-visible before this — every
@@ -463,6 +477,26 @@ button:disabled:hover, .btn:disabled:hover { filter: none; }
 .btn-warn { background: var(--warn); color: #241a00; }
 .btn-danger { background: var(--danger); color: #2a0007; }
 .btn-ok { background: var(--ok); color: #04241a; }
+
+/* Neutral action that isn't primary, destructive, or a warning state (e.g.
+   Renew: a routine, positive maintenance action — it was previously
+   btn-warn, the same amber as Block, which is an actually-restrictive
+   action; sharing that color made two different-weight actions look like
+   the same thing and added to every row being uniformly loud). Border
+   instead of a filled color keeps it visually quieter than the four
+   semantic colors, so those still read as the meaningful ones. */
+.btn-secondary {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: none;
+}
+.btn-secondary:hover {
+  filter: none;
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.12);
+}
 
 /* Light mode's warn/danger/ok are deliberately darker than dark mode's
    (needed for their standalone-text use in badges/flash messages — see
