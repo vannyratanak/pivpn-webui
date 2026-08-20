@@ -13,10 +13,10 @@
     <summary><h2>Push a new route</h2></summary>
     <form method="post" action="{{ url_for('main.add_vpn_route') }}" class="inline-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <label><span class="label-text">Network<span class="required-star">*</span></span>
+      <label><span class="label-text">Network<span class="required-star" aria-hidden="true">*</span></span>
         <input type="text" name="network" required placeholder="192.168.100.0">
       </label>
-      <label><span class="label-text">Netmask<span class="required-star">*</span></span>
+      <label><span class="label-text">Netmask<span class="required-star" aria-hidden="true">*</span></span>
         <input type="text" name="netmask" required placeholder="255.255.255.0">
       </label>
       <button type="submit">Push route</button>

@@ -771,7 +771,8 @@ dialog.modal code {
 
 .tabs {
   display: flex;
-  gap: 4px;
+  flex-wrap: wrap;
+  gap: 8px 4px;
   border-bottom: 1px solid var(--border);
   margin-bottom: 20px;
 }
@@ -844,6 +845,14 @@ input[type="text"].filter-input-inline {
 }
 
 .sort-header:hover { color: var(--text); }
+
+/* th's are inline within a table row (unlike the free-standing buttons
+   above), so a positive outline-offset would get clipped by neighboring
+   cells — negative offset keeps the ring inside the header's own box. */
+.sort-header:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
 
 .sort-asc::after { content: " \25B2"; }
 .sort-desc::after { content: " \25BC"; }

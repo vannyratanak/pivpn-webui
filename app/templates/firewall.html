@@ -81,10 +81,10 @@
     <p class="hint">DNAT: forward an external port to a VPN client's internal IP.</p>
     <form method="post" action="{{ url_for('main.add_portforward') }}" class="inline-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <label><span class="label-text">External port<span class="required-star">*</span></span>
+      <label><span class="label-text">External port<span class="required-star" aria-hidden="true">*</span></span>
         <input type="text" name="ext_port" required placeholder="8080">
       </label>
-      <label><span class="label-text">Target IP<span class="required-star">*</span></span> <span class="hint">(VPN client's internal IP)</span>
+      <label><span class="label-text">Target IP<span class="required-star" aria-hidden="true">*</span></span> <span class="hint">(VPN client's internal IP)</span>
         <input type="text" name="target_ip" required placeholder="10.8.0.5">
       </label>
       <label>Target port <span class="hint">(blank = same as external)</span>
@@ -116,7 +116,7 @@
       <label>Source <span class="hint">(subnet whose outbound traffic gets rewritten)</span>
         <input type="text" name="src" placeholder="10.202.226.0/24">
       </label>
-      <label><span class="label-text">Fixed exit IP<span class="required-star">*</span></span><span class="hint hint-block">(what the source gets rewritten to)</span>
+      <label><span class="label-text">Fixed exit IP<span class="required-star" aria-hidden="true">*</span></span><span class="hint hint-block">(what the source gets rewritten to)</span>
         <input type="text" name="snat_ip" required placeholder="10.255.50.10">
       </label>
       <label>Outgoing interface <span class="hint">(optional, e.g. ens18)</span>
