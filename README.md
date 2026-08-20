@@ -118,114 +118,86 @@ if `./setup.sh` fails with "ensurepip is not available", run
 The two sudo password prompts noted below are once per script run (sudo
 caches your password for its default ~15 minutes), not once per command.
 Zero iptables rules get added until you deliberately visit the Firewall
-page in step 6 — everything before that is new files and process startup
+page in step 7 — everything before that is new files and process startup
 only. See [Accessing it remotely](#accessing-it-remotely) and
 [First login](#first-login) below for the full detail behind those steps.
 
+**Step 1 — clone the repo** (on the box, as your normal sudo user, not root)
+
+```bash
+git clone https://github.com/vannyratanak/pivpn-webui.git
+cd pivpn-webui
 ```
-┌────────────────────────────────────────────────────────────────┐
-│  On the box, as your normal sudo user (not root)                │
-└────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-        git clone https://github.com/vannyratanak/pivpn-webui.git
-        cd pivpn-webui
-                              │
-                              ▼
-┌────────────────────────────────────────────────────────────────┐
-│ STEP 1 — ./setup.sh                        [sudo password: 1x]  │
-├────────────────────────────────────────────────────────────────┤
-│ • creates venv/, installs Python deps                          │
-│ • prompts: admin username, admin password ×2, ovpn dir,        │
-│   OpenVPN subnet base                                          │
-│ • writes .env (chmod 600) — secrets, paths, helper locations   │
-│ • sudo installs 4 helper scripts → /usr/local/sbin/             │
-│ • sudo installs sudoers rule (visudo -cf validated first)      │
-│ • sudo installs systemd unit + daemon-reload                   │
-│ • sudo installs + starts a CRL permission watcher (see below)  │
-│ • creates empty instance/ dir                                  │
-│                                                                  │
-│ Touches nothing PiVPN owns, no iptables, no VPN impact — except │
-│ the CRL watcher, which starts running immediately (protects     │
-│ against a real PiVPN bug even before the webui itself starts).  │
-└────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-      Before trusting the Sessions/System log tabs, verify the OpenVPN
-      systemd unit name matches what's hardcoded in the log helper:
-        systemctl list-units | grep openvpn   (vs. OPENVPN_UNIT in
-                                        deploy/pivpn-webui-log-helper.sh)
-      Mismatch? Update that one file and reinstall: sudo install -m 0750
-      -o root -g root deploy/pivpn-webui-log-helper.sh
-      /usr/local/sbin/pivpn-webui-log-helper.sh
-      (Client add/remove/renew has the same kind of version caveat — see
-      "Verified against one real install" above, before this step.)
-                              │
-                              ▼
-┌────────────────────────────────────────────────────────────────┐
-│ STEP 2 — sudo systemctl enable --now pivpn-webui                │
-├────────────────────────────────────────────────────────────────┤
-│ • gunicorn starts, binds 127.0.0.1:8443 only                   │
-│ • creates instance/pivpn_webui.db (empty tables)                │
-│ • sync_all() runs → loops over DB rules → DB is empty →         │
-│   does nothing                                                 │
-│                                                                  │
-│ Still zero iptables rules — nothing in the DB yet to sync.      │
-└────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌────────────────────────────────────────────────────────────────┐
-│ STEP 3 — ./setup-nginx.sh                  [sudo password: 1x]  │
-├────────────────────────────────────────────────────────────────┤
-│ • installs nginx via apt if missing                             │
-│ • prompts for server name (auto-detects your IP as default)    │
-│ • generates a self-signed cert (or leaves a real one alone)    │
-│ • installs the reverse-proxy vhost → nginx -t → reload          │
-│                                                                  │
-│ Separate port (443, admin panel) from OpenVPN's tunnel port —  │
-│ zero effect on connected VPN clients.                          │
-└────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-                  https://<server-name>/
-                              │
-                              ▼
-┌────────────────────────────────────────────────────────────────┐
-│ STEP 4 — Log in with the credentials from Step 1                │
-└────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌────────────────────────────────────────────────────────────────┐
-│ STEP 5 — Visit Clients page first                                │
-├────────────────────────────────────────────────────────────────┤
-│ Read-only — runs `pivpn list` + reads CCD files. Confirms the  │
-│ app sees your real clients correctly. Nothing is written.      │
-└────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌────────────────────────────────────────────────────────────────┐
-│ STEP 6 — Visit Firewall page (pick a quiet moment)               │
-├────────────────────────────────────────────────────────────────┤
-│ discover_cli_rules() adopts every untagged rule it finds        │
-│ (e.g. PiVPN's own MASQUERADE/FORWARD rules from original        │
-│ install): delete → re-add same rule, now tagged.                │
-│ Sub-millisecond per rule. OpenVPN daemon never touched —        │
-│ tunnel sessions unaffected.                                     │
-│                                                                  │
-│ Table now shows everything found, marked "Unsaved."             │
-└────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌────────────────────────────────────────────────────────────────┐
-│ STEP 7 — Review the table, then click "Save Rules"               │
-├────────────────────────────────────────────────────────────────┤
-│ Locks the tagged version in as what survives a reboot           │
-│ (needs iptables-persistent installed for this to work).         │
-└────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-                     ✅  Fully installed
+
+**Step 2 — run setup.sh** `[sudo password: 1x]`
+
+```bash
+./setup.sh
 ```
+
+Creates `venv/`, installs Python deps, prompts for admin username/password
+×2/ovpn dir/OpenVPN subnet base, writes `.env` (chmod 600), sudo-installs
+the 4 helper scripts + sudoers rule + systemd unit, and installs+starts
+the CRL permission watcher (see below) — which starts running immediately,
+protecting against a real PiVPN bug even before the webui itself starts.
+Touches nothing PiVPN owns otherwise, no iptables, no VPN impact.
+
+Before trusting the Sessions/System log tabs, verify the OpenVPN systemd
+unit name matches what's hardcoded in the log helper:
+
+```bash
+systemctl list-units | grep openvpn
+```
+
+Compare against `OPENVPN_UNIT` in `deploy/pivpn-webui-log-helper.sh`.
+Mismatch? Update that one file and reinstall:
+
+```bash
+sudo install -m 0750 -o root -g root deploy/pivpn-webui-log-helper.sh /usr/local/sbin/pivpn-webui-log-helper.sh
+```
+
+(Client add/remove/renew has the same kind of version caveat — see
+"Verified against one real install" above, before this step.)
+
+**Step 3 — start the service**
+
+```bash
+sudo systemctl enable --now pivpn-webui
+```
+
+gunicorn starts, binds `127.0.0.1:8443` only; creates
+`instance/pivpn_webui.db` (empty tables); `sync_all()` runs but the DB is
+empty so it does nothing. Still zero iptables rules at this point.
+
+**Step 4 — put nginx + TLS in front of it** `[sudo password: 1x]`
+
+```bash
+./setup-nginx.sh
+```
+
+Installs nginx via apt if missing, prompts for a server name
+(auto-detects your IP as the default), generates a self-signed cert (or
+leaves a real one alone), installs the reverse-proxy vhost. Separate port
+(443, admin panel) from OpenVPN's own tunnel port — zero effect on
+connected VPN clients. Browse to `https://<server-name>/` once it's done.
+
+**Step 5 — log in** with the admin username/password from Step 2.
+
+**Step 6 — visit the Clients page first.** Read-only — runs `pivpn list` +
+reads CCD files. Confirms the app sees your real clients correctly;
+nothing is written.
+
+**Step 7 — visit the Firewall page, at a quiet moment.**
+`discover_cli_rules()` adopts every untagged rule it finds (e.g. PiVPN's
+own MASQUERADE/FORWARD rules from the original install): delete → re-add
+the same rule, now tagged. Sub-millisecond per rule, OpenVPN daemon never
+touched. The table now shows everything found, marked "Unsaved."
+
+**Step 8 — review the table, then click "Save Rules."** Locks the tagged
+version in as what survives a reboot (needs `iptables-persistent`
+installed).
+
+✅ Fully installed.
 
 Optional, separate from the above: if you want the `git push` → auto-deploy
 CD pipeline too (not required for the app to work), see
