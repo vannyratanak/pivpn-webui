@@ -14,12 +14,25 @@
     }
   </script>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-  <script src="{{ url_for('static', filename='js/select-enhance.js') }}" defer></script>
-  <script src="{{ url_for('static', filename='js/log-filter.js') }}" defer></script>
-  <script src="{{ url_for('static', filename='js/pagination.js') }}" defer></script>
-  <script src="{{ url_for('static', filename='js/select-filter.js') }}" defer></script>
-  <script src="{{ url_for('static', filename='js/nav-loading.js') }}" defer></script>
-  <script src="{{ url_for('static', filename='js/theme-toggle.js') }}" defer></script>
+  <!-- Not deferred: every page's own inline <script> block (search/pagination/
+       bulk-select wiring in clients.html, firewall.html, etc.) runs inline,
+       synchronously, during body parsing — it calls attachPagination() /
+       attachLogFilter() etc. immediately, with no DOMContentLoaded wrapper of
+       its own. `defer` here delays these definitions until after the whole
+       document parses, which is *after* those inline callers already ran and
+       threw "attachPagination is not defined" — silently breaking search,
+       pagination, and bulk-select on every page. Tried defer once (found by
+       /impeccable audit as a minor perf win), shipped it, caught this live via
+       a browser console check, reverted same-day. Fixing it properly would
+       mean wrapping every page's inline script in its own DOMContentLoaded
+       listener; not worth the added surface for a render-blocking cost this
+       small on an internal LAN tool with a handful of admins. -->
+  <script src="{{ url_for('static', filename='js/select-enhance.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/log-filter.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/pagination.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/select-filter.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/nav-loading.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/theme-toggle.js') }}"></script>
 </head>
 <body>
   <a href="#main-content" class="skip-link">Skip to content</a>
