@@ -56,7 +56,7 @@
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="network" value="{{ r.network }}">
             <input type="hidden" name="netmask" value="{{ r.netmask }}">
-            <button type="submit" class="btn btn-danger">Remove</button>
+            <button type="submit" class="btn btn-sm btn-danger">Remove</button>
           </form>
           {% else %}
           <span class="hint">Edit server.conf directly to change</span>
