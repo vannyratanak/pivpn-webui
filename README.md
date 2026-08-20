@@ -151,14 +151,15 @@ only. See [Accessing it remotely](#accessing-it-remotely) and
 └────────────────────────────────────────────────────────────────┘
                               │
                               ▼
-      Before trusting client add/remove/renew or the Sessions/System
-      log tabs, verify two things PiVPN versions can differ on:
-        pivpn -h && pivpn add -h        (vs. app/pivpn_ctl.py's flags)
+      Before trusting the Sessions/System log tabs, verify the OpenVPN
+      systemd unit name matches what's hardcoded in the log helper:
         systemctl list-units | grep openvpn   (vs. OPENVPN_UNIT in
                                         deploy/pivpn-webui-log-helper.sh)
-      Mismatch on either? Only that one file needs to change — update
-      it and reinstall: sudo install -m 0750 -o root -g root
-      deploy/pivpn-webui-log-helper.sh /usr/local/sbin/pivpn-webui-log-helper.sh
+      Mismatch? Update that one file and reinstall: sudo install -m 0750
+      -o root -g root deploy/pivpn-webui-log-helper.sh
+      /usr/local/sbin/pivpn-webui-log-helper.sh
+      (Client add/remove/renew has the same kind of version caveat — see
+      "Verified against one real install" above, before this step.)
                               │
                               ▼
 ┌────────────────────────────────────────────────────────────────┐
