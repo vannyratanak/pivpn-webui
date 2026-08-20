@@ -46,7 +46,7 @@ else
     -newkey rsa:2048 \
     -keyout /etc/nginx/ssl/pivpn-webui.key \
     -out /etc/nginx/ssl/pivpn-webui.crt \
-    -subj "/CN=${SERVER_NAME}"
+    -subj "/C=KH/ST=Phnom Penh/L=Phnom Penh/O=The Council for the Development of Cambodia/CN=${SERVER_NAME}"
 fi
 
 # Key readable by nginx's worker user (www-data on Debian/Ubuntu) and root
