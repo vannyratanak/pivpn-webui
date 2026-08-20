@@ -421,26 +421,30 @@ select {
   font-weight: 600;
 }
 
-/* line-height + vertical-align are explicit (not left to the UA default)
-   because <button> and <a class="btn"> otherwise render at different
-   heights with identical padding/font-size — a browser form-control
-   quirk, not a font-size difference (both already share font: inherit
-   via the input/select/button rule below, or plain inheritance for <a>).
-   Visible wherever a link-styled action (Download) sits next to real
-   <button>s in the same row (e.g. the Clients table's Actions column) —
-   found live via a zoomed screenshot comparison, not a spec read. */
+/* Fixed height + flex centering, not line-height/padding math — <button>
+   vs <a class="btn"> (a real browser form-control quirk) and bordered vs
+   borderless variants (.btn-secondary's 1px border, added on top of
+   whatever auto-height padding+line-height produced) each throw off
+   auto-sizing in their own way. A first attempt at line-height +
+   vertical-align alone left a measured 2px gap between .btn-secondary
+   (bordered) and plain-color buttons (borderless) — confirmed via
+   getBoundingClientRect, not a screenshot. Fixed height sidesteps both:
+   box-sizing: border-box (global) absorbs a border into the same
+   declared height instead of adding to it, and flex centering doesn't
+   care what line-height an <a> vs a <button> computes to. */
 button, .btn {
   background: var(--accent);
   color: #fff;
   border: none;
   border-radius: 6px;
-  padding: 8px 14px;
+  height: 34px;
+  padding: 0 14px;
   cursor: pointer;
   text-decoration: none;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font-weight: 500;
-  line-height: 1.2;
-  vertical-align: middle;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
 }
 
@@ -512,7 +516,7 @@ button:disabled:hover, .btn:disabled:hover { filter: none; }
   color: #fff;
 }
 
-.btn-sm { padding: 5px 8px; font-size: 11.5px; }
+.btn-sm { height: 26px; padding: 0 8px; font-size: 11.5px; }
 
 /* .btn-sm trades touch-target size for fitting 4 actions on one row (see
    the Clients table) — below the ~44px touch-target guideline at rest.
