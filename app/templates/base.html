@@ -4,12 +4,22 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}PiVPN Web UI{% endblock %}</title>
+  <!-- Sets data-theme before the stylesheet paints, so a saved "light"
+       choice never flashes dark-then-light on load. Must be inline (not
+       an external src=) and this early in <head> — an external script
+       loads/runs too late to beat first paint. -->
+  <script>
+    if (localStorage.getItem('pivpn-webui-theme') === 'light') {
+      document.documentElement.setAttribute('data-theme', 'light');
+    }
+  </script>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <script src="{{ url_for('static', filename='js/select-enhance.js') }}"></script>
   <script src="{{ url_for('static', filename='js/log-filter.js') }}"></script>
   <script src="{{ url_for('static', filename='js/pagination.js') }}"></script>
   <script src="{{ url_for('static', filename='js/select-filter.js') }}"></script>
   <script src="{{ url_for('static', filename='js/nav-loading.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/theme-toggle.js') }}"></script>
 </head>
 <body>
   <a href="#main-content" class="skip-link">Skip to content</a>
@@ -22,8 +32,17 @@
       <a href="{{ url_for('main.vpn_routes_page') }}" class="{{ 'active' if request.endpoint == 'main.vpn_routes_page' }}" {% if request.endpoint == 'main.vpn_routes_page' %}aria-current="page"{% endif %}>VPN Routes</a>
       <a href="{{ url_for('main.logs') }}" class="{{ 'active' if request.endpoint == 'main.logs' }}" {% if request.endpoint == 'main.logs' %}aria-current="page"{% endif %}>Logs</a>
     </nav>
+    <button type="button" id="theme-toggle" class="theme-toggle" aria-pressed="false" aria-label="Switch to light mode" title="Toggle light/dark mode">
+      <svg class="theme-icon-sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+      <svg class="theme-icon-moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+    </button>
     <a href="{{ url_for('main.logout') }}" class="logout">Log out</a>
   </header>
+  {% else %}
+  <button type="button" id="theme-toggle" class="theme-toggle theme-toggle-floating" aria-pressed="false" aria-label="Switch to light mode" title="Toggle light/dark mode">
+    <svg class="theme-icon-sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+    <svg class="theme-icon-moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+  </button>
   {% endif %}
 
   <main class="content" id="main-content">

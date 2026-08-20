@@ -5,10 +5,43 @@
   --border: #2a3550;
   --text: #e6e9f0;
   --muted: #8a93a8;
+  --muted-rgb: 138, 147, 168;
   --accent: #4f8cff;
+  --accent-rgb: 79, 140, 255;
   --ok: #3ecf8e;
+  --ok-rgb: 62, 207, 142;
   --warn: #f5a623;
   --danger: #f0556c;
+  --danger-rgb: 240, 85, 108;
+}
+
+/* Light theme — toggled via a `data-theme="light"` attribute on <html>,
+   set by static/js/theme-toggle.js (persisted in localStorage) and applied
+   before first paint by the inline script in base.html's <head>, to avoid
+   a flash of the wrong theme. Almost everything below this point already
+   reads exclusively through these custom properties (or their -rgb
+   companions, for rgba() tints — see badges/flash/blocked-row), so
+   overriding them here re-themes nearly the whole page automatically.
+   The one exception: a few icons are inlined as data-URI SVGs (dropdown
+   arrow, collapsible chevron, search icon) with their stroke color
+   hardcoded in the URL string, since url() can't contain a var() — each
+   of those has an explicit [data-theme="light"] override further down,
+   hand-kept in sync with --muted's light-mode value above. */
+[data-theme="light"] {
+  --bg: #f1f4fa;
+  --panel: #ffffff;
+  --panel-2: #eef1f7;
+  --border: #dbe2ee;
+  --text: #0f172a;
+  --muted: #64748b;
+  --muted-rgb: 100, 116, 139;
+  --accent: #2f5fd6;
+  --accent-rgb: 47, 95, 214;
+  --ok: #15803d;
+  --ok-rgb: 21, 128, 61;
+  --warn: #b45309;
+  --danger: #dc2626;
+  --danger-rgb: 220, 38, 38;
 }
 
 * { box-sizing: border-box; }
@@ -276,9 +309,11 @@ input[type="text"]:focus, input[type="password"]:focus, select:focus {
 /* This icon's stroke color (%238a93a8) is the URL-encoded hex for
    var(--muted) — hardcoded rather than tokenized, since a data-URI can't
    reference a CSS custom property. Same tradeoff repeats for the custom-
-   select arrow, the collapsible chevron, and the search icon below. Only
-   matters if --muted's value ever changes; accepted as-is for a single-
-   theme admin app rather than adding a build step or JS-generated SVG. */
+   select arrow, the collapsible chevron, and the search icon below. Now
+   that there's a light theme too, each of these 4 has an explicit
+   [data-theme="light"] override further down using --muted's light-mode
+   hex (%2364748b) instead — still hand-kept-in-sync, not tokenized, just
+   duplicated per theme rather than per rule. */
 select {
   -webkit-appearance: none;
   -moz-appearance: none;
@@ -369,7 +404,7 @@ select {
 }
 
 .custom-select-option.selected {
-  background: rgba(79, 140, 255, 0.18);
+  background: rgba(var(--accent-rgb), 0.18);
   color: var(--accent);
   font-weight: 600;
 }
@@ -576,7 +611,7 @@ th {
   justify-content: flex-start;
 }
 
-.blocked-row { background: rgba(240, 85, 108, 0.08); }
+.blocked-row { background: rgba(var(--danger-rgb), 0.08); }
 /* Dim only the data cells, not the whole row — opacity on the <tr> itself
    would also fade the Enable/Delete buttons in the last cell, since opacity
    compounds through descendants and can't be un-done by a child's own
@@ -678,8 +713,8 @@ dialog.modal code {
   letter-spacing: 0.03em;
 }
 
-.badge-connected { background: rgba(62, 207, 142, 0.18); color: var(--ok); }
-.badge-inactive { background: rgba(138, 147, 168, 0.15); color: var(--muted); }
+.badge-connected { background: rgba(var(--ok-rgb), 0.18); color: var(--ok); }
+.badge-inactive { background: rgba(var(--muted-rgb), 0.15); color: var(--muted); }
 
 .empty { color: var(--muted); }
 
@@ -735,6 +770,23 @@ input[type="text"].filter-input-inline {
   background-size: 14px;
 }
 
+/* Light-mode versions of the 4 hardcoded-color icons above — same SVGs,
+   stroke swapped from %238a93a8 (dark theme's --muted) to %2364748b
+   (light theme's --muted). See the comment near the `select` rule for why
+   these can't just reference the custom property directly. */
+[data-theme="light"] .collapsible summary::after {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'><path fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' d='M6 8l4 4 4-4'/></svg>");
+}
+[data-theme="light"] select {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'><path fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' d='M6 8l4 4 4-4'/></svg>");
+}
+[data-theme="light"] .custom-select-trigger {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'><path fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' d='M6 8l4 4 4-4'/></svg>");
+}
+[data-theme="light"] input[type="text"].filter-input-inline {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='11' cy='11' r='8'/><line x1='21' y1='21' x2='16.65' y2='16.65'/></svg>");
+}
+
 .sort-header {
   cursor: pointer;
   user-select: none;
@@ -756,8 +808,8 @@ input[type="text"].filter-input-inline {
   font-size: 14px;
 }
 
-.flash-success { background: rgba(62, 207, 142, 0.15); border: 1px solid var(--ok); color: var(--ok); }
-.flash-error { background: rgba(240, 85, 108, 0.15); border: 1px solid var(--danger); color: var(--danger); }
+.flash-success { background: rgba(var(--ok-rgb), 0.15); border: 1px solid var(--ok); color: var(--ok); }
+.flash-error { background: rgba(var(--danger-rgb), 0.15); border: 1px solid var(--danger); color: var(--danger); }
 
 .login-wrap {
   min-height: 80vh;
@@ -788,3 +840,52 @@ input[type="text"].filter-input-inline {
 }
 
 .login-card input { width: 100%; }
+
+/* Light/dark toggle (static/js/theme-toggle.js). Lives inside .topbar as a
+   normal flex item on authenticated pages (gap: 24px there spaces it from
+   brand/nav/logout automatically); .theme-toggle-floating is the same
+   button positioned standalone for the login page, which has no topbar to
+   sit inside. */
+.theme-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.theme-toggle:hover { color: var(--text); border-color: var(--accent); }
+
+.theme-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.theme-toggle-floating {
+  position: fixed;
+  top: 20px;
+  right: 24px;
+  z-index: 150;
+}
+
+/* Sun/moon show the *current* theme, not the destination — matches a
+   physical toggle switch showing its own position. Default (no
+   data-theme attribute = dark) shows the moon; [data-theme="light"]
+   swaps to the sun. These 4 selectors are deliberately scoped with the
+   .theme-toggle prefix (not bare .theme-icon-sun/-moon) so they outrank
+   the generic ".theme-toggle svg { display: block }" reset below by
+   specificity — without the prefix, that reset (class+type = 11) beat a
+   bare single-class rule (10) and both icons showed at once regardless
+   of theme, caught via a headless-Chrome screenshot before this shipped. */
+.theme-toggle svg { display: block; }
+.theme-toggle .theme-icon-sun { display: none; }
+.theme-toggle .theme-icon-moon { display: block; }
+[data-theme="light"] .theme-toggle .theme-icon-sun { display: block; }
+[data-theme="light"] .theme-toggle .theme-icon-moon { display: none; }
