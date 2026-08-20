@@ -424,6 +424,18 @@ def import_rules(text: str, client_ips: dict[str, str] | None = None) -> tuple[i
             if len(tokens) == 1 and eq and name.isidentifier():
                 variables[name] = value
                 continue
+            # Clients page's own import format is "name=foo passphrase=bar"
+            # per line — an easy file to upload here by mistake, since both
+            # pages phrase their dialog the same way ("Import ... from
+            # file"). Caught, not just a generic unknown-kind error, so the
+            # fix is obvious instead of cryptic.
+            if name.lower() == "name" and eq:
+                errors.append(
+                    f"line {i}: {tokens[0]!r} looks like a client import line, "
+                    "not a firewall rule — this file probably belongs on the "
+                    "Clients page's Import Client dialog instead."
+                )
+                continue
             errors.append(
                 f"line {i}: Unknown rule kind {tokens[0]!r} "
                 "(expected forward, portforward, snat, or a NAME=value variable definition)."
