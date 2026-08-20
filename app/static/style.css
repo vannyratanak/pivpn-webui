@@ -423,6 +423,19 @@ button, .btn {
 
 button:hover, .btn:hover { filter: brightness(1.1); }
 
+/* Bulk disable/delete (Firewall Rules) and any other <button disabled> use
+   this — previously only .pagination-nav .btn-sm:disabled had a visual
+   disabled state, so e.g. "Bulk delete (0)" looked identical whether it
+   was clickable or not. :hover's brightness bump is also suppressed here,
+   since CSS :hover still fires on a disabled element even though clicks
+   don't register — without this line a disabled button would visibly
+   "react" to a stray mouseover, which reads as active/clickable. */
+button:disabled, .btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+button:disabled:hover, .btn:disabled:hover { filter: none; }
+
 .btn-warn { background: var(--warn); color: #241a00; }
 .btn-danger { background: var(--danger); color: #2a0007; }
 .btn-ok { background: var(--ok); color: #04241a; }
