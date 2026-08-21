@@ -993,6 +993,26 @@ def _iface_ip(iface: str) -> str:
         return iface
 
 
+def rule_client_name(rule: dict, client_names: dict[str, str] | None = None) -> str:
+    """Which VPN client (if any) a rule is tied to, by IP — for the Active
+    Rules table's own Client column, so that's scannable/sortable on its
+    own instead of only ever showing up buried inside the Details text.
+    client_block already carries the name directly (no IP lookup needed);
+    portforward's client-side address is target_ip, not src/dst; every
+    other kind checks src then dst, in case a manual rule was written
+    with the client as the destination instead."""
+    if rule["kind"] == "client_block":
+        return rule.get("client_name") or ""
+    client_names = client_names or {}
+    if rule["kind"] == "portforward":
+        return client_names.get(rule.get("target_ip"), "")
+    for key in ("src", "dst"):
+        name = client_names.get(rule.get(key))
+        if name:
+            return name
+    return ""
+
+
 def describe_rule(rule: dict, client_names: dict[str, str] | None = None) -> str:
     """Concrete from/to summary of a rule for the Active Rules table's
     Details column: real IPs and addresses, not English paraphrasing —

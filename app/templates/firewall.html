@@ -296,9 +296,9 @@
         <th scope="col">Kind</th>
         <th scope="col">Action</th>
         <th scope="col">Details</th>
+        <th scope="col">Client</th>
         <th scope="col">Comment</th>
         <th scope="col">Source</th>
-        <th scope="col">Enabled</th>
         <th scope="col">Saved</th>
         <th scope="col">Order</th>
         <th scope="col">Actions</th>
@@ -312,9 +312,9 @@
         <td>{{ r.kind }}</td>
         <td>{{ r.action }}</td>
         <td>{{ r.detail }}</td>
+        <td>{{ r.client_name or '' }}</td>
         <td>{{ r.comment or '' }}</td>
         <td>{{ 'CLI' if r.source == 'cli' else 'webui' }}</td>
-        <td>{{ 'yes' if r.enabled else 'no' }}</td>
         <td><span class="{{ 'saved-yes' if r.persisted else 'saved-no' }}">{{ 'Saved' if r.persisted else 'Unsaved' }}</span></td>
         <td>
           {% if r.kind == 'client_block' %}

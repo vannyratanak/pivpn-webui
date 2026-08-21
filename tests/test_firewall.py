@@ -17,6 +17,7 @@ from app.firewall import (
     add_input_rule,
     describe_rule,
     import_rules,
+    rule_client_name,
 )
 
 
@@ -379,3 +380,39 @@ def test_import_rules_raw_input_line_no_longer_crashes(monkeypatch):
     )
     assert errors == []
     assert added == 1
+
+
+# --- rule_client_name: the Active Rules table's dedicated Client column,
+# decoupled from Details' inline "name (ip)" text so it's its own
+# sortable/scannable field regardless of rule kind.
+
+def test_rule_client_name_client_block_uses_stored_name_no_lookup():
+    # client_block already carries client_name directly — no client_names
+    # dict passed at all, confirming it's never even consulted here.
+    rule = {"kind": "client_block", "client_name": "nurak", "client_ip": "10.202.226.21"}
+    assert rule_client_name(rule) == "nurak"
+
+
+def test_rule_client_name_forward_matches_src():
+    rule = {"kind": "forward", "src": "10.202.226.4", "dst": "192.168.100.0/24"}
+    assert rule_client_name(rule, {"10.202.226.4": "macbook-phanne"}) == "macbook-phanne"
+
+
+def test_rule_client_name_forward_matches_dst_when_src_unmatched():
+    rule = {"kind": "forward", "src": "192.168.100.0/24", "dst": "10.202.226.4"}
+    assert rule_client_name(rule, {"10.202.226.4": "macbook-phanne"}) == "macbook-phanne"
+
+
+def test_rule_client_name_portforward_uses_target_ip():
+    rule = {"kind": "portforward", "target_ip": "10.202.226.4", "target_port": "80"}
+    assert rule_client_name(rule, {"10.202.226.4": "macbook-phanne"}) == "macbook-phanne"
+
+
+def test_rule_client_name_no_match_returns_empty_string():
+    rule = {"kind": "forward", "src": "203.0.113.0/24", "dst": None}
+    assert rule_client_name(rule, {"10.202.226.4": "macbook-phanne"}) == ""
+
+
+def test_rule_client_name_no_client_names_dict_returns_empty_string():
+    rule = {"kind": "input", "src": "10.202.226.4"}
+    assert rule_client_name(rule) == ""

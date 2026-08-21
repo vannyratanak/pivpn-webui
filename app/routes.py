@@ -230,6 +230,7 @@ def firewall_rules():
     for r in rules:
         r["persisted"] = str(r["id"]) in persisted_ids
         r["detail"] = firewall.describe_rule(r, ip_to_name)
+        r["client_name"] = firewall.rule_client_name(r, ip_to_name)
     has_unsaved = any(not r["persisted"] for r in rules)
 
     try:
