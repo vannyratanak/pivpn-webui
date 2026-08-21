@@ -640,10 +640,30 @@ def delete_rule(rule_id: int):
 
 def sync_all():
     """Reconcile iptables with the DB — safe to call repeatedly (e.g. on
-    every app start, or after a manual iptables flush)."""
+    every app start, or after a manual iptables flush).
+
+    Rules whose kind participates in position-ordering (see
+    _CHAIN_FOR_KIND) are reconciled a whole chain at a time via
+    _rebuild_chain, so they come back in the right relative order — a
+    plain per-rule delete-then-`-A` re-add (what this used to do) can only
+    ever put each rule last as it's processed, which silently broke a
+    lower-position ACCEPT that sat before a higher-position catch-all DROP
+    every time the app restarted. Anything outside that system (currently
+    just client_block, which always -I's to the front on its own) still
+    gets applied one rule at a time, same as before."""
+    touched_chains: set[tuple[str, str | None]] = set()
     for rule in db.list_rules(enabled_only=True):
+        chains = _chains_for(rule)
+        if chains:
+            touched_chains.update(chains)
+        else:
+            try:
+                _apply_idempotent(rule)
+            except PrivilegedCommandError:
+                pass
+    for chain, table in touched_chains:
         try:
-            _apply_idempotent(rule)
+            _rebuild_chain(chain, table)
         except PrivilegedCommandError:
             pass
 
