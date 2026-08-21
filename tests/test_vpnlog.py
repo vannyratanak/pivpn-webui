@@ -1,3 +1,6 @@
+import subprocess
+
+import config
 from app import vpnlog
 from app.vpnlog import (
     CONNECT_RE,
@@ -5,6 +8,7 @@ from app.vpnlog import (
     _format_duration,
     _split_journal_line,
     list_client_sessions,
+    resolve_real_address,
 )
 
 # Real lines captured live from a production install (macbook-phanne
@@ -127,3 +131,69 @@ def test_multiple_ongoing_still_sorted_by_recency_among_themselves(monkeypatch):
     sessions = list_client_sessions()
     assert [s["client"] for s in sessions] == ["late-riser", "early-bird"]
     assert all(s["ongoing"] for s in sessions)
+
+
+# --- resolve_real_address: the relay real-IP lookup. Every branch here
+# must fail closed to "show the fallback address" (return None), never
+# raise — a disabled/unreachable relay should never break the Logs page.
+
+def _fake_run(returncode=0, stdout=""):
+    def run(argv, capture_output, text, timeout):
+        return subprocess.CompletedProcess(args=argv, returncode=returncode, stdout=stdout, stderr="")
+    return run
+
+
+def test_resolve_no_relay_configured_returns_none(monkeypatch):
+    monkeypatch.setattr(config, "RELAY_HOST", None)
+    monkeypatch.setattr(config, "RELAY_TUNNEL_IP", None)
+    assert resolve_real_address("10.66.66.1:36530") is None
+
+
+def test_resolve_address_not_from_relay_returns_none(monkeypatch):
+    monkeypatch.setattr(config, "RELAY_HOST", "157.245.207.122")
+    monkeypatch.setattr(config, "RELAY_TUNNEL_IP", "10.66.66.1")
+    # a normal, direct (non-relayed) client address — nothing to resolve
+    assert resolve_real_address("10.202.226.4:5000") is None
+
+
+def test_resolve_malformed_address_returns_none(monkeypatch):
+    monkeypatch.setattr(config, "RELAY_HOST", "157.245.207.122")
+    monkeypatch.setattr(config, "RELAY_TUNNEL_IP", "10.66.66.1")
+    assert resolve_real_address("not-an-address") is None
+
+
+def test_resolve_success(monkeypatch):
+    monkeypatch.setattr(config, "RELAY_HOST", "157.245.207.122")
+    monkeypatch.setattr(config, "RELAY_TUNNEL_IP", "10.66.66.1")
+    monkeypatch.setattr(subprocess, "run", _fake_run(returncode=0, stdout="27.109.114.181:36530\n"))
+    assert resolve_real_address("10.66.66.1:36530") == "27.109.114.181:36530"
+
+
+def test_resolve_lookup_script_not_found_returns_none(monkeypatch):
+    # e.g. the connection already ended and conntrack forgot it
+    monkeypatch.setattr(config, "RELAY_HOST", "157.245.207.122")
+    monkeypatch.setattr(config, "RELAY_TUNNEL_IP", "10.66.66.1")
+    monkeypatch.setattr(subprocess, "run", _fake_run(returncode=1, stdout=""))
+    assert resolve_real_address("10.66.66.1:36530") is None
+
+
+def test_resolve_ssh_failure_returns_none_not_raise(monkeypatch):
+    monkeypatch.setattr(config, "RELAY_HOST", "157.245.207.122")
+    monkeypatch.setattr(config, "RELAY_TUNNEL_IP", "10.66.66.1")
+
+    def raise_timeout(*a, **k):
+        raise subprocess.TimeoutExpired(cmd="ssh", timeout=5)
+
+    monkeypatch.setattr(subprocess, "run", raise_timeout)
+    assert resolve_real_address("10.66.66.1:36530") is None
+
+
+def test_resolve_ssh_binary_missing_returns_none_not_raise(monkeypatch):
+    monkeypatch.setattr(config, "RELAY_HOST", "157.245.207.122")
+    monkeypatch.setattr(config, "RELAY_TUNNEL_IP", "10.66.66.1")
+
+    def raise_oserror(*a, **k):
+        raise OSError("ssh not found")
+
+    monkeypatch.setattr(subprocess, "run", raise_oserror)
+    assert resolve_real_address("10.66.66.1:36530") is None

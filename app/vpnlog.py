@@ -13,6 +13,7 @@ parsing may fall back to raw/unparsed rows rather than raise an error —
 this is a "best effort" view, not something else depends on it.
 """
 import re
+import subprocess
 from datetime import datetime
 
 import config
@@ -104,6 +105,41 @@ def _format_duration(start: str, end: str) -> str | None:
     return f"{secs}s"
 
 
+def resolve_real_address(address: str) -> str | None:
+    """If a real VPN server relays traffic through another box (see
+    RELAY_* in config.py), every session's logged address is that relay's
+    own tunnel-facing IP, not the client's actual internet address — the
+    relay has to relabel it that way for replies to route back correctly.
+    The relay's own connection-tracking table still remembers the real
+    mapping for as long as the connection is active; this asks it.
+
+    Returns None (never raises) whenever there's nothing useful to show:
+    no relay configured at all, this particular address isn't from the
+    relay, the SSH call itself fails, or the connection has since ended
+    (conntrack forgets it the moment a client disconnects) — a disabled
+    or temporarily-unreachable relay should never break the Logs page,
+    only silently fall back to showing the relabeled address as before."""
+    if not config.RELAY_HOST or not config.RELAY_TUNNEL_IP:
+        return None
+    ip, _, port = address.rpartition(":")
+    if ip != config.RELAY_TUNNEL_IP or not port.isdigit():
+        return None
+    try:
+        result = subprocess.run(
+            [
+                "ssh", "-o", "ConnectTimeout=3", "-o", "BatchMode=yes",
+                "-o", "StrictHostKeyChecking=accept-new",
+                f"{config.RELAY_SSH_USER}@{config.RELAY_HOST}",
+                config.RELAY_LOOKUP_SCRIPT, port,
+            ],
+            capture_output=True, text=True, timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    out = result.stdout.strip()
+    return out if result.returncode == 0 and out else None
+
+
 def list_client_sessions(limit: int = 300) -> list[dict]:
     """Per-client login sessions — each a paired connect+disconnect (or
     still-open connect with no disconnect yet), most recent first. Answers
@@ -145,7 +181,16 @@ def list_client_sessions(limit: int = 300) -> list[dict]:
     # within both the ongoing and ended groups.
     sessions.sort(key=lambda s: s["start"] or "", reverse=True)
     sessions.sort(key=lambda s: not s["ongoing"])
-    return sessions[:limit]
+    sessions = sessions[:limit]
+
+    # Only bother resolving still-open sessions — a relay's conntrack
+    # entry disappears the moment a client disconnects, so a lookup for
+    # anything already-ended would just fail anyway. Keeps this to at most
+    # a handful of SSH calls per page load instead of one per row shown.
+    for s in sessions:
+        if s["ongoing"]:
+            s["real_address"] = resolve_real_address(s["address"])
+    return sessions
 
 
 def list_webui_log(limit: int = 300) -> list[str]:

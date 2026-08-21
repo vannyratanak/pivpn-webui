@@ -87,7 +87,14 @@
           {% endif %}
         </td>
         <td>{{ s.duration or '—' }}</td>
-        <td>{{ s.address or '—' }}</td>
+        <td>
+          {% if s.real_address %}
+            {{ s.real_address }}
+            <span class="cell-note hint-block">via relay ({{ s.address }})</span>
+          {% else %}
+            {{ s.address or '—' }}
+          {% endif %}
+        </td>
       </tr>
       {% endfor %}
     </tbody>

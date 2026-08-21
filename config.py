@@ -31,6 +31,16 @@ LOG_HELPER = os.environ.get("LOG_HELPER", "/usr/local/sbin/pivpn-webui-log-helpe
 ROUTES_HELPER = os.environ.get("ROUTES_HELPER", "/usr/local/sbin/pivpn-webui-routes-helper.sh")
 CLIENT_SCRIPT_HELPER = os.environ.get("CLIENT_SCRIPT_HELPER", "/usr/local/sbin/pivpn-webui-client-script-helper.sh")
 
+# Optional — only meaningful for a server whose real VPN traffic gets
+# relayed through another box (see docs/relay setup). All four are unset
+# by default, and resolve_real_address() treats that as "no relay, don't
+# even try" rather than an error — a plain install with no relay involved
+# should never attempt an SSH call it has no way to succeed at.
+RELAY_HOST = os.environ.get("RELAY_HOST")
+RELAY_SSH_USER = os.environ.get("RELAY_SSH_USER", "root")
+RELAY_TUNNEL_IP = os.environ.get("RELAY_TUNNEL_IP")
+RELAY_LOOKUP_SCRIPT = os.environ.get("RELAY_LOOKUP_SCRIPT", "/usr/local/sbin/vpn-real-ip.sh")
+
 IPTABLES_BIN = os.environ.get("IPTABLES_BIN", "/usr/sbin/iptables")
 NETFILTER_PERSISTENT_BIN = os.environ.get("NETFILTER_PERSISTENT_BIN", "/usr/sbin/netfilter-persistent")
 CAT_BIN = os.environ.get("CAT_BIN", "/bin/cat")
