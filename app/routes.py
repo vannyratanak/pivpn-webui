@@ -205,7 +205,7 @@ def block_client(name):
         _audit(action, name, "error", "no static IP assigned")
         return redirect(url_for("main.clients"))
     try:
-        firewall.set_client_block(name, ip, blocked)
+        firewall.set_client_block(name, ip, blocked, admin_ip=_client_ip())
         flash(f"Client '{name}' {'blocked' if blocked else 'unblocked'}.", "success")
         _audit(action, name)
     except firewall.FirewallError as exc:

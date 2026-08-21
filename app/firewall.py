@@ -27,12 +27,15 @@ _DISCOVERY_TARGETS = [
     ("POSTROUTING", "nat", "postrouting"),  # -> masquerade or snat, by -j target
 ]
 
-# Which live iptables chain(s) each kind's _apply() touches — portforward is
-# the only one that spans two (its DNAT half in PREROUTING/nat, its accept
-# half in FORWARD). client_block is deliberately absent: it always -I's to
-# the very front of FORWARD regardless of anything else there (see
-# _client_block_argv), so it sits outside the position-ordering system
-# entirely rather than being reorderable relative to other FORWARD rules.
+# Which live iptables chain(s) each kind's _apply() touches — portforward
+# spans two (its DNAT half in PREROUTING/nat, its accept half in FORWARD),
+# and so does client_block (a FORWARD half stopping the client's own
+# outbound traffic, an INPUT half stopping the client from reaching this
+# box at all — see _client_block_argv / _client_block_input_argv).
+# client_block is deliberately absent from this map: both its halves
+# always -I to the very front of their chain regardless of anything else
+# there, so it sits outside the position-ordering system entirely rather
+# than being reorderable relative to other rules.
 _CHAIN_FOR_KIND = {
     "input": [("INPUT", None)],
     "forward": [("FORWARD", None)],
@@ -169,9 +172,25 @@ def _snat_argv(rule, delete=False):
 
 
 def _client_block_argv(rule, delete=False):
+    """Stops traffic the client sends *through* this box to somewhere else
+    (LAN, internet) — it does not stop the client from reaching the box
+    itself, since that's the INPUT chain, a separate rule entirely (see
+    _client_block_input_argv)."""
     argv = [config.IPTABLES_BIN, "-D" if delete else "-I", "FORWARD"]
     argv += ["-s", rule["client_ip"]]
     argv += ["-m", "comment", "--comment", f"pivpn-webui:block:{rule['client_name']}"]
+    argv += ["-j", "DROP"]
+    return argv
+
+
+def _client_block_input_argv(rule, delete=False):
+    """Companion to _client_block_argv: blocks the client from reaching
+    this server itself (its web UI, SSH, anything) — without this, a
+    "blocked" client can still ping/connect to the box's own address,
+    since FORWARD only ever sees traffic passing *through* it."""
+    argv = [config.IPTABLES_BIN, "-D" if delete else "-I", "INPUT"]
+    argv += ["-s", rule["client_ip"]]
+    argv += ["-m", "comment", "--comment", f"pivpn-webui:block-in:{rule['client_name']}"]
     argv += ["-j", "DROP"]
     return argv
 
@@ -190,6 +209,7 @@ def _apply(rule):
         run_root(_snat_argv(rule))
     elif rule["kind"] == "client_block":
         run_root(_client_block_argv(rule))
+        run_root(_client_block_input_argv(rule))
 
 
 def _unapply(rule):
@@ -206,6 +226,7 @@ def _unapply(rule):
         run_root(_snat_argv(rule, delete=True))
     elif rule["kind"] == "client_block":
         run_root(_client_block_argv(rule, delete=True))
+        run_root(_client_block_input_argv(rule, delete=True))
 
 
 def _apply_idempotent(rule):
@@ -317,6 +338,24 @@ def _check_self_lockout(client_ip: str | None, simulated_input_rules: list[dict]
     if not _would_allow_client(simulated_input_rules, client_ip):
         raise FirewallError(
             f"This change would block your own current connection ({client_ip}) "
+            "from reaching this page — refusing to apply it."
+        )
+
+
+def _check_client_block_self_lockout(admin_ip: str | None, blocked_client_ip: str):
+    """Raise FirewallError if blocking blocked_client_ip would cut off the
+    request that's asking for it. Unlike _check_self_lockout's position-
+    ordered simulation, a client-block's INPUT half is always a blanket
+    -I DROP for every port, always inserted at the very front of the chain
+    — so there's nothing to simulate: if it's the same address, blocking
+    it will unconditionally cut off this request, full stop. admin_ip is
+    None when there's no real request to protect (tests, or an internal
+    caller) — skip the check in that case."""
+    if admin_ip is None:
+        return
+    if admin_ip == blocked_client_ip:
+        raise FirewallError(
+            f"This would block your own current connection ({admin_ip}) "
             "from reaching this page — refusing to apply it."
         )
 
@@ -626,11 +665,12 @@ def import_rules(text: str, client_ips: dict[str, str] | None = None) -> tuple[i
     return added, errors
 
 
-def set_client_block(client_name: str, client_ip: str, blocked: bool):
+def set_client_block(client_name: str, client_ip: str, blocked: bool, admin_ip: str | None = None):
     existing = db.get_client_block(client_name)
     if blocked:
         if existing:
             return existing["id"]
+        _check_client_block_self_lockout(admin_ip, client_ip)
         rule = {
             "kind": "client_block",
             "action": "DROP",
@@ -968,7 +1008,10 @@ def describe_rule(rule: dict, client_names: dict[str, str] | None = None) -> str
         return f"Translate {src} → {rule['snat_ip']}"
 
     if kind == "client_block":
-        return f"Block all traffic from {rule['client_name']} ({rule['client_ip']}) → 0.0.0.0/0"
+        return (
+            f"Block all traffic from {rule['client_name']} ({rule['client_ip']}) "
+            "→ 0.0.0.0/0, and to this server itself"
+        )
 
     return ""
 
@@ -1067,11 +1110,12 @@ def discover_cli_rules() -> int:
     tracked if that id still exists in the current DB; a tag left over from
     a database that no longer has that row is re-adopted like any other CLI
     rule rather than silently skipped, so a DB reset never leaves live rules
-    invisible to the UI. 'pivpn-webui:block:<name>' (client-block rules,
-    tracked by name via db.get_client_block rather than a numeric id) is
-    always treated as already ours — checking it against known_ids would
-    never match and would re-adopt the same rule as a duplicate on every
-    single page load.
+    invisible to the UI. 'pivpn-webui:block:<name>' / 'pivpn-webui:block-in:
+    <name>' (client-block rules' FORWARD and INPUT halves, tracked by name
+    via db.get_client_block rather than a numeric id) are always treated
+    as already ours — checking either against known_ids would never match
+    and would re-adopt the same rule as a duplicate on every single page
+    load.
 
     Adopting a rule doesn't re-add it immediately — its DB row gets a
     `position` interpolated from where it actually sits among the chain's
@@ -1106,8 +1150,9 @@ def discover_cli_rules() -> int:
         for idx, tokens in enumerate(specs):
             parsed = parsed_list[idx]
             comment = parsed.get("comment", "")
-            if comment.startswith("pivpn-webui:block:"):
-                continue  # client-block rule — tracked by client name (db.get_client_block), not a numeric id
+            if comment.startswith("pivpn-webui:block"):
+                continue  # client-block rule (FORWARD "block:" or INPUT "block-in:" half) —
+                          # tracked by client name (db.get_client_block), not a numeric id
             if comment.startswith("pivpn-webui:"):
                 if comment[len("pivpn-webui:"):] in known_ids:
                     continue  # already ours, and still tracked

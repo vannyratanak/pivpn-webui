@@ -1,9 +1,17 @@
 import shlex
 
+import pytest
+
 from app.firewall import (
+    FirewallError,
+    _apply,
+    _check_client_block_self_lockout,
+    _client_block_argv,
+    _client_block_input_argv,
     _parse_rule_spec,
     _positions_for_new_specs,
     _rule_from_parsed,
+    _unapply,
     _would_allow_client,
     describe_rule,
 )
@@ -50,7 +58,10 @@ def test_masquerade_with_interface(monkeypatch):
 
 def test_client_block():
     rule = {"kind": "client_block", "client_name": "nurak", "client_ip": "10.202.226.21"}
-    assert describe_rule(rule) == "Block all traffic from nurak (10.202.226.21) → 0.0.0.0/0"
+    assert describe_rule(rule) == (
+        "Block all traffic from nurak (10.202.226.21) → 0.0.0.0/0, "
+        "and to this server itself"
+    )
 
 
 # --- the reverse direction: raw iptables -S output back into a rule dict.
@@ -231,3 +242,70 @@ def test_allow_client_ipv6_client_vs_ipv4_only_rule_falls_through():
 
 def test_allow_client_unparseable_ip_fails_open():
     assert _would_allow_client([_rule(1, "DROP")], "not-an-ip") is True
+
+
+# --- client_block: FORWARD half (stop the client reaching past this box)
+# and INPUT half (stop the client reaching this box itself) are two
+# independent rules, applied/removed together. See _apply/_unapply and
+# discover_cli_rules' "pivpn-webui:block"-prefix skip (both "block:" and
+# "block-in:" tags), and _check_client_block_self_lockout for the guard
+# against blocking your own current connection's IP.
+
+_BLOCK_RULE = {"client_name": "nurak", "client_ip": "10.202.226.21"}
+
+
+def test_client_block_forward_argv_shape():
+    argv = _client_block_argv(_BLOCK_RULE)
+    assert argv[1:] == [
+        "-I", "FORWARD", "-s", "10.202.226.21",
+        "-m", "comment", "--comment", "pivpn-webui:block:nurak",
+        "-j", "DROP",
+    ]
+
+
+def test_client_block_input_argv_shape():
+    argv = _client_block_input_argv(_BLOCK_RULE)
+    assert argv[1:] == [
+        "-I", "INPUT", "-s", "10.202.226.21",
+        "-m", "comment", "--comment", "pivpn-webui:block-in:nurak",
+        "-j", "DROP",
+    ]
+
+
+def test_client_block_input_argv_delete_shape():
+    argv = _client_block_input_argv(_BLOCK_RULE, delete=True)
+    assert argv[1] == "-D"
+    assert argv[2] == "INPUT"
+
+
+def test_apply_client_block_touches_both_chains(monkeypatch):
+    calls = []
+    monkeypatch.setattr("app.firewall.run_root", lambda argv: calls.append(argv))
+    _apply({"kind": "client_block", **_BLOCK_RULE})
+    assert len(calls) == 2
+    assert calls[0][1:3] == ["-I", "FORWARD"]
+    assert calls[1][1:3] == ["-I", "INPUT"]
+
+
+def test_unapply_client_block_touches_both_chains(monkeypatch):
+    calls = []
+    monkeypatch.setattr("app.firewall.run_root", lambda argv: calls.append(argv))
+    _unapply({"kind": "client_block", **_BLOCK_RULE})
+    assert len(calls) == 2
+    assert calls[0][1:3] == ["-D", "FORWARD"]
+    assert calls[1][1:3] == ["-D", "INPUT"]
+
+
+def test_client_block_self_lockout_same_ip_raises():
+    with pytest.raises(FirewallError):
+        _check_client_block_self_lockout("10.202.226.21", "10.202.226.21")
+
+
+def test_client_block_self_lockout_different_ip_ok():
+    _check_client_block_self_lockout("203.0.113.9", "10.202.226.21")  # no raise
+
+
+def test_client_block_self_lockout_no_admin_ip_skips_check():
+    # None means "no real request to protect" (internal caller/tests) —
+    # never raise in that case, same convention as _check_self_lockout.
+    _check_client_block_self_lockout(None, "10.202.226.21")  # no raise

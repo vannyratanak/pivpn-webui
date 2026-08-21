@@ -23,12 +23,16 @@ live on the server) for keeping a running install in sync with this repo.
     new file.
   - *Remove* → `pivpn revoke -y <name>` (non-interactive; PiVPN's newer
     subcommand is `revoke`, not `remove` — older docs/forks may differ).
-  - *Block/Unblock* → inserts/removes a `DROP` rule in the `FORWARD` chain
-    matching that client's VPN IP. PiVPN's own `add`/`revoke` scripts already
-    pin and clean up a static per-client IP via client-config-dir (ccd) —
-    this app only ever *reads* that (`get_client_ip`), it doesn't allocate
-    IPs itself. A client only shows as blockable once it has a ccd entry,
-    which PiVPN assigns at creation time.
+  - *Block/Unblock* → inserts/removes a `DROP` rule matching that client's
+    VPN IP in **both** `FORWARD` (stops it reaching anything past this
+    server — LAN, internet) **and** `INPUT` (stops it reaching this server
+    itself). Blocking is refused if the client's IP is the same address
+    the request is coming from, to avoid cutting off your own access.
+    PiVPN's own `add`/`revoke` scripts already pin and clean up a static
+    per-client IP via client-config-dir (ccd) — this app only ever *reads*
+    that (`get_client_ip`), it doesn't allocate IPs itself. A client only
+    shows as blockable once it has a ccd entry, which PiVPN assigns at
+    creation time.
 
 - **Firewall** page manages two independent things, both stored in a local
   SQLite DB so they survive reapplication after reboot or an `iptables -F`:
