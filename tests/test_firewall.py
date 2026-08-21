@@ -1,6 +1,12 @@
 import shlex
 
-from app.firewall import _parse_rule_spec, _positions_for_new_specs, _rule_from_parsed, describe_rule
+from app.firewall import (
+    _parse_rule_spec,
+    _positions_for_new_specs,
+    _rule_from_parsed,
+    _would_allow_client,
+    describe_rule,
+)
 
 
 def test_input_accept(monkeypatch):
@@ -146,3 +152,60 @@ def test_positions_no_anchors_at_all_stay_relatively_ordered():
     anchors = [(False, None), (False, None), (False, None)]
     result = _positions_for_new_specs(anchors)
     assert result[0] < result[1] < result[2]
+
+
+# --- _would_allow_client: the self-lockout guard. Simulates the same
+# first-match-wins evaluation iptables itself does for the INPUT chain,
+# so a reorder/disable/delete can be refused *before* it's applied if it
+# would cut off the very connection making the request — the class of bug
+# that caused several real outages this session.
+
+def _rule(id, action, src=None, position=0.0, protocol="tcp", dport="443"):
+    return {"id": id, "action": action, "src": src, "position": position,
+            "protocol": protocol, "dport": dport}
+
+
+def test_allow_client_matches_accept_before_drop():
+    rules = [
+        _rule(1, "ACCEPT", "10.202.226.0/24", position=1.0),
+        _rule(2, "DROP", position=2.0),
+    ]
+    assert _would_allow_client(rules, "10.202.226.5") is True
+
+
+def test_allow_client_matches_drop_when_no_earlier_accept():
+    rules = [
+        _rule(1, "ACCEPT", "10.202.226.0/24", position=1.0),
+        _rule(2, "DROP", position=2.0),
+    ]
+    assert _would_allow_client(rules, "203.0.113.9") is False
+
+
+def test_allow_client_order_matters_drop_before_accept_blocks_it():
+    # the exact shape of today's real bug: same two rules, but DROP now
+    # sorts first — the matching ACCEPT further down never gets reached.
+    rules = [
+        _rule(2, "DROP", position=1.0),
+        _rule(1, "ACCEPT", "10.202.226.0/24", position=2.0),
+    ]
+    assert _would_allow_client(rules, "10.202.226.5") is False
+
+
+def test_allow_client_no_match_falls_through_to_default_accept():
+    rules = [_rule(1, "ACCEPT", "10.202.226.0/24", position=1.0)]
+    assert _would_allow_client(rules, "203.0.113.9") is True
+
+
+def test_allow_client_ignores_rules_for_other_ports():
+    rules = [_rule(1, "DROP", dport="22", position=1.0)]
+    assert _would_allow_client(rules, "203.0.113.9") is True
+
+
+def test_allow_client_ignores_rules_for_other_protocols():
+    rules = [_rule(1, "DROP", protocol="udp", position=1.0)]
+    assert _would_allow_client(rules, "203.0.113.9") is True
+
+
+def test_allow_client_no_src_matches_anywhere():
+    rules = [_rule(1, "DROP", src=None, position=1.0)]
+    assert _would_allow_client(rules, "203.0.113.9") is False

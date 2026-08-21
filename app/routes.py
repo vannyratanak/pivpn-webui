@@ -13,6 +13,16 @@ def _audit(action, target="", result="ok", detail=""):
     db.add_audit(actor, action, target, result, detail)
 
 
+def _client_ip():
+    """The real caller's address, not gunicorn's view of it — gunicorn
+    only ever sees nginx's own loopback connection (no ProxyFix is
+    configured), so request.remote_addr alone would always read
+    127.0.0.1. nginx's vhost already sets X-Real-IP to the actual source;
+    this is what the firewall module's self-lockout check needs, since
+    that's the address iptables itself will actually match against."""
+    return request.headers.get("X-Real-IP", request.remote_addr)
+
+
 def _regenerate_script_for_ip(ip, client_ips=None):
     """Best-effort: refresh the CLI-visible reference script for whichever
     client owns `ip`, if any. Never lets a helper/permission problem here
@@ -372,7 +382,7 @@ def add_portforward():
 def toggle_rule(rule_id):
     try:
         rule = db.get_rule(rule_id)
-        firewall.toggle_rule(rule_id)
+        firewall.toggle_rule(rule_id, client_ip=_client_ip())
         _audit("firewall_rule_toggle", f"rule#{rule_id}")
         if rule and rule["kind"] == "forward":
             _regenerate_script_for_ip(rule["src"])
@@ -395,7 +405,7 @@ def reorder_rule(rule_id):
     try:
         target_id = int(body.get("target_id"))
         place = body.get("place")
-        firewall.reorder_rule(rule_id, target_id, place)
+        firewall.reorder_rule(rule_id, target_id, place, client_ip=_client_ip())
         _audit("firewall_rule_reorder", f"rule#{rule_id} {place} rule#{target_id}")
         return jsonify(ok=True)
     except (TypeError, ValueError):
@@ -409,11 +419,15 @@ def reorder_rule(rule_id):
 @login_required
 def delete_rule(rule_id):
     rule = db.get_rule(rule_id)
-    firewall.delete_rule(rule_id)
-    flash("Rule deleted.", "success")
-    _audit("firewall_rule_delete", f"rule#{rule_id}")
-    if rule and rule["kind"] == "forward":
-        _regenerate_script_for_ip(rule["src"])
+    try:
+        firewall.delete_rule(rule_id, client_ip=_client_ip())
+        flash("Rule deleted.", "success")
+        _audit("firewall_rule_delete", f"rule#{rule_id}")
+        if rule and rule["kind"] == "forward":
+            _regenerate_script_for_ip(rule["src"])
+    except firewall.FirewallError as exc:
+        flash(str(exc), "error")
+        _audit("firewall_rule_delete", f"rule#{rule_id}", "error", str(exc))
     return redirect(url_for("main.firewall_rules"))
 
 
@@ -421,9 +435,11 @@ def delete_rule(rule_id):
 @login_required
 def bulk_delete_rules():
     ids = request.form.getlist("rule_ids")
+    client_ip = _client_ip()
     client_ips = pivpn_ctl.list_client_ips()
     affected_ips = set()
     deleted = 0
+    skipped = []
     for id_str in ids:
         try:
             rule_id = int(id_str)
@@ -432,7 +448,11 @@ def bulk_delete_rules():
         rule = db.get_rule(rule_id)
         if not rule:
             continue
-        firewall.delete_rule(rule_id)
+        try:
+            firewall.delete_rule(rule_id, client_ip=client_ip)
+        except firewall.FirewallError as exc:
+            skipped.append(f"rule#{rule_id}: {exc}")
+            continue
         deleted += 1
         if rule["kind"] == "forward" and rule.get("src"):
             affected_ips.add(rule["src"])
@@ -440,9 +460,11 @@ def bulk_delete_rules():
         _regenerate_script_for_ip(ip, client_ips=client_ips)
     if deleted:
         flash(f"Deleted {deleted} rule(s).", "success")
-    else:
+    if skipped:
+        flash("Skipped (would block your own access): " + "; ".join(skipped), "error")
+    elif not deleted:
         flash("Nothing selected to delete.", "error")
-    _audit("firewall_bulk_delete", f"{deleted} rule(s)")
+    _audit("firewall_bulk_delete", f"{deleted} rule(s), {len(skipped)} skipped")
     return redirect(url_for("main.firewall_rules"))
 
 
@@ -450,9 +472,11 @@ def bulk_delete_rules():
 @login_required
 def bulk_disable_rules():
     ids = request.form.getlist("rule_ids")
+    client_ip = _client_ip()
     client_ips = pivpn_ctl.list_client_ips()
     affected_ips = set()
     disabled = 0
+    skipped = []
     for id_str in ids:
         try:
             rule_id = int(id_str)
@@ -461,7 +485,11 @@ def bulk_disable_rules():
         rule = db.get_rule(rule_id)
         if not rule or not rule["enabled"]:
             continue
-        firewall.disable_rule(rule_id)
+        try:
+            firewall.disable_rule(rule_id, client_ip=client_ip)
+        except firewall.FirewallError as exc:
+            skipped.append(f"rule#{rule_id}: {exc}")
+            continue
         disabled += 1
         if rule["kind"] == "forward" and rule.get("src"):
             affected_ips.add(rule["src"])
@@ -469,9 +497,11 @@ def bulk_disable_rules():
         _regenerate_script_for_ip(ip, client_ips=client_ips)
     if disabled:
         flash(f"Disabled {disabled} rule(s).", "success")
-    else:
+    if skipped:
+        flash("Skipped (would block your own access): " + "; ".join(skipped), "error")
+    elif not disabled:
         flash("Nothing selected to disable.", "error")
-    _audit("firewall_bulk_disable", f"{disabled} rule(s)")
+    _audit("firewall_bulk_disable", f"{disabled} rule(s), {len(skipped)} skipped")
     return redirect(url_for("main.firewall_rules"))
 
 

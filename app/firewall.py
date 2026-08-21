@@ -273,7 +273,55 @@ def _rebuild_chain(chain: str, table: str | None):
         _apply_to_chain(rule, chain, table)
 
 
-def reorder_rule(rule_id: int, target_id: int, place: str):
+def _input_rule_matches(rule: dict, client_ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """Would this INPUT-kind rule be the one iptables actually matches for
+    a request from client_ip to the web UI's port (443)? Mirrors iptables'
+    own matching: protocol/port must apply to 443 (or be unrestricted), and
+    src (or no src, i.e. 0.0.0.0/0) must contain the address."""
+    if rule.get("dport") not in (None, "", "443"):
+        return False
+    if rule.get("protocol") not in (None, "all", "tcp"):
+        return False
+    src = rule.get("src")
+    if not src:
+        return True
+    try:
+        return client_ip in ipaddress.ip_network(src, strict=False)
+    except ValueError:
+        return False
+
+
+def _would_allow_client(input_rules: list[dict], client_ip_str: str) -> bool:
+    """Walk a (position-ordered) set of enabled INPUT-kind rules the same
+    way iptables does — first match wins — and report whether client_ip
+    would reach port 443. No match at all falls through to INPUT's own
+    default policy, which is ACCEPT."""
+    try:
+        client_ip = ipaddress.ip_address(client_ip_str)
+    except ValueError:
+        return True  # can't parse it — don't block on our own bad data
+    for rule in sorted(input_rules, key=lambda r: (r["position"], r["id"])):
+        if _input_rule_matches(rule, client_ip):
+            return rule["action"] == "ACCEPT"
+    return True
+
+
+def _check_self_lockout(client_ip: str | None, simulated_input_rules: list[dict]):
+    """Raise FirewallError if applying a hypothetical INPUT rule set would
+    block client_ip's own access to the web UI. client_ip is None when
+    there's no real request to protect (discover_cli_rules, sync_all,
+    tests) — skip the check entirely in that case, there's nothing to
+    guard."""
+    if client_ip is None:
+        return
+    if not _would_allow_client(simulated_input_rules, client_ip):
+        raise FirewallError(
+            f"This change would block your own current connection ({client_ip}) "
+            "from reaching this page — refusing to apply it."
+        )
+
+
+def reorder_rule(rule_id: int, target_id: int, place: str, client_ip: str | None = None):
     """Place `rule_id` immediately before/after `target_id` among rules that
     share a chain with it — what a drag-and-drop drop (rather than a single
     up/down step, see move_rule) needs: the drop target can be any number
@@ -312,6 +360,13 @@ def reorder_rule(rule_id: int, target_id: int, place: str):
         new_pos = left["position"] + 1
     else:
         new_pos = (left["position"] + right["position"]) / 2
+
+    if rule["kind"] == "input":
+        simulated = [
+            {**r, "position": new_pos} if r["id"] == rule_id else r
+            for r in db.list_rules(enabled_only=True) if r["kind"] == "input"
+        ]
+        _check_self_lockout(client_ip, simulated)
 
     db.set_positions({rule_id: new_pos})
     for chain, table in my_chains:
@@ -595,7 +650,14 @@ def set_client_block(client_name: str, client_ip: str, blocked: bool):
     return None
 
 
-def toggle_rule(rule_id: int):
+def _input_rules_without(rule_id: int) -> list[dict]:
+    """Currently-enabled INPUT-kind rules, minus one — the simulated state
+    for a disable/delete self-lockout check (both remove a rule from what's
+    actually enforced, just via a different DB field)."""
+    return [r for r in db.list_rules(enabled_only=True) if r["kind"] == "input" and r["id"] != rule_id]
+
+
+def toggle_rule(rule_id: int, client_ip: str | None = None):
     rule = db.get_rule(rule_id)
     if not rule:
         raise FirewallError("Rule not found.")
@@ -611,25 +673,31 @@ def toggle_rule(rule_id: int):
         else:
             _apply(rule)  # e.g. client_block — outside the position-ordering system, see _CHAIN_FOR_KIND
     else:
+        if rule["kind"] == "input":
+            _check_self_lockout(client_ip, _input_rules_without(rule_id))
         _unapply(rule)
         db.set_enabled(rule_id, False)
 
 
-def disable_rule(rule_id: int):
+def disable_rule(rule_id: int, client_ip: str | None = None):
     """Explicitly disable (not toggle) — used by bulk-disable, where some
     selected rules may already be disabled and a toggle would wrongly
     re-enable them."""
     rule = db.get_rule(rule_id)
     if not rule or not rule["enabled"]:
         return
+    if rule["kind"] == "input":
+        _check_self_lockout(client_ip, _input_rules_without(rule_id))
     _unapply(rule)
     db.set_enabled(rule_id, False)
 
 
-def delete_rule(rule_id: int):
+def delete_rule(rule_id: int, client_ip: str | None = None):
     rule = db.get_rule(rule_id)
     if not rule:
         return
+    if rule["kind"] == "input":
+        _check_self_lockout(client_ip, _input_rules_without(rule_id))
     if rule["enabled"]:
         try:
             _unapply(rule)
