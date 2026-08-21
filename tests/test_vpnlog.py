@@ -1,8 +1,10 @@
+from app import vpnlog
 from app.vpnlog import (
     CONNECT_RE,
     DISCONNECT_RE,
     _format_duration,
     _split_journal_line,
+    list_client_sessions,
 )
 
 # Real lines captured live from a production install (macbook-phanne
@@ -85,3 +87,43 @@ def test_format_duration_unparseable_returns_none():
 
 def test_format_duration_none_start_returns_none():
     assert _format_duration(None, "2026-08-21 12:00:00") is None
+
+
+# --- list_client_sessions: ongoing sessions must sort to the top,
+# regardless of how long ago they started — a client that reconnects
+# often (each reconnect its own short, already-ended session) shouldn't
+# be able to bury someone who's actually connected right now further down
+# the list just by having more recent (but finished) activity.
+
+def _connect_line(ts, name, addr):
+    return f"{ts}+0700 vpn ovpn-server[1]: [{name}] Peer Connection Initiated with [AF_INET]{addr}"
+
+
+def _disconnect_line(ts, name, addr):
+    return f"{ts}+0700 vpn ovpn-server[1]: {name}/{addr} SIGTERM[soft,remote-exit] received, client-instance exiting"
+
+
+def test_ongoing_session_sorts_above_more_recent_ended_ones(monkeypatch):
+    lines = [
+        # "old" started much earlier and never disconnected — still ongoing
+        _connect_line("2026-08-21T13:00:00", "old", "10.66.66.1:1"),
+        # "test" connected and disconnected much more recently, but it's over
+        _connect_line("2026-08-21T15:50:00", "test", "10.66.66.1:2"),
+        _disconnect_line("2026-08-21T15:50:10", "test", "10.66.66.1:2"),
+    ]
+    monkeypatch.setattr(vpnlog, "run_root", lambda argv: "\n".join(lines))
+    sessions = list_client_sessions()
+    assert [s["client"] for s in sessions] == ["old", "test"]
+    assert sessions[0]["ongoing"] is True
+    assert sessions[1]["ongoing"] is False
+
+
+def test_multiple_ongoing_still_sorted_by_recency_among_themselves(monkeypatch):
+    lines = [
+        _connect_line("2026-08-21T10:00:00", "early-bird", "10.66.66.1:1"),
+        _connect_line("2026-08-21T14:00:00", "late-riser", "10.66.66.1:2"),
+    ]
+    monkeypatch.setattr(vpnlog, "run_root", lambda argv: "\n".join(lines))
+    sessions = list_client_sessions()
+    assert [s["client"] for s in sessions] == ["late-riser", "early-bird"]
+    assert all(s["ongoing"] for s in sessions)

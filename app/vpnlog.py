@@ -136,7 +136,15 @@ def list_client_sessions(limit: int = 300) -> list[dict]:
             "client": client, "start": pending["start"], "end": None,
             "address": pending["address"], "duration": None, "ongoing": True,
         })
+    # Most-recent-first within each group, then ongoing sessions pulled to
+    # the very top regardless of when they started — otherwise a client
+    # that reconnects often (each reconnect being its own short, already-
+    # ended session) keeps burying anyone who's actually connected right
+    # now further down the list. list.sort() is stable, so this second
+    # pass preserves the recency order the first pass already established
+    # within both the ongoing and ended groups.
     sessions.sort(key=lambda s: s["start"] or "", reverse=True)
+    sessions.sort(key=lambda s: not s["ongoing"])
     return sessions[:limit]
 
 
