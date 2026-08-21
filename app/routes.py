@@ -48,9 +48,9 @@ def login():
         password = request.form.get("password", "")
         if verify_credentials(username, password):
             login_user(AdminUser())
-            db.add_audit(username, "login", detail=f"from {request.remote_addr}")
+            db.add_audit(username, "login", detail=f"from {_client_ip()}")
             return redirect(url_for("main.clients"))
-        db.add_audit(username or "(blank)", "login", result="error", detail=f"bad credentials from {request.remote_addr}")
+        db.add_audit(username or "(blank)", "login", result="error", detail=f"bad credentials from {_client_ip()}")
         flash("Invalid username or password.", "error")
     return render_template("login.html")
 
