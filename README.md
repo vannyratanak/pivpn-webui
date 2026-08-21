@@ -251,6 +251,123 @@ thought than a weekend project gets. Options, easiest first:
 - This app never serves HTTPS itself — anything beyond the SSH-tunnel option
   is sending the login password in plaintext unless you put TLS in front.
 
+## Real client IPs behind a relay (optional)
+
+Only relevant if this server's real OpenVPN traffic is relayed through
+another box — e.g. because this server can only reach the internet on
+TCP/443 and dials out through a public relay that forwards/MASQUERADEs
+real VPN clients in. In that setup, every connection this server's own
+OpenVPN log sees is stamped with the *relay's* tunnel-facing address
+(e.g. `10.66.66.1:<port>`), not the client's real internet address — the
+MASQUERADE rule that lets return traffic route back through the tunnel
+necessarily relabels it that way. **If you're not relaying traffic through
+another box, skip this whole section** — `RELAY_HOST`/`RELAY_TUNNEL_IP`
+default to unset, and `resolve_real_address()` in `app/vpnlog.py` returns
+`None` immediately without ever touching `ssh`, so Client Sessions behaves
+exactly as it always has.
+
+### How it works
+
+The relay's own connection-tracking table (`conntrack`) still remembers
+the real `(client IP, client port)` behind each masqueraded connection,
+for as long as that connection stays open. This server asks for that
+mapping over SSH, using a key that's restricted to running exactly one
+lookup script and nothing else — the relay may be a shared box hosting
+other, unrelated services, so this is deliberately not full root/shell
+access from here.
+
+### One-time setup on the relay
+
+1. Install `conntrack-tools` (`apt install conntrack-tools`) and the
+   lookup script at `/usr/local/sbin/vpn-real-ip.sh` (`chmod 755`):
+
+   ```bash
+   #!/bin/bash
+   set -euo pipefail
+   PORT="${1:?usage: $0 <port-from-openvpn-log>}"
+
+   conntrack -L -p udp --dport 1194 2>/dev/null | awk -v want="dport=$PORT" '
+     {
+       seen = 0
+       for (i = 1; i <= NF; i++) {
+         if ($i ~ /^dport=/) {
+           seen++
+           if (seen == 2 && $i == want) {
+             gsub(/src=/, "", $4)
+             gsub(/sport=/, "", $6)
+             print $4":"$6
+             found = 1
+           }
+         }
+       }
+     }
+     END { if (!found) exit 1 }
+   '
+   ```
+
+   Adjust `--dport 1194` if the relay forwards a different UDP port.
+
+2. Install a forced-command wrapper at
+   `/usr/local/sbin/vpn-real-ip-wrapper.sh` (`chmod 755`) — this is the
+   actual security boundary the restricted key below relies on, not the
+   key itself, so it validates the incoming command tightly rather than
+   trusting `authorized_keys` option-globbing:
+
+   ```bash
+   #!/bin/bash
+   set -euo pipefail
+   if [[ "${SSH_ORIGINAL_COMMAND:-}" =~ ^/usr/local/sbin/vpn-real-ip\.sh\ ([0-9]{1,5})$ ]]; then
+     exec /usr/local/sbin/vpn-real-ip.sh "${BASH_REMATCH[1]}"
+   fi
+   echo "rejected: only vpn-real-ip.sh <port> is permitted" >&2
+   exit 1
+   ```
+
+### One-time setup on this server (the OpenVPN box)
+
+1. Generate a dedicated key — don't reuse the CD deploy key from the
+   section below, this one needs different, narrower permissions:
+   ```bash
+   ssh-keygen -t ed25519 -f ~/.ssh/relay_lookup_key -N '' -C 'thisserver-to-relay-real-ip'
+   ```
+2. On the relay, add the **public** half to `root`'s `authorized_keys`
+   with a forced command pointing at the wrapper above. **The quotes
+   around the `command=` value are required** — an unquoted value is
+   silently rejected by `sshd` with nothing useful in the log at default
+   verbosity (cost real debugging time to track down once already):
+   ```
+   command="/usr/local/sbin/vpn-real-ip-wrapper.sh",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty ssh-ed25519 AAAA... thisserver-to-relay-real-ip
+   ```
+3. `resolve_real_address()` calls plain `ssh user@host script port` with
+   no `-i` flag, so point it at the right key via `~/.ssh/config`, set up
+   as the same user the `pivpn-webui` service runs as (check `User=` in
+   `/etc/systemd/system/pivpn-webui.service`):
+   ```
+   Host <relay's public IP>
+     User root
+     IdentityFile ~/.ssh/relay_lookup_key
+     IdentitiesOnly yes
+     StrictHostKeyChecking accept-new
+   ```
+4. Add to `.env` and restart the service:
+   ```
+   RELAY_HOST=<relay's public IP>
+   RELAY_TUNNEL_IP=<relay's tunnel-facing IP, e.g. 10.66.66.1>
+   RELAY_SSH_USER=root
+   ```
+   (`RELAY_LOOKUP_SCRIPT` only needs setting if the script isn't at the
+   default `/usr/local/sbin/vpn-real-ip.sh`.)
+5. Verify: with a client actually connected, note its port from
+   `sudo cat /var/log/openvpn-status.log`, then from this server run:
+   ```bash
+   ssh root@<relay's public IP> /usr/local/sbin/vpn-real-ip.sh <port>
+   ```
+   It should print `real.ip.address:port`. If it does, the Client
+   Sessions tab will show it too — but only for sessions still ongoing;
+   `conntrack` forgets the mapping the moment a client disconnects, so an
+   already-ended session always falls back to showing the relayed
+   address, same as before this feature existed.
+
 ## CD: deploying code changes to a running server
 
 This repo is public and its `Deploy` workflow runs on a **self-hosted**
