@@ -209,3 +209,25 @@ def test_allow_client_ignores_rules_for_other_protocols():
 def test_allow_client_no_src_matches_anywhere():
     rules = [_rule(1, "DROP", src=None, position=1.0)]
     assert _would_allow_client(rules, "203.0.113.9") is False
+
+
+def test_allow_client_position_tie_broken_by_lower_id():
+    # matches the same (position, id) tie-break used everywhere else in
+    # this module (_rebuild_chain, reorder_rule's sibling sort) — lower id
+    # wins a tie, regardless of which rule it is.
+    rules = [_rule(2, "DROP", position=1.0), _rule(1, "ACCEPT", "203.0.113.0/24", position=1.0)]
+    assert _would_allow_client(rules, "203.0.113.9") is True
+
+
+def test_allow_client_malformed_src_is_ignored():
+    rules = [_rule(1, "DROP", src="not-a-cidr", position=1.0)]
+    assert _would_allow_client(rules, "203.0.113.9") is True
+
+
+def test_allow_client_ipv6_client_vs_ipv4_only_rule_falls_through():
+    rules = [_rule(1, "DROP", src="203.0.113.0/24", position=1.0)]
+    assert _would_allow_client(rules, "2001:db8::5") is True
+
+
+def test_allow_client_unparseable_ip_fails_open():
+    assert _would_allow_client([_rule(1, "DROP")], "not-an-ip") is True
