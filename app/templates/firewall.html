@@ -77,6 +77,70 @@
 
 <section class="card">
   <details class="collapsible" name="firewall-add-rule">
+    <summary><h2>Add INPUT rule</h2></summary>
+    <p class="hint">Controls what's allowed to reach this server itself (its web UI, SSH, anything listening here) — not traffic passing through it to somewhere else, that's the FORWARD rule above. A rule that would block your own current connection is refused rather than applied.</p>
+    <form method="post" action="{{ url_for('main.add_input') }}" class="inline-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label>Action
+        <select name="action">
+          <option value="ACCEPT">Allow (ACCEPT)</option>
+          <option value="DROP">Drop</option>
+        </select>
+      </label>
+      <label>Protocol
+        <select name="protocol">
+          <option value="all">Any</option>
+          <option value="tcp">tcp</option>
+          <option value="udp">udp</option>
+        </select>
+      </label>
+      <label>Source
+        <select id="input-src-select">
+          <option value="">Any (0.0.0.0/0)</option>
+          {% for c in vpn_clients %}
+          <option value="{{ c.ip }}">{{ c.name }} ({{ c.ip }})</option>
+          {% endfor %}
+          <option value="__custom__">Custom IP/CIDR…</option>
+        </select>
+      </label>
+      <label id="input-src-custom-wrap" class="fwd-src-custom-wrap">Custom source <span class="hint">(IP/CIDR, blank = any)</span>
+        <input type="text" id="input-src-custom-input" placeholder="10.202.226.0/24">
+      </label>
+      <input type="hidden" name="src" id="input-src-hidden">
+      <label>Dest. port <span class="hint">(blank = any)</span>
+        <input type="text" name="dport" placeholder="443">
+      </label>
+      <label>Comment
+        <input type="text" name="comment" placeholder="optional note">
+      </label>
+      <button type="submit">Add rule</button>
+    </form>
+  </details>
+  <script>
+    (function() {
+      const select = document.getElementById('input-src-select');
+      const customWrap = document.getElementById('input-src-custom-wrap');
+      const customInput = document.getElementById('input-src-custom-input');
+      const hidden = document.getElementById('input-src-hidden');
+
+      function sync() {
+        if (select.value === '__custom__') {
+          customWrap.style.display = '';
+          hidden.value = customInput.value;
+        } else {
+          customWrap.style.display = 'none';
+          hidden.value = select.value;
+        }
+      }
+      select.addEventListener('change', sync);
+      customInput.addEventListener('input', sync);
+      sync();
+    })();
+  </script>
+</section>
+
+<section class="card">
+  <details class="collapsible" name="firewall-add-rule">
     <summary><h2>Add port-forward rule</h2></summary>
     <p class="hint">DNAT: forward an external port to a VPN client's internal IP.</p>
     <form method="post" action="{{ url_for('main.add_portforward') }}" class="inline-form">

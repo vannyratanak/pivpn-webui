@@ -3,6 +3,7 @@ import shlex
 import pytest
 
 from app.firewall import (
+    _IMPORT_ADDERS,
     FirewallError,
     _apply,
     _check_client_block_self_lockout,
@@ -13,7 +14,9 @@ from app.firewall import (
     _rule_from_parsed,
     _unapply,
     _would_allow_client,
+    add_input_rule,
     describe_rule,
+    import_rules,
 )
 
 
@@ -309,3 +312,70 @@ def test_client_block_self_lockout_no_admin_ip_skips_check():
     # None means "no real request to protect" (internal caller/tests) —
     # never raise in that case, same convention as _check_self_lockout.
     _check_client_block_self_lockout(None, "10.202.226.21")  # no raise
+
+
+# --- add_input_rule: previously there was no way to add a brand-new INPUT
+# rule at all (only forward/portforward/snat had an adder — "input" wasn't
+# in _IMPORT_ADDERS, and a raw "-A INPUT ..." import line crashed with a
+# bare KeyError since _iptables_line_to_fields does return kind="input").
+# The new rule always lands last (db.insert_rule's default position), so
+# unlike client_block's blanket rule this one does need the full
+# position-ordered simulation — same self-lockout guard reorder_rule uses.
+
+def _patch_insert_and_apply(monkeypatch, existing_input):
+    # db.list_rules() rows always carry a "kind" — add_input_rule filters
+    # on it — but the _rule() helper above (shared with the pure
+    # _would_allow_client tests) doesn't set one, so inject it here rather
+    # than changing that shared helper's shape.
+    rows = [{"kind": "input", **r} for r in existing_input]
+    monkeypatch.setattr("app.firewall.db.list_rules", lambda enabled_only=False: rows)
+    inserted = []
+    monkeypatch.setattr("app.firewall.db.insert_rule", lambda rule: inserted.append(rule) or 99)
+    applied = []
+    monkeypatch.setattr("app.firewall.run_root", lambda argv: applied.append(argv))
+    return inserted, applied
+
+
+def test_add_input_rule_self_lockout_raises_and_never_applies(monkeypatch):
+    inserted, applied = _patch_insert_and_apply(monkeypatch, existing_input=[])
+    with pytest.raises(FirewallError):
+        add_input_rule(action="DROP", protocol="all", src=None, dport=None, client_ip="203.0.113.9")
+    assert inserted == []  # refused before ever touching the DB or iptables
+    assert applied == []
+
+
+def test_add_input_rule_allowed_when_earlier_accept_still_covers_caller(monkeypatch):
+    existing = [_rule(1, "ACCEPT", "203.0.113.0/24", position=1.0, dport="443")]
+    inserted, applied = _patch_insert_and_apply(monkeypatch, existing_input=existing)
+    # a new blanket DROP lands last (after the existing ACCEPT) — caller's
+    # own connection still matches the earlier ACCEPT first, so this is safe
+    add_input_rule(action="DROP", protocol="all", src=None, dport=None, client_ip="203.0.113.9")
+    assert len(inserted) == 1
+    assert len(applied) == 1
+
+
+def test_add_input_rule_no_client_ip_skips_guard(monkeypatch):
+    # None means "no real request to protect" — e.g. a script/internal
+    # caller, not a browser request that could get locked out.
+    inserted, applied = _patch_insert_and_apply(monkeypatch, existing_input=[])
+    add_input_rule(action="DROP", protocol="all", src=None, dport=None, client_ip=None)
+    assert len(inserted) == 1
+    assert len(applied) == 1
+
+
+def test_import_adders_accepts_input_kind():
+    assert "input" in _IMPORT_ADDERS
+
+
+def test_import_rules_raw_input_line_no_longer_crashes(monkeypatch):
+    # Regression test for the bug this session found: _iptables_line_to_fields
+    # returns kind="input" for a raw "-A INPUT ..." line, but "input" was
+    # missing from _IMPORT_ADDERS — dispatch raised a bare KeyError, not a
+    # catchable FirewallError, so one bad/unexpected line crashed the whole
+    # import instead of reporting "line N: ..." like every other bad line.
+    _patch_insert_and_apply(monkeypatch, existing_input=[])
+    added, errors = import_rules(
+        'iptables -A INPUT -s 203.0.113.0/24 -p tcp -m tcp --dport 22 -j ACCEPT\n'
+    )
+    assert errors == []
+    assert added == 1

@@ -260,7 +260,7 @@ def import_rules():
         flash("Could not read that file as text (expected UTF-8).", "error")
         return redirect(url_for("main.firewall_rules"))
     client_ips = pivpn_ctl.list_client_ips()
-    added, errors = firewall.import_rules(text, client_ips=client_ips)
+    added, errors = firewall.import_rules(text, client_ips=client_ips, client_ip=_client_ip())
     if added:
         flash(f"Imported {added} rule(s).", "success")
         for name, ip in client_ips.items():
@@ -336,6 +336,26 @@ def add_forward():
     except firewall.FirewallError as exc:
         flash(str(exc), "error")
         _audit("firewall_forward_add", "", "error", str(exc))
+    return redirect(url_for("main.firewall_rules"))
+
+
+@bp.route("/firewall/input", methods=["POST"])
+@login_required
+def add_input():
+    try:
+        rule_id = firewall.add_input_rule(
+            action=request.form.get("action"),
+            protocol=request.form.get("protocol"),
+            src=request.form.get("src"),
+            dport=request.form.get("dport"),
+            comment=request.form.get("comment", ""),
+            client_ip=_client_ip(),
+        )
+        flash("Input rule added.", "success")
+        _audit("firewall_input_add", f"rule#{rule_id}")
+    except firewall.FirewallError as exc:
+        flash(str(exc), "error")
+        _audit("firewall_input_add", "", "error", str(exc))
     return redirect(url_for("main.firewall_rules"))
 
 

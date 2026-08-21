@@ -442,6 +442,29 @@ def add_forward_rule(action, protocol, src, dst, dport, comment=""):
     return _insert_and_apply(rule)
 
 
+def add_input_rule(action, protocol, src, dport, comment="", client_ip: str | None = None):
+    """Unlike forward/portforward/snat, this can lock the caller out of the
+    web UI itself (INPUT is exactly what gates port 443) — a new rule
+    always lands last among enabled INPUT rules (db.insert_rule's default
+    position, same as every other kind), so simulate it there and run the
+    same self-lockout check reorder_rule uses before actually applying
+    it."""
+    rule = {
+        "kind": "input",
+        "action": _valid_action(action),
+        "protocol": _valid_proto(protocol),
+        "src": _valid_addr(src),
+        "dport": _valid_port(dport),
+        "comment": (comment or "")[:200],
+        "enabled": 1,
+    }
+    existing_input = [r for r in db.list_rules(enabled_only=True) if r["kind"] == "input"]
+    max_pos = max((r["position"] for r in existing_input), default=0.0)
+    simulated = existing_input + [{**rule, "id": -1, "position": max_pos + 1}]
+    _check_self_lockout(client_ip, simulated)
+    return _insert_and_apply(rule)
+
+
 def add_portforward_rule(ext_port, target_ip, target_port, protocol="tcp", ext_iface=None, comment=""):
     target_ip = _valid_addr(target_ip)
     if not target_ip:
@@ -478,19 +501,27 @@ def add_snat_rule(src, snat_ip, out_iface=None, comment=""):
 
 
 # --- bulk import: one rule per line, "kind key=value key=value ..." ---
+# Every adder takes (fields, client_ip) even though only "input" actually
+# uses client_ip (the self-lockout guard) — a uniform signature keeps both
+# dispatch call sites below simple, instead of special-casing one kind.
 
 _IMPORT_ADDERS = {
-    "forward": lambda f: add_forward_rule(
+    "forward": lambda f, client_ip: add_forward_rule(
         action=f.get("action"), protocol=f.get("protocol"),
         src=f.get("src"), dst=f.get("dst"), dport=f.get("dport"),
         comment=f.get("comment", ""),
     ),
-    "portforward": lambda f: add_portforward_rule(
+    "input": lambda f, client_ip: add_input_rule(
+        action=f.get("action"), protocol=f.get("protocol"),
+        src=f.get("src"), dport=f.get("dport"),
+        comment=f.get("comment", ""), client_ip=client_ip,
+    ),
+    "portforward": lambda f, client_ip: add_portforward_rule(
         ext_port=f.get("ext_port"), target_ip=f.get("target_ip"),
         target_port=f.get("target_port"), protocol=f.get("protocol", "tcp"),
         ext_iface=f.get("ext_iface"), comment=f.get("comment", ""),
     ),
-    "snat": lambda f: add_snat_rule(
+    "snat": lambda f, client_ip: add_snat_rule(
         src=f.get("src"), snat_ip=f.get("snat_ip"),
         out_iface=f.get("out_iface"), comment=f.get("comment", ""),
     ),
@@ -505,7 +536,7 @@ def _parse_import_line(line: str) -> tuple[str, dict]:
         raise FirewallError("Empty line.")
     kind = tokens[0].lower()
     if kind not in _IMPORT_ADDERS:
-        raise FirewallError(f"Unknown rule kind {tokens[0]!r} (expected forward, portforward, or snat).")
+        raise FirewallError(f"Unknown rule kind {tokens[0]!r} (expected forward, input, portforward, or snat).")
     fields = {}
     for tok in tokens[1:]:
         if "=" not in tok:
@@ -575,9 +606,16 @@ def _resolve_client_name(value: str, client_ips: dict[str, str]) -> str:
         return client_ips.get(value, value)
 
 
-def import_rules(text: str, client_ips: dict[str, str] | None = None) -> tuple[int, list[str]]:
+def import_rules(
+    text: str, client_ips: dict[str, str] | None = None, client_ip: str | None = None
+) -> tuple[int, list[str]]:
     """Add one rule per non-blank, non-'#'-comment line. Every line is
     independent — one bad line doesn't stop the rest from importing.
+
+    client_ip (the caller's own address, for the self-lockout guard) is
+    distinct from client_ips (plural — VPN client name -> IP lookup for
+    src/dst) despite the similar name; only an imported 'input' line
+    actually uses it.
 
     A line of the form NAME=value (no rule kind, e.g. "CLIENT_IP=10.8.0.5")
     defines a variable instead of a rule — any later line can reference it
@@ -626,7 +664,7 @@ def import_rules(text: str, client_ips: dict[str, str] | None = None) -> tuple[i
                 for key in ("src", "dst"):
                     if key in fields:
                         fields[key] = _resolve_client_name(fields[key], client_ips)
-                _IMPORT_ADDERS[kind](fields)
+                _IMPORT_ADDERS[kind](fields, client_ip)
                 added += 1
             except FirewallError as exc:
                 errors.append(f"line {i}: {exc}")
@@ -650,7 +688,7 @@ def import_rules(text: str, client_ips: dict[str, str] | None = None) -> tuple[i
                 continue
             errors.append(
                 f"line {i}: Unknown rule kind {tokens[0]!r} "
-                "(expected forward, portforward, snat, or a NAME=value variable definition)."
+                "(expected forward, input, portforward, snat, or a NAME=value variable definition)."
             )
             continue
         try:
@@ -658,7 +696,7 @@ def import_rules(text: str, client_ips: dict[str, str] | None = None) -> tuple[i
             for key in ("src", "dst"):
                 if key in fields:
                     fields[key] = _resolve_client_name(fields[key], client_ips)
-            _IMPORT_ADDERS[kind](fields)
+            _IMPORT_ADDERS[kind](fields, client_ip)
             added += 1
         except FirewallError as exc:
             errors.append(f"line {i}: {exc}")
