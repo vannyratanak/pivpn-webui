@@ -14,7 +14,17 @@ set -euo pipefail
 # openvpn-server@server.service instead).
 OPENVPN_UNIT="openvpn@server"
 WEBUI_UNIT="pivpn-webui"
-LINES=300
+
+# A plain "-n 300" caps *raw journal lines*, not events — one OpenVPN
+# connection alone logs 15-20 lines of cipher/peer-info detail, so a burst
+# of reconnects (a flaky client, someone testing) can silently shrink the
+# effective visible window down to a few minutes, hiding sessions that are
+# only hours old. --since gives a real, predictable time window regardless
+# of how chatty traffic gets; -n stays on alongside it purely as a safety
+# cap against a truly pathological volume within that window, not as the
+# primary limit.
+SINCE="3 days ago"
+LINES=5000
 
 usage() {
   echo "usage: $0 openvpn | webui | system" >&2
@@ -26,13 +36,13 @@ action="${1:-}"
 
 case "$action" in
   openvpn)
-    journalctl -u "$OPENVPN_UNIT" -n "$LINES" --no-pager -o short-iso
+    journalctl -u "$OPENVPN_UNIT" --since "$SINCE" -n "$LINES" --no-pager -o short-iso
     ;;
   webui)
-    journalctl -u "$WEBUI_UNIT" -n "$LINES" --no-pager -o short-iso
+    journalctl -u "$WEBUI_UNIT" --since "$SINCE" -n "$LINES" --no-pager -o short-iso
     ;;
   system)
-    journalctl -n "$LINES" --no-pager -o short-iso
+    journalctl --since "$SINCE" -n "$LINES" --no-pager -o short-iso
     ;;
   *)
     usage

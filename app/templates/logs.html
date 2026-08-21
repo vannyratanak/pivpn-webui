@@ -12,7 +12,7 @@
 
 {% if tab == 'sessions' %}
 <section class="card">
-  <p class="hint">Client connect/disconnect events parsed from the OpenVPN service journal, most recent first (last 300). Parsing is best-effort — lines that don't match a known OpenVPN log format show up with event "other" and the raw message in Detail.</p>
+  <p class="hint">Client connect/disconnect events parsed from the OpenVPN service journal, most recent first (last 3 days). Parsing is best-effort — lines that don't match a known OpenVPN log format show up with event "other" and the raw message in Detail.</p>
   {% if not sessions %}
     <p class="empty">No session events found (or the log helper isn't installed/configured yet — see deploy/pivpn-webui-log-helper.sh).</p>
   {% else %}
@@ -119,7 +119,7 @@
 {% if tab == 'system' %}
 <section class="card">
   <h2>PiVPN Web UI service</h2>
-  <p class="hint">journalctl -u pivpn-webui, most recent first (last 300).</p>
+  <p class="hint">journalctl -u pivpn-webui, most recent first (last 3 days).</p>
   {% if not webui_log %}
     <p class="empty">No log lines found (or the log helper isn't installed/configured yet).</p>
   {% else %}
@@ -131,7 +131,7 @@
 
 <section class="card">
   <h2>System journal</h2>
-  <p class="hint">journalctl (whole system), most recent first (last 300).</p>
+  <p class="hint">journalctl (whole system), most recent first (last 3 days).</p>
   {% if not system_log %}
     <p class="empty">No log lines found (or the log helper isn't installed/configured yet).</p>
   {% else %}
