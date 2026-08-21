@@ -30,11 +30,22 @@ function attachFirewallReorder(tbodySelector) {
     draggingRow = null;
   });
 
+  tbody.addEventListener('dragenter', (e) => {
+    if (draggingRow) e.preventDefault(); // some browsers also gate 'drop' on this, not just dragover
+  });
+
   tbody.addEventListener('dragover', (e) => {
     if (!draggingRow) return;
+    // Always claim the dragover, even over a gap/border/padding pixel that
+    // isn't exactly over a row — the browser only allows 'drop' to fire at
+    // all if the *last* dragover before mouse-up called preventDefault, and
+    // a real mouse (unlike a scripted single-point test) is never pixel-
+    // perfect over row centers. Missing this meant drop silently never
+    // fired on real drags: the row still looked reordered (from earlier
+    // dragovers that did land on a row), but nothing ever got saved.
+    e.preventDefault();
     const overRow = e.target.closest('tr');
     if (!overRow || overRow === draggingRow || overRow.getAttribute('draggable') !== 'true') return;
-    e.preventDefault(); // only allow drop once we know the target is a valid reorderable row
     const rect = overRow.getBoundingClientRect();
     const before = (e.clientY - rect.top) < rect.height / 2;
     overRow.parentNode.insertBefore(draggingRow, before ? overRow : overRow.nextSibling);
