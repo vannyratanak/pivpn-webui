@@ -1,6 +1,6 @@
 import shlex
 
-from app.firewall import _parse_rule_spec, _rule_from_parsed, describe_rule
+from app.firewall import _parse_rule_spec, _positions_for_new_specs, _rule_from_parsed, describe_rule
 
 
 def test_input_accept(monkeypatch):
@@ -98,3 +98,51 @@ def test_rule_from_parsed_unrecognized_shape_returns_none():
     # discover_cli_rules()'s own contract: leave it alone, don't adopt it.
     parsed = {"action": "REJECT", "src": "10.0.0.0/8"}
     assert _rule_from_parsed("forward", parsed) is None
+
+
+# --- _positions_for_new_specs: the fix for the real bug this project hit —
+# discover_cli_rules() adopting a manually-added ACCEPT rule that lived
+# *before* an existing catch-all DROP, but a plain -A re-add silently moved
+# it to the end of the chain, landing it after the DROP and breaking it.
+
+def test_positions_between_two_anchors():
+    # one new rule sitting between two already-tracked ones
+    anchors = [(True, 1.0), (False, None), (True, 4.0)]
+    assert _positions_for_new_specs(anchors) == [None, 2.5, None]
+
+
+def test_positions_multiple_between_two_anchors_stay_ordered():
+    anchors = [(True, 1.0), (False, None), (False, None), (True, 4.0)]
+    result = _positions_for_new_specs(anchors)
+    assert result[0] is None and result[3] is None
+    assert 1.0 < result[1] < result[2] < 4.0
+
+
+def test_positions_new_rule_before_an_existing_accept_and_drop():
+    # the actual bug scenario: ACCEPT (tracked, pos 1.0) already exists,
+    # a newly-discovered ACCEPT sat between it and the catch-all DROP
+    # (tracked, pos 2.0) live — it must land strictly before the DROP.
+    anchors = [(True, 1.0), (False, None), (True, 2.0)]
+    result = _positions_for_new_specs(anchors)
+    assert 1.0 < result[1] < 2.0
+
+
+def test_positions_new_rule_before_first_anchor():
+    anchors = [(False, None), (True, 5.0)]
+    result = _positions_for_new_specs(anchors)
+    assert result[0] < 5.0
+    assert result[1] is None
+
+
+def test_positions_new_rule_after_last_anchor():
+    anchors = [(True, 5.0), (False, None)]
+    result = _positions_for_new_specs(anchors)
+    assert result[0] is None
+    assert result[1] > 5.0
+
+
+def test_positions_no_anchors_at_all_stay_relatively_ordered():
+    # a chain with nothing tracked yet — e.g. the very first discover_cli_rules() run
+    anchors = [(False, None), (False, None), (False, None)]
+    result = _positions_for_new_specs(anchors)
+    assert result[0] < result[1] < result[2]

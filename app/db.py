@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS firewall_rules (
     comment TEXT,
     source TEXT NOT NULL DEFAULT 'webui',  -- 'webui' | 'cli' (discovered from a manually-run iptables command)
     enabled INTEGER NOT NULL DEFAULT 1,
+    position REAL,                -- display/apply order among rules sharing a chain — see firewall.py's _rebuild_chain
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -57,6 +58,7 @@ _MIGRATIONS = {
     "out_iface": "ALTER TABLE firewall_rules ADD COLUMN out_iface TEXT",
     "source": "ALTER TABLE firewall_rules ADD COLUMN source TEXT NOT NULL DEFAULT 'webui'",
     "snat_ip": "ALTER TABLE firewall_rules ADD COLUMN snat_ip TEXT",
+    "position": "ALTER TABLE firewall_rules ADD COLUMN position REAL",
 }
 
 
@@ -68,6 +70,10 @@ def init_db():
         for col, ddl in _MIGRATIONS.items():
             if col not in existing_cols:
                 conn.execute(ddl)
+        # Rows from before the position column existed (or any row inserted
+        # without one) — fall back to id order, which is what they sorted by
+        # already.
+        conn.execute("UPDATE firewall_rules SET position = id WHERE position IS NULL")
         conn.commit()
     finally:
         conn.close()
@@ -76,6 +82,11 @@ def init_db():
 def insert_rule(rule: dict) -> int:
     conn = get_conn()
     try:
+        if rule.get("position") is None:
+            # Default: append after everything currently in the table, same
+            # as this app's rules have always ended up live via -A anyway.
+            (max_pos,) = conn.execute("SELECT COALESCE(MAX(position), 0) FROM firewall_rules").fetchone()
+            rule = {**rule, "position": max_pos + 1}
         cols = list(rule.keys())
         placeholders = ",".join("?" for _ in cols)
         sql = f"INSERT INTO firewall_rules ({','.join(cols)}) VALUES ({placeholders})"
@@ -92,8 +103,23 @@ def list_rules(enabled_only: bool = False) -> list[dict]:
         sql = "SELECT * FROM firewall_rules"
         if enabled_only:
             sql += " WHERE enabled=1"
-        sql += " ORDER BY id"
+        sql += " ORDER BY position, id"
         return [dict(r) for r in conn.execute(sql).fetchall()]
+    finally:
+        conn.close()
+
+
+def set_positions(mapping: dict[int, float]):
+    """Bulk position update for a reorder swap — both rows change together,
+    in one transaction, so a crash mid-write can't leave two rules sharing
+    (or missing) a position."""
+    conn = get_conn()
+    try:
+        conn.executemany(
+            "UPDATE firewall_rules SET position=? WHERE id=?",
+            [(pos, rule_id) for rule_id, pos in mapping.items()],
+        )
+        conn.commit()
     finally:
         conn.close()
 

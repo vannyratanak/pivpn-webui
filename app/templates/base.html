@@ -3,6 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Read by firewall-reorder.js's fetch() calls — everything else in this
+       app is a plain form POST with its own hidden csrf_token input, but
+       that one JSON endpoint has no form to carry a hidden field. -->
+  <meta name="csrf-token" content="{{ csrf_token() }}">
   <title>{% block title %}PiVPN Web UI{% endblock %}</title>
   <!-- Sets data-theme before the stylesheet paints, so a saved "light"
        choice never flashes dark-then-light on load. Must be inline (not
@@ -31,6 +35,7 @@
   <script src="{{ url_for('static', filename='js/log-filter.js') }}"></script>
   <script src="{{ url_for('static', filename='js/pagination.js') }}"></script>
   <script src="{{ url_for('static', filename='js/select-filter.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/firewall-reorder.js') }}"></script>
   <script src="{{ url_for('static', filename='js/nav-loading.js') }}"></script>
   <script src="{{ url_for('static', filename='js/theme-toggle.js') }}"></script>
 </head>

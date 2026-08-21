@@ -236,12 +236,14 @@
         <th scope="col">Source</th>
         <th scope="col">Enabled</th>
         <th scope="col">Saved</th>
+        <th scope="col">Order</th>
         <th scope="col">Actions</th>
       </tr>
     </thead>
     <tbody id="rules-tbody">
       {% for r in rules %}
-      <tr class="{{ '' if r.enabled else 'disabled-row' }}">
+      <tr class="{{ '' if r.enabled else 'disabled-row' }}"
+          {% if r.kind != 'client_block' %}draggable="true" data-rule-id="{{ r.id }}"{% endif %}>
         <td><input type="checkbox" class="rule-select-checkbox" data-rule-id="{{ r.id }}" aria-label="Select rule {{ r.id }}"></td>
         <td>{{ r.kind }}</td>
         <td>{{ r.action }}</td>
@@ -250,6 +252,13 @@
         <td>{{ 'CLI' if r.source == 'cli' else 'webui' }}</td>
         <td>{{ 'yes' if r.enabled else 'no' }}</td>
         <td><span class="{{ 'saved-yes' if r.persisted else 'saved-no' }}">{{ 'Saved' if r.persisted else 'Unsaved' }}</span></td>
+        <td>
+          {% if r.kind == 'client_block' %}
+          <span class="hint" title="Client blocks always take priority over other rules and can't be reordered">&mdash;</span>
+          {% else %}
+          <span class="drag-handle" title="Drag to reorder">&#9776;</span>
+          {% endif %}
+        </td>
         <td>
           <div class="actions">
           <form method="post" action="{{ url_for('main.toggle_rule', rule_id=r.id) }}" class="btn-form">
@@ -271,6 +280,7 @@
   <script>
     const rulesClientFilter = attachSelectFilter('rules-client-filter', '#rules-tbody', 'tr');
     attachLogFilter('rules-filter', '#rules-tbody', 'tr', '#rules-table thead th:not(:first-child):not(:last-child)', () => rulesClientFilter && rulesClientFilter.refresh());
+    attachFirewallReorder('#rules-tbody');
 
     (function() {
       const selectAll = document.getElementById('rules-select-all');

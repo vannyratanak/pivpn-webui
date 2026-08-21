@@ -1,4 +1,4 @@
-from flask import Blueprint, abort, flash, redirect, render_template, request, send_file, url_for
+from flask import Blueprint, abort, flash, jsonify, redirect, render_template, request, send_file, url_for
 from flask_login import current_user, login_required, login_user, logout_user
 
 from app import db, firewall, pivpn_ctl, vpn_routes, vpnlog
@@ -380,6 +380,29 @@ def toggle_rule(rule_id):
         flash(str(exc), "error")
         _audit("firewall_rule_toggle", f"rule#{rule_id}", "error", str(exc))
     return redirect(url_for("main.firewall_rules"))
+
+
+@bp.route("/firewall/<int:rule_id>/reorder", methods=["POST"])
+@login_required
+def reorder_rule(rule_id):
+    """JSON endpoint for the Firewall page's drag-and-drop reorder — unlike
+    every other mutation in this app, this one doesn't redirect back to a
+    freshly rendered page: the drop already moved the row in the DOM
+    client-side, so a full reload here would just be visible flicker (and
+    the classic "reload jumps back to the top" annoyance) for a change the
+    page already shows correctly."""
+    body = request.get_json(silent=True) or {}
+    try:
+        target_id = int(body.get("target_id"))
+        place = body.get("place")
+        firewall.reorder_rule(rule_id, target_id, place)
+        _audit("firewall_rule_reorder", f"rule#{rule_id} {place} rule#{target_id}")
+        return jsonify(ok=True)
+    except (TypeError, ValueError):
+        return jsonify(ok=False, error="Invalid request."), 400
+    except firewall.FirewallError as exc:
+        _audit("firewall_rule_reorder", f"rule#{rule_id}", "error", str(exc))
+        return jsonify(ok=False, error=str(exc)), 400
 
 
 @bp.route("/firewall/<int:rule_id>/delete", methods=["POST"])
