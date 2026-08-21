@@ -35,14 +35,14 @@ def test_input_block_anywhere(monkeypatch):
     assert describe_rule(rule) == "Block tcp/443 from 0.0.0.0/0 → 10.0.0.1"
 
 
-def test_forward_resolves_client_name():
-    # forward never calls _server_ip()/_iface_ip() — no mocking needed here,
-    # this is testing label()'s client-name lookup instead.
+def test_forward_shows_ip_only_no_client_name():
+    # forward never calls _server_ip()/_iface_ip() — no mocking needed here.
+    # describe_rule deliberately never resolves a client name (that's the
+    # Active Rules table's own Client column's job, see rule_client_name) —
+    # confirms it stays a bare IP even for a known client's address.
     rule = {"kind": "forward", "action": "DROP", "protocol": "all",
             "src": "10.202.226.4", "dst": "192.168.100.0/24"}
-    client_names = {"10.202.226.4": "macbook-phanne"}
-    assert describe_rule(rule, client_names) == \
-        "Block all traffic from macbook-phanne (10.202.226.4) → 192.168.100.0/24"
+    assert describe_rule(rule) == "Block all traffic from 10.202.226.4 → 192.168.100.0/24"
 
 
 def test_snat():
@@ -61,10 +61,11 @@ def test_masquerade_with_interface(monkeypatch):
 
 
 def test_client_block():
+    # client_name isn't shown here either, same reasoning as forward/
+    # portforward — it's the Client column's job now, not Details'.
     rule = {"kind": "client_block", "client_name": "nurak", "client_ip": "10.202.226.21"}
     assert describe_rule(rule) == (
-        "Block all traffic from nurak (10.202.226.21) → 0.0.0.0/0, "
-        "and to this server itself"
+        "Block all traffic from 10.202.226.21 → 0.0.0.0/0, and to this server itself"
     )
 
 

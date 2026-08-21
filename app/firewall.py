@@ -1013,24 +1013,20 @@ def rule_client_name(rule: dict, client_names: dict[str, str] | None = None) -> 
     return ""
 
 
-def describe_rule(rule: dict, client_names: dict[str, str] | None = None) -> str:
+def describe_rule(rule: dict) -> str:
     """Concrete from/to summary of a rule for the Active Rules table's
     Details column: real IPs and addresses, not English paraphrasing —
     "this server"/interface names/"anyone" all resolve to actual addresses,
     since a reader cross-checking against `iptables -S` or a packet capture
-    needs the real values, not a soft description of them. client_names
-    ({ip: name}) lets a src/dst/target that happens to be a known VPN
-    client's exact IP show up as "name (ip)" instead of a bare address —
-    optional since not every caller has that mapping to hand (e.g.
-    discover_cli_rules doesn't)."""
+    needs the real values, not a soft description of them. Deliberately IP
+    only, no client name lookup — the Active Rules table has its own
+    Client column for that (see rule_client_name); showing it in both
+    places was redundant."""
     kind = rule["kind"]
     protocol = rule.get("protocol") or "all"
 
     def label(value):
-        if not value:
-            return "0.0.0.0/0"
-        name = (client_names or {}).get(value)
-        return f"{name} ({value})" if name else value
+        return value or "0.0.0.0/0"
 
     def service(dport_key="dport"):
         dport = rule.get(dport_key)
@@ -1052,8 +1048,7 @@ def describe_rule(rule: dict, client_names: dict[str, str] | None = None) -> str
     if kind == "portforward":
         proto = rule.get("protocol") or "tcp"
         ext_ip = _iface_ip(rule["ext_iface"]) if rule.get("ext_iface") else _server_ip()
-        who = (client_names or {}).get(rule.get("target_ip"))
-        target = f"{rule['target_ip']}:{rule['target_port']}" + (f" ({who})" if who else "")
+        target = f"{rule['target_ip']}:{rule['target_port']}"
         return f"Translate {ext_ip}:{rule['ext_port']} ({proto}) → {target}"
 
     if kind == "masquerade":
@@ -1066,10 +1061,7 @@ def describe_rule(rule: dict, client_names: dict[str, str] | None = None) -> str
         return f"Translate {src} → {rule['snat_ip']}"
 
     if kind == "client_block":
-        return (
-            f"Block all traffic from {rule['client_name']} ({rule['client_ip']}) "
-            "→ 0.0.0.0/0, and to this server itself"
-        )
+        return f"Block all traffic from {rule['client_ip']} → 0.0.0.0/0, and to this server itself"
 
     return ""
 
