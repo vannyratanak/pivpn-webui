@@ -654,6 +654,14 @@ button:disabled:hover, .btn:disabled:hover { filter: none; }
    both need overriding together. */
 .pagination-size .custom-select-trigger { height: 34px; min-height: 34px; padding: 0 30px 0 8px; }
 
+/* .btn-sm (Prev/Next, right beside this in .pagination-nav) grows to a
+   44px touch target below 600px (see its own @media block above) — this
+   needs the same bump, or the two would match on desktop (34px both) but
+   mismatch on mobile (44px vs. still 34px). */
+@media (max-width: 600px) {
+  .pagination-size .custom-select-trigger { height: 44px; min-height: 44px; }
+}
+
 /* .rule-client-filter reuses .pagination-size's label+select layout, but
    needs a much wider select than the page-size dropdown's 80px — client
    names + IPs don't fit in that. */
