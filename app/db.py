@@ -4,7 +4,7 @@ No ORM on purpose — one table, few columns, and it keeps the dependency
 footprint (and thus what has to install cleanly on a Pi) small.
 """
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import config
@@ -174,13 +174,29 @@ def set_enabled(rule_id: int, enabled: bool):
         conn.close()
 
 
+# How long audit_log rows stick around before add_audit opportunistically
+# prunes them — long enough to matter for a real incident review, short
+# enough that the table doesn't grow forever from background noise. That
+# noise is real, not hypothetical: the login page is now reachable from
+# the public internet via the relay, and every failed attempt (including
+# ones from bots that have no idea this is PiVPN, just scanning) writes
+# a row here — see login_failures for the separate, shorter-lived table
+# that actually drives rate-limiting.
+AUDIT_LOG_RETENTION_DAYS = 90
+
+
 def add_audit(actor: str, action: str, target: str = "", result: str = "ok", detail: str = ""):
     # SQLite's CURRENT_TIMESTAMP (the column default) is hardcoded to UTC by
     # the SQL standard, regardless of the system's configured timezone — so
     # it's passed explicitly here instead, using the box's actual local time
-    # (Asia/Phnom_Penh) via datetime.now().
+    # (Asia/Phnom_Penh) via datetime.now(). The prune cutoff below is
+    # computed the same way, for the same reason — comparing it against
+    # datetime('now', ...) (UTC) would silently prune the wrong rows by
+    # the box's UTC offset.
     conn = get_conn()
     try:
+        cutoff = (datetime.now() - timedelta(days=AUDIT_LOG_RETENTION_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
+        conn.execute("DELETE FROM audit_log WHERE ts < ?", (cutoff,))
         conn.execute(
             "INSERT INTO audit_log (ts, actor, action, target, result, detail) VALUES (?,?,?,?,?,?)",
             (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), actor, action, target, result, (detail or "")[:500]),

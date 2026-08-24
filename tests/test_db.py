@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta
+
 import config
 from app import db
 
@@ -47,6 +49,36 @@ def test_add_audit_and_query(tmp_path, monkeypatch):
     row = conn.execute("SELECT actor, action, result FROM audit_log").fetchone()
     conn.close()
     assert (row["actor"], row["action"], row["result"]) == ("admin", "login", "ok")
+
+
+def test_add_audit_prunes_rows_older_than_retention(tmp_path, monkeypatch):
+    _use_temp_db(tmp_path, monkeypatch)
+    conn = db.get_conn()
+    old_ts = (datetime.now() - timedelta(days=db.AUDIT_LOG_RETENTION_DAYS + 1)).strftime("%Y-%m-%d %H:%M:%S")
+    conn.execute(
+        "INSERT INTO audit_log (ts, actor, action, result) VALUES (?, ?, ?, ?)",
+        (old_ts, "admin", "login", "ok"),
+    )
+    conn.commit()
+    conn.close()
+    db.add_audit("admin", "logout", result="ok")  # triggers the opportunistic prune
+    rows = db.list_audit(limit=100)
+    assert len(rows) == 1  # only the fresh one survives
+    assert rows[0]["action"] == "logout"
+
+
+def test_add_audit_keeps_rows_within_retention(tmp_path, monkeypatch):
+    _use_temp_db(tmp_path, monkeypatch)
+    conn = db.get_conn()
+    recent_ts = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
+    conn.execute(
+        "INSERT INTO audit_log (ts, actor, action, result) VALUES (?, ?, ?, ?)",
+        (recent_ts, "admin", "login", "ok"),
+    )
+    conn.commit()
+    conn.close()
+    db.add_audit("admin", "logout", result="ok")
+    assert len(db.list_audit(limit=100)) == 2  # both survive
 
 
 def test_login_failures_count_per_ip(tmp_path, monkeypatch):
