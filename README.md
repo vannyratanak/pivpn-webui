@@ -487,10 +487,14 @@ reinstall steps exist.
   because a relay setup (see below) can put the login page on the public
   internet; tune `SESSION_LIFETIME_HOURS` in `.env` if 8 hours doesn't
   match how this install is actually used.
-- `renew_client` fully revokes before reissuing; if `add_client` then fails
-  (e.g. a server resource hiccup), the client is left removed with no new
-  cert.
-  The UI will show an error — check `pivpn list` to confirm state.
+- `renew_client` fully revokes before reissuing — it's not atomic (revoke
+  can't be undone), so if `add_client` then fails afterward (e.g. a server
+  resource hiccup), the client is left with no valid cert at all, not just
+  stuck on the old one. The UI makes this unambiguous rather than showing
+  an ordinary-looking error: a distinct message ("...this client now has
+  NO valid VPN access — re-add it manually") and a separate
+  `client_renew_partial` audit-log entry, so it doesn't blend in with a
+  routine renew failure.
 - Per-client block needs a ccd-assigned IP, which PiVPN only writes once a
   client has been through `add`. Clients created before this tool (or before
   PiVPN itself added ccd pinning, if you're on an old version) may show no
