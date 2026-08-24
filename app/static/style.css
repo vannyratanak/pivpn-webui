@@ -358,6 +358,14 @@ select {
 }
 
 .custom-select-trigger {
+  /* It's a <button> (see select-enhance.js), which browsers render with
+     native OS chrome by default — background-color/border alone don't
+     reliably suppress that, so without this reset some platforms show
+     the custom styling with a native button's shape/highlight bleeding
+     through underneath it. */
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
   width: 100%;
   text-align: left;
   padding: 10px 34px 10px 12px;
