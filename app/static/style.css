@@ -654,16 +654,13 @@ button:disabled:hover, .btn:disabled:hover { filter: none; }
    both need overriding together. */
 .pagination-size .custom-select-trigger { height: 34px; min-height: 34px; padding: 0 30px 0 8px; }
 
-/* On mobile, stay at the same 34px used on desktop instead of growing —
-   one consistent height for this row at every width. .pagination-nav
-   .btn-sm still needs an explicit override even at the same value,
-   otherwise .btn-sm's own separate 44px touch-target mobile rule (a
-   pre-existing, more general rule — also sizes the Clients table's
-   per-row action buttons, a different context not asked to change here)
-   would win via that rule's own @media block. */
+/* Prev/Next are .btn-sm, whose own base rule is 26px — override to the
+   same 34px as the dropdown beside it, at every width (not just mobile),
+   since .btn-sm's 26px is otherwise this row's actual desktop height too,
+   not just a mobile-only mismatch. */
+.pagination-nav .btn-sm { height: 34px; min-height: 34px; }
+
 @media (max-width: 600px) {
-  .pagination-size .custom-select-trigger { height: 34px; min-height: 34px; }
-  .pagination-nav .btn-sm { height: 34px; min-height: 34px; }
   /* Prev/Next (and the page-status text between them) center within the
      row instead of sitting pinned to the right — width: 100% gives them
      room to actually center in, since .pagination-nav is otherwise sized
