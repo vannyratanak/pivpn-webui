@@ -1,4 +1,4 @@
-from flask import Blueprint, abort, flash, jsonify, redirect, render_template, request, send_file, url_for
+from flask import Blueprint, abort, flash, jsonify, redirect, render_template, request, send_file, session, url_for
 from flask_login import current_user, login_required, login_user, logout_user
 
 from app import db, firewall, pivpn_ctl, vpn_routes, vpnlog
@@ -62,6 +62,13 @@ def login():
         password = request.form.get("password", "")
         if verify_credentials(username, password):
             login_user(AdminUser())
+            # A plain Flask session cookie never expires unless marked
+            # permanent — this is what actually activates
+            # PERMANENT_SESSION_LIFETIME (see create_app). Combined with
+            # SESSION_REFRESH_EACH_REQUEST (Flask's own default, on), the
+            # cookie's expiry renews on every request, making this an
+            # idle timeout, not a fixed one from login time.
+            session.permanent = True
             db.clear_login_failures(ip)
             db.add_audit(username, "login", detail=f"from {ip}")
             return redirect(url_for("main.clients"))

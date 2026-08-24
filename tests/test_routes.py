@@ -25,6 +25,22 @@ def test_login_with_wrong_credentials_reshows_form(client):
     assert b"Invalid username or password" in resp.data
 
 
+def test_successful_login_issues_a_session_cookie_with_an_expiry(client):
+    # A plain Flask session cookie has no Max-Age/Expires at all (it dies
+    # with the browser) unless the session is explicitly marked
+    # permanent — this confirms login() actually does that, not just that
+    # PERMANENT_SESSION_LIFETIME is configured somewhere and unused.
+    resp = client.post("/login", data={"username": "admin", "password": TEST_PASSWORD})
+    set_cookie = resp.headers.get("Set-Cookie", "")
+    assert "Max-Age" in set_cookie or "Expires" in set_cookie
+
+
+def test_session_lifetime_matches_configured_hours(client):
+    import config
+    from datetime import timedelta
+    assert client.application.config["PERMANENT_SESSION_LIFETIME"] == timedelta(hours=config.SESSION_LIFETIME_HOURS)
+
+
 def test_logout_requires_login(client):
     resp = client.get("/logout")
     assert resp.status_code == 302

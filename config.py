@@ -11,6 +11,15 @@ SECRET_KEY = os.environ.get("SECRET_KEY")
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD_HASH = os.environ.get("ADMIN_PASSWORD_HASH")
 
+# A logged-in session with no expiry at all (the previous default — plain
+# Flask session cookies never expire unless marked permanent) stays valid
+# forever if it ever leaks: a stolen laptop, a shared computer, an XSS
+# elsewhere in the same browser profile. Sliding window, not a fixed
+# absolute one — combined with Flask's SESSION_REFRESH_EACH_REQUEST
+# (default on), the cookie's expiry renews on every request, so this is
+# "N hours since your *last* request," not "N hours since you logged in."
+SESSION_LIFETIME_HOURS = int(os.environ.get("SESSION_LIFETIME_HOURS", "8"))
+
 OVPN_DIR = os.environ.get("PIVPN_OVPN_DIR", str(Path.home() / "ovpns"))
 OPENVPN_CCD_DIR = os.environ.get("OPENVPN_CCD_DIR", "/etc/openvpn/ccd")
 OPENVPN_SUBNET_BASE = os.environ.get("OPENVPN_SUBNET_BASE", "10.8.0")

@@ -473,6 +473,13 @@ reinstall steps exist.
 ## Known limitations / things to check
 
 - Single static admin user — fine for one operator, not built for a team.
+- Login is rate-limited (5 failed attempts / 5 minutes, per source IP —
+  see `app/db.py`'s `login_failures` table) and sessions expire after
+  `SESSION_LIFETIME_HOURS` (default 8) of inactivity — a sliding window,
+  renewed on every request, not a fixed timer from login time. Both exist
+  because a relay setup (see below) can put the login page on the public
+  internet; tune `SESSION_LIFETIME_HOURS` in `.env` if 8 hours doesn't
+  match how this install is actually used.
 - `renew_client` fully revokes before reissuing; if `add_client` then fails
   (e.g. a server resource hiccup), the client is left removed with no new
   cert.

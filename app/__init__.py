@@ -1,4 +1,5 @@
 import fcntl
+from datetime import timedelta
 from pathlib import Path
 
 from flask import Flask
@@ -40,6 +41,10 @@ def create_app():
 
     app = Flask(__name__)
     app.config["SECRET_KEY"] = config.SECRET_KEY
+    # See routes.py's login() for where session.permanent actually gets
+    # set — this alone doesn't apply a limit to the plain (non-permanent)
+    # session cookie Flask uses by default.
+    app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=config.SESSION_LIFETIME_HOURS)
 
     db.init_db()
     login_manager.init_app(app)
