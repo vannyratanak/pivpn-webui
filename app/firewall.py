@@ -679,7 +679,14 @@ def import_rules(
         if tokens[0] == "iptables":
             try:
                 sub_tokens = shlex.split(_substitute_vars(line, variables))
-            except ValueError as exc:
+            except (ValueError, FirewallError) as exc:
+                # ValueError from shlex (unbalanced quoting, possibly only
+                # after substitution); FirewallError from _substitute_vars
+                # itself (a $VAR that was never defined) — the other import
+                # branch below already catches both around this same call,
+                # this one didn't, so an undefined variable in a raw
+                # 'iptables ...' line used to crash the whole import
+                # instead of reporting just this one line.
                 errors.append(f"line {i}: {exc}")
                 continue
             result = _iptables_line_to_fields(sub_tokens)

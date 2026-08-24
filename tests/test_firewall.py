@@ -470,6 +470,23 @@ def test_import_rules_truncated_iptables_line_does_not_crash(monkeypatch):
     assert errors == []  # not a recognized rule (no action) — silently skipped, like other unsupported lines
 
 
+def test_import_rules_undefined_variable_in_raw_iptables_line_reports_clean_error(monkeypatch):
+    # Regression test: _substitute_vars raises FirewallError (not
+    # ValueError) for an undefined $VAR — the raw 'iptables ...' import
+    # branch only caught ValueError around that call, so this used to
+    # escape import_rules entirely (crashing the whole request) instead
+    # of reporting just this one line and continuing to the next.
+    inserted, applied = _patch_insert_and_apply(monkeypatch, existing_input=[])
+    added, errors = import_rules(
+        'iptables -A FORWARD -s $UNDEFINED -p tcp --dport 443 -j ACCEPT\n'
+        'iptables -A FORWARD -s 10.8.0.5 -p tcp --dport 80 -j ACCEPT\n'
+    )
+    assert len(errors) == 1
+    assert "$UNDEFINED" in errors[0]
+    assert added == 1  # the second, valid line still imported
+    assert len(inserted) == 1
+
+
 # --- rule_client_name: the Active Rules table's dedicated Client column,
 # decoupled from Details' inline "name (ip)" text so it's its own
 # sortable/scannable field regardless of rule kind.
