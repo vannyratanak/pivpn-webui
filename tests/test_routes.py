@@ -29,3 +29,47 @@ def test_logout_requires_login(client):
     resp = client.get("/logout")
     assert resp.status_code == 302
     assert "/login" in resp.headers["Location"]
+
+
+# --- login rate-limiting: a plain in-process counter wouldn't be seen by
+# both gunicorn worker processes in production, so this is backed by
+# sqlite (see db.py) — tracked per source IP, 5 failures / 5 minutes.
+
+def test_login_lockout_after_max_failed_attempts(client):
+    from app.routes import LOGIN_MAX_ATTEMPTS
+    for _ in range(LOGIN_MAX_ATTEMPTS):
+        client.post("/login", data={"username": "admin", "password": "wrong"})
+    resp = client.post("/login", data={"username": "admin", "password": "wrong"})
+    assert b"Too many failed login attempts" in resp.data
+
+
+def test_login_lockout_blocks_even_correct_credentials(client):
+    from app.routes import LOGIN_MAX_ATTEMPTS
+    for _ in range(LOGIN_MAX_ATTEMPTS):
+        client.post("/login", data={"username": "admin", "password": "wrong"})
+    # the whole point: once locked out, even the real password is refused
+    # until the window passes — otherwise this is just a slower guesser.
+    resp = client.post("/login", data={"username": "admin", "password": TEST_PASSWORD})
+    assert b"Too many failed login attempts" in resp.data
+    assert resp.status_code == 200  # not the 302-to-/clients a real login gets
+
+
+def test_login_under_the_limit_still_works(client):
+    from app.routes import LOGIN_MAX_ATTEMPTS
+    for _ in range(LOGIN_MAX_ATTEMPTS - 1):
+        client.post("/login", data={"username": "admin", "password": "wrong"})
+    resp = client.post("/login", data={"username": "admin", "password": TEST_PASSWORD})
+    assert resp.status_code == 302
+    assert resp.headers["Location"] == "/clients"
+
+
+def test_successful_login_clears_the_failure_count(client):
+    # log in for real once, then confirm a fresh run of failures afterward
+    # starts counting from zero again — success shouldn't leave the IP
+    # sitting one attempt away from a lockout it never triggered.
+    from app.routes import LOGIN_MAX_ATTEMPTS
+    client.post("/login", data={"username": "admin", "password": TEST_PASSWORD})
+    client.get("/logout")
+    for _ in range(LOGIN_MAX_ATTEMPTS - 1):
+        resp = client.post("/login", data={"username": "admin", "password": "wrong"})
+    assert b"Too many failed login attempts" not in resp.data

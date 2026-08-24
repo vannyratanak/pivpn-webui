@@ -42,6 +42,17 @@ CREATE TABLE IF NOT EXISTS audit_log (
     result TEXT NOT NULL,   -- 'ok' | 'error'
     detail TEXT
 );
+
+-- Login rate-limiting. A plain in-process counter doesn't work here:
+-- gunicorn runs 2 worker processes (separate OS processes, no shared
+-- memory), so a counter living in one worker's memory would only ever
+-- see roughly half of an attacker's requests. This table is the shared
+-- state both workers see.
+CREATE TABLE IF NOT EXISTS login_failures (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ip TEXT NOT NULL,
+    ts TEXT DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 
@@ -186,6 +197,46 @@ def list_audit(limit: int = 200) -> list[dict]:
             "SELECT * FROM audit_log ORDER BY id DESC LIMIT ?", (limit,)
         ).fetchall()
         return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def record_login_failure(ip: str):
+    """Also opportunistically prunes anything old enough that no lockout
+    window could ever care about it again — no separate cleanup job
+    needed for a table that only ever grows one row per failed attempt.
+    Unlike add_audit, this deliberately stays in SQLite's own UTC
+    CURRENT_TIMESTAMP (not datetime.now()'s local time) so the window
+    comparison in count_recent_login_failures can use datetime('now', ...)
+    directly — both sides of that comparison need to agree on a clock,
+    and mixing local-time inserts with a UTC-based comparison would
+    silently make every window wrong by the box's UTC offset."""
+    conn = get_conn()
+    try:
+        conn.execute("DELETE FROM login_failures WHERE ts < datetime('now', '-1 hour')")
+        conn.execute("INSERT INTO login_failures (ip) VALUES (?)", (ip,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def count_recent_login_failures(ip: str, window_seconds: int) -> int:
+    conn = get_conn()
+    try:
+        (count,) = conn.execute(
+            "SELECT COUNT(*) FROM login_failures WHERE ip = ? AND ts > datetime('now', ?)",
+            (ip, f"-{window_seconds} seconds"),
+        ).fetchone()
+        return count
+    finally:
+        conn.close()
+
+
+def clear_login_failures(ip: str):
+    conn = get_conn()
+    try:
+        conn.execute("DELETE FROM login_failures WHERE ip = ?", (ip,))
+        conn.commit()
     finally:
         conn.close()
 

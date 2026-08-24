@@ -39,18 +39,34 @@ def _regenerate_script_for_ip(ip, client_ips=None):
             break
 
 
+# Failed attempts are tracked per source IP in sqlite (see db.py — a
+# plain in-process counter wouldn't be seen by both gunicorn workers).
+# 5 tries / 5 minutes: generous enough that a real admin mistyping their
+# own password never gets meaningfully locked out, but enough to blunt
+# an automated guesser now that the login page is reachable from the
+# public internet via the relay.
+LOGIN_MAX_ATTEMPTS = 5
+LOGIN_LOCKOUT_WINDOW_SECONDS = 300
+
+
 @bp.route("/login", methods=["GET", "POST"])
 def login():
     if current_user.is_authenticated:
         return redirect(url_for("main.clients"))
     if request.method == "POST":
+        ip = _client_ip()
+        if db.count_recent_login_failures(ip, LOGIN_LOCKOUT_WINDOW_SECONDS) >= LOGIN_MAX_ATTEMPTS:
+            flash("Too many failed login attempts. Try again in a few minutes.", "error")
+            return render_template("login.html")
         username = request.form.get("username", "")
         password = request.form.get("password", "")
         if verify_credentials(username, password):
             login_user(AdminUser())
-            db.add_audit(username, "login", detail=f"from {_client_ip()}")
+            db.clear_login_failures(ip)
+            db.add_audit(username, "login", detail=f"from {ip}")
             return redirect(url_for("main.clients"))
-        db.add_audit(username or "(blank)", "login", result="error", detail=f"bad credentials from {_client_ip()}")
+        db.record_login_failure(ip)
+        db.add_audit(username or "(blank)", "login", result="error", detail=f"bad credentials from {ip}")
         flash("Invalid username or password.", "error")
     return render_template("login.html")
 
