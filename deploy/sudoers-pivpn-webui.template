@@ -12,8 +12,14 @@ __USER__ ALL=(root) NOPASSWD: /usr/sbin/netfilter-persistent
 # persisted_rule_ids() reads the saved-rules snapshot back via this, as
 # root, since the file is root:root 640 — without this grant it's always
 # unreadable and the Saved column shows "Unsaved" even right after a
-# successful Save Rules.
-__USER__ ALL=(root) NOPASSWD: /bin/cat
+# successful Save Rules. Pinned to this one fixed path (matching
+# PERSISTED_RULES_PATH's default, which setup.sh never overrides in .env)
+# rather than a bare `/bin/cat` — the app only ever reads this one file,
+# so there's no reason to also grant root-read of every other file on the
+# box. If you set PERSISTED_RULES_PATH to something else in .env by hand,
+# update this line (and re-run setup.sh) to match, or Save Rules will
+# start failing silently (cat requires a password it can't provide).
+__USER__ ALL=(root) NOPASSWD: /bin/cat /etc/iptables/rules.v4
 # For the CD deploy workflow's forced-command SSH key (see setup-cd-deploy.sh
 # and README) — scoped to restarting only this one service, nothing else
 # systemctl can do.
