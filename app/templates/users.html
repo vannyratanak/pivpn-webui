@@ -1,7 +1,12 @@
 {% extends "base.html" %}
 {% block title %}Users — PiVPN Web UI{% endblock %}
 {% block content %}
-<h1>Users</h1>
+<div class="page-header-row">
+  <h1>Users</h1>
+  {% if users %}
+    <input type="text" id="users-filter" class="log-filter-input filter-input-inline" placeholder="Search…" aria-label="Search users">
+  {% endif %}
+</div>
 
 {% if current_user.is_admin %}
 <section class="card">
@@ -52,11 +57,12 @@
 
 <section class="card">
   <h2>Existing users</h2>
+
   {% if not users %}
     <p class="empty">No users found.</p>
   {% else %}
   <div class="table-scroll">
-  <table>
+  <table id="users-table">
     <thead>
       <tr>
         <th scope="col">Username</th>
@@ -65,7 +71,7 @@
         {% if current_user.is_admin %}<th scope="col">Actions</th>{% endif %}
       </tr>
     </thead>
-    <tbody>
+    <tbody id="users-tbody">
       {% for u in users %}
       <tr>
         <td>{{ u.username }}{% if u.id == current_user.id | int %} <span class="hint">(you)</span>{% endif %}</td>
@@ -106,6 +112,25 @@
     </tbody>
   </table>
   </div>
+  <div class="pagination" id="users-pagination">
+    <label class="pagination-size">Show
+      <select id="users-page-size">
+        <option value="10" selected>10</option>
+        <option value="25">25</option>
+        <option value="50">50</option>
+        <option value="100">100</option>
+      </select>
+    </label>
+    <div class="pagination-nav">
+      <button type="button" class="btn btn-sm" data-page-prev>Prev</button>
+      <span data-page-status class="hint"></span>
+      <button type="button" class="btn btn-sm" data-page-next>Next</button>
+    </div>
+  </div>
+  <script>
+    const usersPager = attachPagination('#users-tbody', 'tr', 'users-page-size', 'users-pagination');
+    attachLogFilter('users-filter', '#users-tbody', 'tr', '#users-table thead th:not(:last-child)', () => usersPager && usersPager.refresh());
+  </script>
   {% endif %}
 </section>
 {% endblock %}
