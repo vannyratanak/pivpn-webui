@@ -759,6 +759,34 @@ th {
   #clients-table .actions .btn { width: 96px; }
 }
 
+/* users-table: same fixed-layout treatment as clients-table — without it,
+   auto-layout gave the Actions column far more width than its buttons
+   need, and since .actions defaults to justify-content: flex-end (see
+   above), the buttons floated in a huge empty gap far from the rest of
+   the row instead of sitting compactly after Created. 4 columns, no
+   checkbox (bulk-select was considered and dropped for this table).
+   130px button width fits "Reset password", this table's longest label
+   (vs. clients-table's 71px sized for "Download"). */
+#users-table { table-layout: fixed; min-width: 730px; }
+#users-table th:nth-child(1) { width: 220px; }
+#users-table th:nth-child(2) { width: 120px; }
+#users-table th:nth-child(3) { width: 170px; }
+#users-table th:nth-child(4) { width: 220px; }
+
+#users-table .actions {
+  justify-content: flex-start;
+}
+#users-table .actions .btn {
+  width: 130px;
+  text-align: center;
+}
+
+@media (max-width: 600px) {
+  #users-table { min-width: 850px; }
+  #users-table th:nth-child(4) { width: 340px; }
+  #users-table .actions .btn { width: 165px; }
+}
+
 /* rules-table is auto-layout (not fixed like clients-table), and .actions'
    flex-wrap lets its column collapse to one button's width instead of
    fitting both Disable/Enable + Delete side by side — give it a floor. */
