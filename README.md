@@ -232,14 +232,21 @@ It's bound to localhost on purpose — this panel can revoke certs and edit
 your firewall, so it shouldn't be reachable from the internet without more
 thought than a weekend project gets. Options, easiest first:
 
-- **SSH tunnel**: `ssh -L 8443:127.0.0.1:8443 youruser@yourserver`, then
-  browse to `https://127.0.0.1:8443` from your laptop. Simplest, no extra
-  exposure.
+- **SSH tunnel**: requires `./setup-nginx.sh` to already be set up (nginx is
+  what actually speaks TLS — gunicorn itself never does, see below), then
+  `ssh -L 8443:127.0.0.1:443 youruser@yourserver` (note: remote port
+  **443**, nginx's port — not `BIND_PORT`/8443, gunicorn's own plain-HTTP-
+  only port). Browse to `https://127.0.0.1:8443` from your laptop.
+  Simplest, no extra exposure.
 - **LAN-only**: set `BIND_HOST=0.0.0.0` in `.env`, restart the service, and
   add a host-firewall rule scoping port `BIND_PORT` to your LAN subnet
   specifically — don't just open the bind address and rely on there being
   no route from further out. Plain traffic, no auth beyond the app's login,
-  so only do this on a network you trust:
+  so only do this on a network you trust. Also set `SESSION_COOKIE_SECURE=false`
+  in `.env` for this mode — the cookie a login issues is marked
+  HTTPS-only by default, so over plain HTTP it would never come back on
+  the next request and login would look like it silently fails
+  (redirect-loops back to `/login`):
   ```bash
   sudo iptables -A INPUT -p tcp --dport 8443 -s 192.168.1.0/24 -j ACCEPT
   sudo iptables -A INPUT -p tcp --dport 8443 -j DROP

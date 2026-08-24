@@ -41,6 +41,14 @@ def test_session_lifetime_matches_configured_hours(client):
     assert client.application.config["PERMANENT_SESSION_LIFETIME"] == timedelta(hours=config.SESSION_LIFETIME_HOURS)
 
 
+def test_session_cookie_secure_defaults_on(client):
+    # Confirms the app config actually picks up config.SESSION_COOKIE_SECURE
+    # (default True) — not just that the setting exists somewhere unused.
+    import config
+    assert client.application.config["SESSION_COOKIE_SECURE"] == config.SESSION_COOKIE_SECURE
+    assert config.SESSION_COOKIE_SECURE is True
+
+
 def test_logout_requires_login(client):
     resp = client.get("/logout")
     assert resp.status_code == 302

@@ -20,6 +20,17 @@ ADMIN_PASSWORD_HASH = os.environ.get("ADMIN_PASSWORD_HASH")
 # "N hours since your *last* request," not "N hours since you logged in."
 SESSION_LIFETIME_HOURS = int(os.environ.get("SESSION_LIFETIME_HOURS", "8"))
 
+# A browser only ever sends a "Secure" cookie back over HTTPS — without
+# it, the session cookie would still be sent in plaintext over any HTTP
+# connection that reaches this app. Defaults on because the two primary
+# documented access paths (setup-nginx.sh's reverse proxy, or the relay)
+# are both HTTPS-only. The one real exception is the README's "LAN-only"
+# option (BIND_HOST=0.0.0.0, deliberately plain HTTP, no TLS at all) —
+# that mode needs this set to false in .env, or the cookie a login just
+# issued would never come back on the next request and login would look
+# like it silently fails (redirect-loops back to /login).
+SESSION_COOKIE_SECURE = os.environ.get("SESSION_COOKIE_SECURE", "true").lower() != "false"
+
 OVPN_DIR = os.environ.get("PIVPN_OVPN_DIR", str(Path.home() / "ovpns"))
 OPENVPN_CCD_DIR = os.environ.get("OPENVPN_CCD_DIR", "/etc/openvpn/ccd")
 OPENVPN_SUBNET_BASE = os.environ.get("OPENVPN_SUBNET_BASE", "10.8.0")

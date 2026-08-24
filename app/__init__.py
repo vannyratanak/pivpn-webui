@@ -45,6 +45,7 @@ def create_app():
     # set — this alone doesn't apply a limit to the plain (non-permanent)
     # session cookie Flask uses by default.
     app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=config.SESSION_LIFETIME_HOURS)
+    app.config["SESSION_COOKIE_SECURE"] = config.SESSION_COOKIE_SECURE
 
     db.init_db()
     login_manager.init_app(app)
