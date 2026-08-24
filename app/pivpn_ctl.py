@@ -144,6 +144,10 @@ def import_clients(text: str) -> tuple[int, list[str]]:
             continue
         try:
             tokens = shlex.split(line)
+        except ValueError as exc:
+            errors.append(f"line {i}: {exc}")
+            continue
+        try:
             fields = {}
             for tok in tokens:
                 if "=" not in tok:

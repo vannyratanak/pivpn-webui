@@ -49,3 +49,24 @@ def test_list_clients_raises_on_nonzero_exit(monkeypatch):
         assert False, "expected PivpnError"
     except pivpn_ctl.PivpnError:
         pass
+
+
+# --- import_clients: an unbalanced quote must produce a clean per-line
+# error, not an unhandled ValueError from shlex.split — found live: an
+# import file with a stray quote crashed the whole request with a raw
+# 500 instead of the "line N: ..." message every other bad line gets.
+
+def test_import_clients_unbalanced_quote_is_caught_not_raised():
+    added, errors = pivpn_ctl.import_clients('name="unbalanced\n')
+    assert added == 0
+    assert len(errors) == 1
+    assert "line 1" in errors[0]
+
+
+def test_import_clients_one_bad_line_does_not_stop_the_rest(monkeypatch):
+    monkeypatch.setattr(pivpn_ctl, "add_client", lambda name, passphrase=None: None)
+    text = 'name="unbalanced\nname=validclient\n'
+    added, errors = pivpn_ctl.import_clients(text)
+    assert added == 1
+    assert len(errors) == 1
+    assert "line 1" in errors[0]

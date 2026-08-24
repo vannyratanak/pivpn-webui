@@ -9,6 +9,7 @@ from app.firewall import (
     _check_client_block_self_lockout,
     _client_block_argv,
     _client_block_input_argv,
+    _parse_import_line,
     _parse_rule_spec,
     _positions_for_new_specs,
     _require_proto_for_dport,
@@ -452,3 +453,28 @@ def test_add_input_rule_rejects_any_protocol_with_port(monkeypatch):
         add_input_rule(action="ACCEPT", protocol="all", src=None, dport="9991")
     assert inserted == []  # rejected before ever touching the DB or iptables
     assert applied == []
+
+
+# --- _parse_import_line: an unbalanced quote must raise FirewallError,
+# never a raw ValueError from shlex.split — found live: a $VAR substituted
+# into an otherwise-fine import line can introduce a stray quote that only
+# breaks *after* substitution, past the caller's own pre-substitution
+# shlex.split guard, and crashed the whole import request with a raw 500.
+
+def test_parse_import_line_unbalanced_quote_raises_firewall_error():
+    with pytest.raises(FirewallError):
+        _parse_import_line('forward action=DROP comment="unbalanced')
+
+
+def test_import_rules_variable_substitution_unbalanced_quote_is_caught():
+    # COMMENT_VAL's value is fine quoted on its own definition line; only
+    # once substituted into the next line (replacing the literal
+    # "$COMMENT_VAL" text) does the apostrophe end up unquoted and unbalanced.
+    text = (
+        "COMMENT_VAL=\"john's rule\"\n"
+        "forward action=DROP protocol=tcp src=198.51.100.0/24 dport=9 comment=$COMMENT_VAL\n"
+    )
+    added, errors = import_rules(text)
+    assert added == 0
+    assert len(errors) == 1
+    assert "line 2" in errors[0]

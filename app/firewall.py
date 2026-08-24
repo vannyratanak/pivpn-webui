@@ -548,8 +548,16 @@ _IMPORT_ADDERS = {
 
 def _parse_import_line(line: str) -> tuple[str, dict]:
     """'kind key=value key="quoted value" ...' -> (kind, {key: value}).
-    shlex handles the quoting so a comment can contain spaces."""
-    tokens = shlex.split(line)
+    shlex handles the quoting so a comment can contain spaces. Raises
+    FirewallError (never a raw ValueError) for unbalanced quoting — this
+    runs on the *post-variable-substitution* line (see import_rules), so
+    a $VAR whose value itself contains a stray quote can make an
+    otherwise-fine line unbalanced only after substitution; the caller's
+    own pre-substitution shlex.split guard doesn't catch that case."""
+    try:
+        tokens = shlex.split(line)
+    except ValueError as exc:
+        raise FirewallError(str(exc)) from exc
     if not tokens:
         raise FirewallError("Empty line.")
     kind = tokens[0].lower()
