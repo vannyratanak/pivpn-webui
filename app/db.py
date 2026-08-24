@@ -53,6 +53,18 @@ CREATE TABLE IF NOT EXISTS login_failures (
     ip TEXT NOT NULL,
     ts TEXT DEFAULT CURRENT_TIMESTAMP
 );
+
+-- No 'active' column on purpose: CRUD means a real delete, not a
+-- soft-disable flag. role: 'admin' (full access) | 'moderator' (client
+-- control + Logs' Client Sessions/Auth tabs only, view-only on this table)
+-- — see app/auth.py's admin_required.
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'admin',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 
@@ -85,6 +97,20 @@ def init_db():
         # without one) — fall back to id order, which is what they sorted by
         # already.
         conn.execute("UPDATE firewall_rules SET position = id WHERE position IS NULL")
+        # One-time bootstrap: this app used to have exactly one hardcoded
+        # account, authenticated against ADMIN_USERNAME/ADMIN_PASSWORD_HASH
+        # in .env (see config.py). The first time this runs against a users
+        # table with nothing in it yet, carry that account over as a real
+        # row — every existing install's current login keeps working with
+        # zero manual steps, and .env's values become unused dead config
+        # from here on (verify_credentials only ever reads the users table
+        # once it has at least one row).
+        (user_count,) = conn.execute("SELECT COUNT(*) FROM users").fetchone()
+        if user_count == 0 and config.ADMIN_USERNAME and config.ADMIN_PASSWORD_HASH:
+            conn.execute(
+                "INSERT INTO users (username, password_hash) VALUES (?, ?)",
+                (config.ADMIN_USERNAME, config.ADMIN_PASSWORD_HASH),
+            )
         conn.commit()
     finally:
         conn.close()
@@ -169,6 +195,75 @@ def set_enabled(rule_id: int, enabled: bool):
     conn = get_conn()
     try:
         conn.execute("UPDATE firewall_rules SET enabled=? WHERE id=?", (1 if enabled else 0, rule_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_user(user_id: int):
+    conn = get_conn()
+    try:
+        row = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def get_user_by_username(username: str):
+    conn = get_conn()
+    try:
+        row = conn.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def list_users() -> list[dict]:
+    conn = get_conn()
+    try:
+        return [dict(r) for r in conn.execute("SELECT * FROM users ORDER BY username").fetchall()]
+    finally:
+        conn.close()
+
+
+def count_users() -> int:
+    conn = get_conn()
+    try:
+        (count,) = conn.execute("SELECT COUNT(*) FROM users").fetchone()
+        return count
+    finally:
+        conn.close()
+
+
+def insert_user(username: str, password_hash: str, role: str = "admin") -> int:
+    conn = get_conn()
+    try:
+        try:
+            cur = conn.execute(
+                "INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
+                (username, password_hash, role),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise ValueError(f"A user named '{username}' already exists.") from exc
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def delete_user(user_id: int):
+    conn = get_conn()
+    try:
+        conn.execute("DELETE FROM users WHERE id=?", (user_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def set_user_password(user_id: int, password_hash: str):
+    conn = get_conn()
+    try:
+        conn.execute("UPDATE users SET password_hash=? WHERE id=?", (password_hash, user_id))
         conn.commit()
     finally:
         conn.close()

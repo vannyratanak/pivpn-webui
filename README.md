@@ -479,7 +479,15 @@ reinstall steps exist.
 
 ## Known limitations / things to check
 
-- Single static admin user — fine for one operator, not built for a team.
+- Two roles, no finer-grained permissions yet: `admin` (full access) and
+  `moderator` (Clients page + Logs' Client Sessions/Auth tabs only — no
+  Firewall, VPN Routes, or user management beyond viewing the list). Manage
+  accounts from the Users page (admin-only for add/delete/reset-password;
+  every user can change their own password from there regardless of role).
+  Changing a password does not invalidate that account's *other* already-open
+  sessions elsewhere — there's no server-side session store to revoke against
+  with Flask's plain cookie sessions, only the account whose password changed
+  needs to log back in anywhere it matters.
 - Login is rate-limited (5 failed attempts / 5 minutes, per source IP —
   see `app/db.py`'s `login_failures` table) and sessions expire after
   `SESSION_LIFETIME_HOURS` (default 8) of inactivity — a sliding window,

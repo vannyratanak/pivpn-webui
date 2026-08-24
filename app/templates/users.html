@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block title %}Users — PiVPN Web UI{% endblock %}
+{% block content %}
+<h1>Users</h1>
+
+<section class="card">
+  <h2>Change your password</h2>
+  <p class="hint">Changing your own password requires your current one — this is different from an admin resetting someone else's below, which doesn't.</p>
+  <form method="post" action="{{ url_for('main.change_own_password') }}" class="inline-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label><span class="label-text">Current password<span class="required-star" aria-hidden="true">*</span></span>
+      <input type="password" name="current_password" required autocomplete="current-password">
+    </label>
+    <label><span class="label-text">New password<span class="required-star" aria-hidden="true">*</span></span>
+      <input type="password" name="password" required autocomplete="new-password">
+    </label>
+    <label><span class="label-text">Confirm<span class="required-star" aria-hidden="true">*</span></span>
+      <input type="password" name="confirm" required autocomplete="new-password">
+    </label>
+    <button type="submit">Change password</button>
+  </form>
+</section>
+
+{% if current_user.is_admin %}
+<section class="card">
+  <details class="collapsible">
+    <summary><h2>Add user</h2></summary>
+    <form method="post" action="{{ url_for('main.add_user') }}" class="inline-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label><span class="label-text">Username<span class="required-star" aria-hidden="true">*</span></span>
+        <input type="text" name="username" required autocomplete="off">
+      </label>
+      <label><span class="label-text">Password<span class="required-star" aria-hidden="true">*</span></span>
+        <input type="password" name="password" required autocomplete="new-password">
+      </label>
+      <label><span class="label-text">Confirm<span class="required-star" aria-hidden="true">*</span></span>
+        <input type="password" name="confirm" required autocomplete="new-password">
+      </label>
+      <label>Role
+        <select name="role">
+          <option value="admin">Admin (full access)</option>
+          <option value="moderator">Moderator (clients + logs only)</option>
+        </select>
+      </label>
+      <button type="submit">Create user</button>
+    </form>
+  </details>
+</section>
+{% endif %}
+
+<section class="card">
+  <h2>Existing users</h2>
+  {% if not users %}
+    <p class="empty">No users found.</p>
+  {% else %}
+  <div class="table-scroll">
+  <table>
+    <thead>
+      <tr>
+        <th scope="col">Username</th>
+        <th scope="col">Role</th>
+        <th scope="col">Created</th>
+        {% if current_user.is_admin %}<th scope="col">Actions</th>{% endif %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for u in users %}
+      <tr>
+        <td>{{ u.username }}{% if u.id == current_user.id | int %} <span class="hint">(you)</span>{% endif %}</td>
+        <td><span class="badge {{ 'badge-connected' if u.role == 'admin' else 'badge-inactive' }}">{{ u.role }}</span></td>
+        <td>{{ u.created_at }}</td>
+        {% if current_user.is_admin %}
+        <td>
+          <div class="actions">
+          <button type="button" class="btn btn-sm btn-secondary" onclick="document.getElementById('reset-pw-{{ u.id }}').showModal()">Reset password</button>
+          <dialog id="reset-pw-{{ u.id }}" class="modal" onclick="if (event.target === this) this.close()">
+            <button type="button" class="modal-close-btn" onclick="document.getElementById('reset-pw-{{ u.id }}').close()" aria-label="Close">&times;</button>
+            <h2>Reset password for {{ u.username }}</h2>
+            <form method="post" action="{{ url_for('main.reset_user_password', user_id=u.id) }}" class="inline-form">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <label>New password
+                <input type="password" name="password" required autocomplete="new-password">
+              </label>
+              <label>Confirm
+                <input type="password" name="confirm" required autocomplete="new-password">
+              </label>
+              <div class="btn-group">
+                <button type="submit">Set password</button>
+                <button type="button" class="btn" onclick="document.getElementById('reset-pw-{{ u.id }}').close()">Cancel</button>
+              </div>
+            </form>
+          </dialog>
+
+          <form method="post" action="{{ url_for('main.delete_user', user_id=u.id) }}" class="btn-form"
+                onsubmit="return confirm('Permanently remove {{ u.username }}? This cannot be undone.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+          </form>
+          </div>
+        </td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

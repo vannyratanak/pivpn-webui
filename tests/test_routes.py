@@ -1,3 +1,5 @@
+from werkzeug.security import generate_password_hash
+
 from tests.conftest import TEST_PASSWORD
 
 import app.pivpn_ctl as pivpn_ctl
@@ -175,3 +177,200 @@ def test_renew_ordinary_failure_keeps_plain_audit_tag(client, monkeypatch):
     latest = db.list_audit(limit=1)[0]
     assert latest["action"] == "client_renew"
     assert latest["result"] == "error"
+
+
+# --- user management: CRUD, password change, and RBAC (admin vs. moderator).
+# The `client` fixture's own login always uses the bootstrapped admin
+# (username "admin", TEST_PASSWORD) — _add_moderator inserts a second
+# account directly via db.insert_user for tests that need to log in as
+# something with restricted access.
+
+MOD_PASSWORD = "modpass456"
+
+
+def _login_admin(client):
+    client.post("/login", data={"username": "admin", "password": TEST_PASSWORD})
+
+
+def _add_moderator(username="mod"):
+    db.insert_user(username, generate_password_hash(MOD_PASSWORD), "moderator")
+    return username
+
+
+def _login_moderator(client, username="mod"):
+    client.post("/login", data={"username": username, "password": MOD_PASSWORD})
+
+
+def test_users_page_requires_login(client):
+    resp = client.get("/users")
+    assert resp.status_code == 302
+    assert "/login" in resp.headers["Location"]
+
+
+def test_users_page_loads_for_admin(client):
+    _login_admin(client)
+    resp = client.get("/users")
+    assert resp.status_code == 200
+    assert b"admin" in resp.data
+
+
+def test_add_user_creates_moderator(client):
+    _login_admin(client)
+    resp = client.post("/users/add", data={
+        "username": "newmod", "password": "x", "confirm": "x", "role": "moderator",
+    })
+    assert resp.status_code == 302
+    row = db.get_user_by_username("newmod")
+    assert row is not None
+    assert row["role"] == "moderator"
+
+
+def test_add_user_duplicate_username_rejected(client):
+    _login_admin(client)
+    resp = client.post("/users/add", data={
+        "username": "admin", "password": "x", "confirm": "x", "role": "admin",
+    })
+    assert resp.status_code == 302
+    assert db.count_users() == 1  # no duplicate row inserted
+
+
+def test_add_user_password_mismatch_rejected(client):
+    _login_admin(client)
+    client.post("/users/add", data={
+        "username": "newmod", "password": "x", "confirm": "y", "role": "moderator",
+    })
+    assert db.get_user_by_username("newmod") is None
+
+
+def test_add_user_invalid_role_rejected(client):
+    _login_admin(client)
+    client.post("/users/add", data={
+        "username": "newmod", "password": "x", "confirm": "x", "role": "superadmin",
+    })
+    assert db.get_user_by_username("newmod") is None
+
+
+def test_add_user_requires_admin(client):
+    _add_moderator()
+    _login_moderator(client)
+    resp = client.post("/users/add", data={
+        "username": "newmod2", "password": "x", "confirm": "x", "role": "moderator",
+    })
+    assert resp.status_code == 403
+    assert db.get_user_by_username("newmod2") is None
+
+
+def test_delete_last_user_refused(client):
+    _login_admin(client)
+    admin_row = db.get_user_by_username("admin")
+    resp = client.post(f"/users/{admin_row['id']}/delete")
+    assert resp.status_code == 302
+    assert db.count_users() == 1
+
+
+def test_delete_self_refused_even_with_other_users(client):
+    _add_moderator()
+    _login_admin(client)
+    admin_row = db.get_user_by_username("admin")
+    resp = client.post(f"/users/{admin_row['id']}/delete")
+    assert resp.status_code == 302
+    assert db.get_user_by_username("admin") is not None  # still there
+
+
+def test_delete_other_user_succeeds(client):
+    _add_moderator()
+    _login_admin(client)
+    mod_row = db.get_user_by_username("mod")
+    resp = client.post(f"/users/{mod_row['id']}/delete")
+    assert resp.status_code == 302
+    assert db.get_user_by_username("mod") is None
+
+
+def test_delete_user_requires_admin(client):
+    _add_moderator()
+    _login_moderator(client)
+    admin_row = db.get_user_by_username("admin")
+    resp = client.post(f"/users/{admin_row['id']}/delete")
+    assert resp.status_code == 403
+    assert db.get_user_by_username("admin") is not None
+
+
+def test_reset_password_requires_admin(client):
+    _add_moderator()
+    _login_moderator(client)
+    admin_row = db.get_user_by_username("admin")
+    resp = client.post(f"/users/{admin_row['id']}/reset-password", data={
+        "password": "hacked", "confirm": "hacked",
+    })
+    assert resp.status_code == 403
+
+
+def test_reset_password_success_lets_target_log_in_with_new_password(client):
+    _add_moderator()
+    _login_admin(client)
+    mod_row = db.get_user_by_username("mod")
+    resp = client.post(f"/users/{mod_row['id']}/reset-password", data={
+        "password": "newmodpass", "confirm": "newmodpass",
+    })
+    assert resp.status_code == 302
+    client.get("/logout")
+    resp = client.post("/login", data={"username": "mod", "password": "newmodpass"})
+    assert resp.status_code == 302
+    assert resp.headers["Location"] == "/clients"
+
+
+def test_change_own_password_requires_correct_current_password(client):
+    _login_admin(client)
+    resp = client.post("/account/password", data={
+        "current_password": "wrong", "password": "newpass", "confirm": "newpass",
+    })
+    assert resp.status_code == 302
+    client.get("/logout")
+    # old password still works, new one doesn't
+    resp = client.post("/login", data={"username": "admin", "password": TEST_PASSWORD})
+    assert resp.headers["Location"] == "/clients"
+
+
+def test_change_own_password_success(client):
+    _login_admin(client)
+    client.post("/account/password", data={
+        "current_password": TEST_PASSWORD, "password": "newpass789", "confirm": "newpass789",
+    })
+    client.get("/logout")
+    resp = client.post("/login", data={"username": "admin", "password": "newpass789"})
+    assert resp.status_code == 302
+    assert resp.headers["Location"] == "/clients"
+
+
+def test_moderator_cannot_access_firewall(client):
+    _add_moderator()
+    _login_moderator(client)
+    assert client.get("/firewall").status_code == 403
+
+
+def test_moderator_cannot_access_vpn_routes(client):
+    _add_moderator()
+    _login_moderator(client)
+    assert client.get("/vpn-routes").status_code == 403
+
+
+def test_moderator_can_access_clients(client):
+    _add_moderator()
+    _login_moderator(client)
+    assert client.get("/clients").status_code == 200
+
+
+def test_moderator_logs_tab_falls_back_from_disallowed_tab(client):
+    _add_moderator()
+    _login_moderator(client)
+    resp = client.get("/logs?tab=system")
+    assert resp.status_code == 200
+    # A moderator asking for ?tab=system must not actually get it — the
+    # System tab's own markers shouldn't render at all.
+    assert b"System journal" not in resp.data
+
+
+def test_admin_still_has_full_firewall_access(client):
+    _login_admin(client)
+    assert client.get("/firewall").status_code == 200
+    assert client.get("/vpn-routes").status_code == 200

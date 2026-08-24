@@ -14,7 +14,7 @@ def test_init_db_creates_both_tables(tmp_path, monkeypatch):
     conn = db.get_conn()
     tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     conn.close()
-    assert {"firewall_rules", "audit_log"}.issubset(tables)
+    assert {"firewall_rules", "audit_log", "users"}.issubset(tables)
 
 
 def test_insert_and_list_rule(tmp_path, monkeypatch):
@@ -108,3 +108,89 @@ def test_clear_login_failures(tmp_path, monkeypatch):
     db.record_login_failure("203.0.113.9")
     db.clear_login_failures("203.0.113.9")
     assert db.count_recent_login_failures("203.0.113.9", window_seconds=300) == 0
+
+
+# --- users table: CRUD, uniqueness, and the one-time bootstrap-from-.env
+# path in init_db(). _use_temp_db_no_bootstrap additionally blanks
+# ADMIN_USERNAME/ADMIN_PASSWORD_HASH so a real local .env's values (if any)
+# can't race these tests by auto-creating their own "admin" row first.
+
+def _use_temp_db_no_bootstrap(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "ADMIN_USERNAME", None)
+    monkeypatch.setattr(config, "ADMIN_PASSWORD_HASH", None)
+    _use_temp_db(tmp_path, monkeypatch)
+
+
+def test_insert_and_get_user(tmp_path, monkeypatch):
+    _use_temp_db_no_bootstrap(tmp_path, monkeypatch)
+    user_id = db.insert_user("alice", "hash123", "moderator")
+    row = db.get_user(user_id)
+    assert row["username"] == "alice"
+    assert row["role"] == "moderator"
+    assert db.get_user_by_username("alice")["id"] == user_id
+
+
+def test_insert_user_defaults_to_admin_role(tmp_path, monkeypatch):
+    _use_temp_db_no_bootstrap(tmp_path, monkeypatch)
+    user_id = db.insert_user("alice", "hash123")
+    assert db.get_user(user_id)["role"] == "admin"
+
+
+def test_insert_duplicate_username_raises(tmp_path, monkeypatch):
+    _use_temp_db_no_bootstrap(tmp_path, monkeypatch)
+    db.insert_user("alice", "hash123")
+    try:
+        db.insert_user("alice", "hash456")
+        assert False, "expected ValueError"
+    except ValueError:
+        pass
+    assert db.count_users() == 1  # the failed insert never landed
+
+
+def test_list_users_ordered_by_username(tmp_path, monkeypatch):
+    _use_temp_db_no_bootstrap(tmp_path, monkeypatch)
+    db.insert_user("zeb", "h")
+    db.insert_user("alice", "h")
+    usernames = [u["username"] for u in db.list_users()]
+    assert usernames == ["alice", "zeb"]
+
+
+def test_delete_user(tmp_path, monkeypatch):
+    _use_temp_db_no_bootstrap(tmp_path, monkeypatch)
+    user_id = db.insert_user("alice", "hash123")
+    db.delete_user(user_id)
+    assert db.get_user(user_id) is None
+    assert db.count_users() == 0
+
+
+def test_set_user_password(tmp_path, monkeypatch):
+    _use_temp_db_no_bootstrap(tmp_path, monkeypatch)
+    user_id = db.insert_user("alice", "oldhash")
+    db.set_user_password(user_id, "newhash")
+    assert db.get_user(user_id)["password_hash"] == "newhash"
+
+
+def test_init_db_bootstraps_admin_from_config(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "ADMIN_USERNAME", "admin")
+    monkeypatch.setattr(config, "ADMIN_PASSWORD_HASH", "somehash")
+    _use_temp_db(tmp_path, monkeypatch)
+    users = db.list_users()
+    assert len(users) == 1
+    assert users[0]["username"] == "admin"
+    assert users[0]["password_hash"] == "somehash"
+    assert users[0]["role"] == "admin"
+
+
+def test_init_db_bootstrap_only_runs_once(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "ADMIN_USERNAME", "admin")
+    monkeypatch.setattr(config, "ADMIN_PASSWORD_HASH", "somehash")
+    _use_temp_db(tmp_path, monkeypatch)
+    db.set_user_password(db.get_user_by_username("admin")["id"], "changed-by-user")
+    db.init_db()  # e.g. the next app restart — must not re-bootstrap and clobber the change
+    assert db.count_users() == 1
+    assert db.get_user_by_username("admin")["password_hash"] == "changed-by-user"
+
+
+def test_init_db_no_bootstrap_without_config(tmp_path, monkeypatch):
+    _use_temp_db_no_bootstrap(tmp_path, monkeypatch)
+    assert db.count_users() == 0

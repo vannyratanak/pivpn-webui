@@ -3,14 +3,14 @@ from flask_login import current_user, login_required, login_user, logout_user
 
 import config
 from app import db, firewall, pivpn_ctl, vpn_routes, vpnlog
-from app.auth import AdminUser, verify_credentials
+from app.auth import admin_required, hash_password, verify_credentials
 from app.privileged import PrivilegedCommandError
 
 bp = Blueprint("main", __name__)
 
 
 def _audit(action, target="", result="ok", detail=""):
-    actor = current_user.get_id() if current_user.is_authenticated else "anonymous"
+    actor = current_user.username if current_user.is_authenticated else "anonymous"
     db.add_audit(actor, action, target, result, detail)
 
 
@@ -73,8 +73,9 @@ def login():
             return render_template("login.html")
         username = request.form.get("username", "")
         password = request.form.get("password", "")
-        if verify_credentials(username, password):
-            login_user(AdminUser())
+        user = verify_credentials(username, password)
+        if user:
+            login_user(user)
             # A plain Flask session cookie never expires unless marked
             # permanent — this is what actually activates
             # PERMANENT_SESSION_LIFETIME (see create_app). Combined with
@@ -83,7 +84,7 @@ def login():
             # idle timeout, not a fixed one from login time.
             session.permanent = True
             db.clear_login_failures(ip)
-            db.add_audit(username, "login", detail=f"from {ip}")
+            db.add_audit(user.username, "login", detail=f"from {ip}")
             return redirect(url_for("main.clients"))
         db.record_login_failure(ip)
         db.add_audit(username or "(blank)", "login", result="error", detail=f"bad credentials from {ip}")
@@ -97,6 +98,120 @@ def logout():
     _audit("logout")
     logout_user()
     return redirect(url_for("main.login"))
+
+
+VALID_ROLES = ("admin", "moderator")
+
+
+@bp.route("/users")
+@login_required
+def users():
+    # Both roles can view (a moderator sees who else has access), but only
+    # admin_required routes below can actually change anything — the
+    # template hides those controls for a moderator to match.
+    return render_template("users.html", users=db.list_users())
+
+
+@bp.route("/users/add", methods=["POST"])
+@login_required
+@admin_required
+def add_user():
+    username = request.form.get("username", "").strip()
+    password = request.form.get("password", "")
+    confirm = request.form.get("confirm", "")
+    role = request.form.get("role", "")
+    if role not in VALID_ROLES:
+        flash("Invalid role.", "error")
+        return redirect(url_for("main.users"))
+    if not username or not password:
+        flash("Username and password are required.", "error")
+        return redirect(url_for("main.users"))
+    if password != confirm:
+        flash("Passwords did not match.", "error")
+        return redirect(url_for("main.users"))
+    try:
+        db.insert_user(username, hash_password(password), role)
+        flash(f"User '{username}' created.", "success")
+        _audit("user_add", username, detail=f"role={role}")
+    except ValueError as exc:
+        flash(str(exc), "error")
+        _audit("user_add", username, "error", str(exc))
+    return redirect(url_for("main.users"))
+
+
+@bp.route("/users/<int:user_id>/delete", methods=["POST"])
+@login_required
+@admin_required
+def delete_user(user_id):
+    target = db.get_user(user_id)
+    if not target:
+        flash("User not found.", "error")
+        return redirect(url_for("main.users"))
+    # Both guards protect against the same failure mode the firewall
+    # self-lockout checks exist for: a state nobody can recover from
+    # without direct DB surgery. Deleting the last account would lock out
+    # everyone; deleting yourself mid-session is recoverable (another
+    # admin still exists) but still a confusing way to end up logged out.
+    if db.count_users() <= 1:
+        flash("Cannot delete the last remaining user account.", "error")
+        _audit("user_delete", target["username"], "error", "last remaining account")
+        return redirect(url_for("main.users"))
+    if str(user_id) == current_user.id:
+        flash("Cannot delete your own account while logged in as it.", "error")
+        _audit("user_delete", target["username"], "error", "self-delete")
+        return redirect(url_for("main.users"))
+    db.delete_user(user_id)
+    flash(f"User '{target['username']}' removed.", "success")
+    _audit("user_delete", target["username"])
+    return redirect(url_for("main.users"))
+
+
+@bp.route("/users/<int:user_id>/reset-password", methods=["POST"])
+@login_required
+@admin_required
+def reset_user_password(user_id):
+    target = db.get_user(user_id)
+    if not target:
+        flash("User not found.", "error")
+        return redirect(url_for("main.users"))
+    password = request.form.get("password", "")
+    confirm = request.form.get("confirm", "")
+    if not password:
+        flash("Password is required.", "error")
+        return redirect(url_for("main.users"))
+    if password != confirm:
+        flash("Passwords did not match.", "error")
+        return redirect(url_for("main.users"))
+    db.set_user_password(user_id, hash_password(password))
+    flash(f"Password reset for '{target['username']}'.", "success")
+    _audit("user_password_reset", target["username"])
+    return redirect(url_for("main.users"))
+
+
+@bp.route("/account/password", methods=["POST"])
+@login_required
+def change_own_password():
+    # Unlike reset_user_password above (an already-authenticated different
+    # admin acting on someone else's account), this changes the acting
+    # session's own account — requiring the current password guards against
+    # a stolen session cookie silently taking it over.
+    current = request.form.get("current_password", "")
+    password = request.form.get("password", "")
+    confirm = request.form.get("confirm", "")
+    if not verify_credentials(current_user.username, current):
+        flash("Current password is incorrect.", "error")
+        _audit("account_password_change", current_user.username, "error", "wrong current password")
+        return redirect(url_for("main.users"))
+    if not password:
+        flash("New password is required.", "error")
+        return redirect(url_for("main.users"))
+    if password != confirm:
+        flash("Passwords did not match.", "error")
+        return redirect(url_for("main.users"))
+    db.set_user_password(int(current_user.id), hash_password(password))
+    flash("Your password was changed.", "success")
+    _audit("account_password_change", current_user.username)
+    return redirect(url_for("main.users"))
 
 
 @bp.route("/")
@@ -258,6 +373,7 @@ def block_client(name):
 
 @bp.route("/firewall")
 @login_required
+@admin_required
 def firewall_rules():
     try:
         imported = firewall.discover_cli_rules()
@@ -292,6 +408,7 @@ def firewall_rules():
 
 @bp.route("/firewall/import", methods=["POST"])
 @login_required
+@admin_required
 def import_rules():
     upload = request.files.get("rules_file")
     if not upload or not upload.filename:
@@ -322,6 +439,7 @@ def import_rules():
 
 @bp.route("/vpn-routes")
 @login_required
+@admin_required
 def vpn_routes_page():
     try:
         routes_ = vpn_routes.list_routes()
@@ -333,6 +451,7 @@ def vpn_routes_page():
 
 @bp.route("/vpn-routes/add", methods=["POST"])
 @login_required
+@admin_required
 def add_vpn_route():
     network = request.form.get("network", "")
     netmask = request.form.get("netmask", "")
@@ -348,6 +467,7 @@ def add_vpn_route():
 
 @bp.route("/vpn-routes/remove", methods=["POST"])
 @login_required
+@admin_required
 def remove_vpn_route():
     network = request.form.get("network", "")
     netmask = request.form.get("netmask", "")
@@ -363,6 +483,7 @@ def remove_vpn_route():
 
 @bp.route("/firewall/forward", methods=["POST"])
 @login_required
+@admin_required
 def add_forward():
     try:
         rule_id = firewall.add_forward_rule(
@@ -384,6 +505,7 @@ def add_forward():
 
 @bp.route("/firewall/input", methods=["POST"])
 @login_required
+@admin_required
 def add_input():
     try:
         rule_id = firewall.add_input_rule(
@@ -404,6 +526,7 @@ def add_input():
 
 @bp.route("/firewall/snat", methods=["POST"])
 @login_required
+@admin_required
 def add_snat():
     try:
         rule_id = firewall.add_snat_rule(
@@ -422,6 +545,7 @@ def add_snat():
 
 @bp.route("/firewall/portforward", methods=["POST"])
 @login_required
+@admin_required
 def add_portforward():
     try:
         rule_id = firewall.add_portforward_rule(
@@ -442,6 +566,7 @@ def add_portforward():
 
 @bp.route("/firewall/<int:rule_id>/toggle", methods=["POST"])
 @login_required
+@admin_required
 def toggle_rule(rule_id):
     try:
         rule = db.get_rule(rule_id)
@@ -457,6 +582,7 @@ def toggle_rule(rule_id):
 
 @bp.route("/firewall/<int:rule_id>/reorder", methods=["POST"])
 @login_required
+@admin_required
 def reorder_rule(rule_id):
     """JSON endpoint for the Firewall page's drag-and-drop reorder — unlike
     every other mutation in this app, this one doesn't redirect back to a
@@ -480,6 +606,7 @@ def reorder_rule(rule_id):
 
 @bp.route("/firewall/<int:rule_id>/delete", methods=["POST"])
 @login_required
+@admin_required
 def delete_rule(rule_id):
     rule = db.get_rule(rule_id)
     try:
@@ -496,6 +623,7 @@ def delete_rule(rule_id):
 
 @bp.route("/firewall/bulk-delete", methods=["POST"])
 @login_required
+@admin_required
 def bulk_delete_rules():
     ids = request.form.getlist("rule_ids")
     client_ip = _client_ip()
@@ -533,6 +661,7 @@ def bulk_delete_rules():
 
 @bp.route("/firewall/bulk-disable", methods=["POST"])
 @login_required
+@admin_required
 def bulk_disable_rules():
     ids = request.form.getlist("rule_ids")
     client_ip = _client_ip()
@@ -570,6 +699,7 @@ def bulk_disable_rules():
 
 @bp.route("/firewall/persist", methods=["POST"])
 @login_required
+@admin_required
 def persist_rules():
     try:
         firewall.save_persistent()
@@ -583,6 +713,7 @@ def persist_rules():
 
 @bp.route("/firewall/resync", methods=["POST"])
 @login_required
+@admin_required
 def resync_rules():
     firewall.sync_all()
     flash("Firewall rules reapplied from the database.", "success")
@@ -593,12 +724,19 @@ def resync_rules():
 AUTH_ACTIONS = ("login", "logout")
 
 
+MODERATOR_LOG_TABS = ("client_sessions", "auth")
+
+
 @bp.route("/logs")
 @login_required
 def logs():
-    tab = request.args.get("tab", "sessions")
-    if tab not in ("sessions", "client_sessions", "system", "auth"):
-        tab = "sessions"
+    allowed_tabs = ("sessions", "client_sessions", "system", "auth") if current_user.is_admin else MODERATOR_LOG_TABS
+    default_tab = "sessions" if current_user.is_admin else MODERATOR_LOG_TABS[0]
+    tab = request.args.get("tab", default_tab)
+    # Enforced here, not just hidden in the template — a moderator editing
+    # the URL's ?tab= directly must not be able to reach Sessions/System.
+    if tab not in allowed_tabs:
+        tab = default_tab
 
     sessions = client_sessions = webui_log = system_log = auth_entries = None
     if tab == "sessions":

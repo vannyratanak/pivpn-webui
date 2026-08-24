@@ -4,9 +4,13 @@
 <h1>Logs</h1>
 
 <div class="tabs">
+  {% if current_user.is_admin %}
   <a href="{{ url_for('main.logs', tab='sessions') }}" class="{{ 'active' if tab == 'sessions' }}">VPN Sessions</a>
+  {% endif %}
   <a href="{{ url_for('main.logs', tab='client_sessions') }}" class="{{ 'active' if tab == 'client_sessions' }}">Client Sessions</a>
+  {% if current_user.is_admin %}
   <a href="{{ url_for('main.logs', tab='system') }}" class="{{ 'active' if tab == 'system' }}">System</a>
+  {% endif %}
   <a href="{{ url_for('main.logs', tab='auth') }}" class="{{ 'active' if tab == 'auth' }}">User Auth</a>
 </div>
 
