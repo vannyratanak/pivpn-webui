@@ -389,6 +389,15 @@ select {
   font-size: 14px;
   font-family: inherit;
   cursor: pointer;
+  /* A native <select> never wraps its selected-value display onto a second
+     line no matter how long the option text is — it truncates. min-height
+     (not a fixed height, needed elsewhere for this element) means without
+     this, a long option (e.g. "Moderator (clients + logs only)") wraps and
+     grows the button taller instead, throwing off spacing with whatever
+     sits right below it. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'><path fill='none' stroke='%238a93a8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' d='M6 8l4 4 4-4'/></svg>");
   background-repeat: no-repeat;
   background-position: right 12px center;
