@@ -366,6 +366,19 @@ select {
   -webkit-appearance: none;
   -moz-appearance: none;
   appearance: none;
+  /* Chrome's default computed display for <button> is inline-flex, which
+     centers its content via flexbox (align-items/justify-content) —
+     text-align has no effect on a flex item, so the label stayed centered
+     despite text-align: left below. display: block fixes that part. */
+  display: block;
+  /* Separately, a <button>'s auto height doesn't measure the same way an
+     <input>'s does — with identical padding/border/line-height/font-size,
+     a sibling text input in this same form measures 43px tall and this
+     button still only measured 34px even after the display: block above.
+     Rather than rely on auto-sizing lining up by coincidence, pin it to
+     match: 10px+10px padding + 21px line-height + 1px+1px border = 43px,
+     the same box-sizing: border-box math the text inputs already use. */
+  min-height: 43px;
   width: 100%;
   text-align: left;
   padding: 10px 34px 10px 12px;
