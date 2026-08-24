@@ -642,6 +642,14 @@ button:disabled:hover, .btn:disabled:hover { filter: none; }
 }
 
 .pagination-size .custom-select-wrapper { width: 80px; min-width: 80px; }
+/* Match .btn-sm's height (26px) exactly — the Prev/Next buttons this
+   sits beside in .pagination-nav. .custom-select-trigger's own base
+   min-height (43px) and 10px top/bottom padding are sized for the taller
+   Add-rule form fields, not this compact control, so all three need
+   overriding here: height alone isn't enough since the base rule's
+   min-height is a separate property that still wins as a floor
+   (used height = max(height, min-height) regardless of source order). */
+.pagination-size .custom-select-trigger { height: 26px; min-height: 26px; padding: 0 30px 0 8px; }
 
 /* .rule-client-filter reuses .pagination-size's label+select layout, but
    needs a much wider select than the page-size dropdown's 80px — client
