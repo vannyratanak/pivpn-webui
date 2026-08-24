@@ -21,6 +21,7 @@ from app.firewall import (
     describe_rule,
     import_rules,
     rule_client_name,
+    toggle_rule,
 )
 
 
@@ -366,6 +367,59 @@ def test_add_input_rule_no_client_ip_skips_guard(monkeypatch):
     add_input_rule(action="DROP", protocol="all", src=None, dport=None, client_ip=None)
     assert len(inserted) == 1
     assert len(applied) == 1
+
+
+def _patch_toggle(monkeypatch, rule, other_input_rules=()):
+    # rule is the row toggle_rule looks up via db.get_rule; other_input_rules
+    # are the rest of the currently-enabled input set db.list_rules(enabled_only=True)
+    # would return, standing in for "everything else already live".
+    monkeypatch.setattr("app.firewall.db.get_rule", lambda rule_id: dict(rule))
+    monkeypatch.setattr(
+        "app.firewall.db.list_rules",
+        lambda enabled_only=False: [{"kind": "input", **r} for r in other_input_rules],
+    )
+    set_enabled_calls = []
+    monkeypatch.setattr(
+        "app.firewall.db.set_enabled",
+        lambda rule_id, enabled: set_enabled_calls.append((rule_id, enabled)),
+    )
+    applied = []
+
+    def _run_root(argv):
+        applied.append(argv)
+        return ""  # _rebuild_chain treats this as "-S <chain>" output: no owned rules live yet
+
+    monkeypatch.setattr("app.firewall.run_root", _run_root)
+    return set_enabled_calls, applied
+
+
+def test_toggle_rule_enable_self_lockout_raises_and_never_applies(monkeypatch):
+    # Regression test: re-enabling a disabled blanket-DROP input rule used
+    # to skip the self-lockout guard entirely (only the disable direction
+    # checked it) — a rule that was safe to leave off could silently cut
+    # the admin off the moment it was flipped back on.
+    rule = {**_rule(1, "DROP", src=None, position=1.0), "kind": "input", "enabled": 0}
+    set_enabled_calls, applied = _patch_toggle(monkeypatch, rule, other_input_rules=[])
+    with pytest.raises(FirewallError):
+        toggle_rule(1, client_ip="203.0.113.55")
+    assert set_enabled_calls == []  # refused before ever touching the DB or iptables
+    assert applied == []
+
+
+def test_toggle_rule_enable_allowed_when_earlier_accept_still_covers_caller(monkeypatch):
+    rule = {**_rule(2, "DROP", src=None, position=2.0), "kind": "input", "enabled": 0}
+    earlier_accept = _rule(1, "ACCEPT", "203.0.113.0/24", position=1.0)
+    set_enabled_calls, applied = _patch_toggle(monkeypatch, rule, other_input_rules=[earlier_accept])
+    toggle_rule(2, client_ip="203.0.113.55")
+    assert set_enabled_calls == [(2, True)]
+    assert applied  # chain rebuild actually ran
+
+
+def test_toggle_rule_enable_no_client_ip_skips_guard(monkeypatch):
+    rule = {**_rule(1, "DROP", src=None, position=1.0), "kind": "input", "enabled": 0}
+    set_enabled_calls, applied = _patch_toggle(monkeypatch, rule, other_input_rules=[])
+    toggle_rule(1, client_ip=None)
+    assert set_enabled_calls == [(1, True)]
 
 
 def test_import_adders_accepts_input_kind():

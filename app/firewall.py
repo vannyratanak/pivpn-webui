@@ -767,6 +767,12 @@ def toggle_rule(rule_id: int, client_ip: str | None = None):
         raise FirewallError("Rule not found.")
     new_state = not rule["enabled"]
     if new_state:
+        # A disabled INPUT rule can be a DROP that was safe to leave off
+        # (e.g. the admin's own IP has since moved) — re-enabling it needs
+        # the same guard add_input_rule/reorder_rule already apply, or a
+        # stale rule could silently cut the admin off with no warning.
+        if rule["kind"] == "input":
+            _check_self_lockout(client_ip, _input_rules_without(rule_id) + [rule])
         # DB flip has to happen before any chain rebuild, since rebuild
         # re-derives what's live from db.list_rules(enabled_only=True).
         db.set_enabled(rule_id, True)
