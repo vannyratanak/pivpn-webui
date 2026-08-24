@@ -1,6 +1,7 @@
 from flask import Blueprint, abort, flash, jsonify, redirect, render_template, request, send_file, session, url_for
 from flask_login import current_user, login_required, login_user, logout_user
 
+import config
 from app import db, firewall, pivpn_ctl, vpn_routes, vpnlog
 from app.auth import AdminUser, verify_credentials
 from app.privileged import PrivilegedCommandError
@@ -14,13 +15,25 @@ def _audit(action, target="", result="ok", detail=""):
 
 
 def _client_ip():
-    """The real caller's address, not gunicorn's view of it — gunicorn
-    only ever sees nginx's own loopback connection (no ProxyFix is
-    configured), so request.remote_addr alone would always read
-    127.0.0.1. nginx's vhost already sets X-Real-IP to the actual source;
-    this is what the firewall module's self-lockout check needs, since
-    that's the address iptables itself will actually match against."""
-    return request.headers.get("X-Real-IP", request.remote_addr)
+    """The real caller's address, not gunicorn's view of it.
+
+    BIND_HOST=127.0.0.1 (the default — see setup-nginx.sh) means gunicorn
+    is only ever reachable through nginx's own loopback connection, so
+    request.remote_addr alone would always read 127.0.0.1; nginx's vhost
+    sets X-Real-IP to the actual source on every request, unconditionally
+    overwriting anything a client tried to send, which is what makes that
+    header trustworthy here.
+
+    But BIND_HOST=0.0.0.0 (the README's documented "LAN-only" mode) puts
+    gunicorn directly on the network with nothing in front to sanitize
+    that header — a client can set X-Real-IP to anything, which would
+    trivially defeat both the login rate-limiter and the firewall
+    self-lockout guard (both key off this value). request.remote_addr is
+    the real TCP peer address in that mode and can't be spoofed via a
+    header, so use that instead."""
+    if config.BIND_HOST == "127.0.0.1":
+        return request.headers.get("X-Real-IP", request.remote_addr)
+    return request.remote_addr
 
 
 def _regenerate_script_for_ip(ip, client_ips=None):

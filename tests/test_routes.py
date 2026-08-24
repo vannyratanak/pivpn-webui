@@ -1,6 +1,7 @@
 from tests.conftest import TEST_PASSWORD
 
 import app.pivpn_ctl as pivpn_ctl
+import config
 from app import db
 
 
@@ -56,6 +57,46 @@ def test_logout_requires_login(client):
     resp = client.get("/logout")
     assert resp.status_code == 302
     assert "/login" in resp.headers["Location"]
+
+
+# --- _client_ip: X-Real-IP is only trustworthy when BIND_HOST=127.0.0.1
+# guarantees nginx is the sole caller (nginx's vhost always overwrites
+# that header with the real source). In the README's documented LAN-only
+# mode (BIND_HOST=0.0.0.0), gunicorn is reachable directly and nothing
+# rewrites a client-supplied header — trusting it there would let a
+# client spoof any IP it wants, defeating the login rate-limit and the
+# firewall self-lockout guard, both of which key off this value.
+
+def test_client_ip_trusts_x_real_ip_behind_loopback_nginx(client, monkeypatch):
+    monkeypatch.setattr(config, "BIND_HOST", "127.0.0.1")
+    from app.routes import _client_ip
+    with client.application.test_request_context(headers={"X-Real-IP": "203.0.113.9"}):
+        assert _client_ip() == "203.0.113.9"
+
+
+def test_client_ip_ignores_x_real_ip_when_lan_exposed(client, monkeypatch):
+    monkeypatch.setattr(config, "BIND_HOST", "0.0.0.0")
+    from app.routes import _client_ip
+    with client.application.test_request_context(
+        headers={"X-Real-IP": "203.0.113.9"},
+        environ_overrides={"REMOTE_ADDR": "192.168.1.50"},
+    ):
+        assert _client_ip() == "192.168.1.50"
+
+
+def test_login_rate_limit_not_bypassable_via_spoofed_x_real_ip_when_lan_exposed(client, monkeypatch):
+    # Regression test for the exact bypass: rotating X-Real-IP on every
+    # attempt used to reset the rate limiter's notion of "which IP", no
+    # matter how many times the real client actually failed.
+    monkeypatch.setattr(config, "BIND_HOST", "0.0.0.0")
+    from app.routes import LOGIN_MAX_ATTEMPTS
+    for i in range(LOGIN_MAX_ATTEMPTS + 1):
+        resp = client.post(
+            "/login", data={"username": "admin", "password": "wrong"},
+            headers={"X-Real-IP": f"10.0.0.{i}"},
+            environ_overrides={"REMOTE_ADDR": "192.168.1.50"},
+        )
+    assert b"Too many failed login attempts" in resp.data
 
 
 # --- login rate-limiting: a plain in-process counter wouldn't be seen by
