@@ -1,5 +1,8 @@
 from tests.conftest import TEST_PASSWORD
 
+import app.pivpn_ctl as pivpn_ctl
+from app import db
+
 
 def test_login_page_loads(client):
     resp = client.get("/login")
@@ -97,3 +100,37 @@ def test_successful_login_clears_the_failure_count(client):
     for _ in range(LOGIN_MAX_ATTEMPTS - 1):
         resp = client.post("/login", data={"username": "admin", "password": "wrong"})
     assert b"Too many failed login attempts" not in resp.data
+
+
+# --- renew route: a PivpnRenewPartialFailure (revoke succeeded, re-add
+# failed — client now has zero access) needs a distinct audit tag from an
+# ordinary renew failure, so it's easy to spot in Logs later.
+
+def test_renew_partial_failure_gets_distinct_audit_tag(client, monkeypatch):
+    client.post("/login", data={"username": "admin", "password": TEST_PASSWORD})
+
+    def fake_renew(name):
+        raise pivpn_ctl.PivpnRenewPartialFailure(f"'{name}' was revoked but re-add failed.")
+
+    monkeypatch.setattr("app.routes.pivpn_ctl.renew_client", fake_renew)
+    resp = client.post("/clients/testclient/renew")
+    assert resp.status_code == 302
+
+    latest = db.list_audit(limit=1)[0]
+    assert latest["action"] == "client_renew_partial"
+    assert latest["result"] == "error"
+
+
+def test_renew_ordinary_failure_keeps_plain_audit_tag(client, monkeypatch):
+    client.post("/login", data={"username": "admin", "password": TEST_PASSWORD})
+
+    def fake_renew(name):
+        raise pivpn_ctl.PivpnError("pivpn revoke failed")
+
+    monkeypatch.setattr("app.routes.pivpn_ctl.renew_client", fake_renew)
+    resp = client.post("/clients/testclient/renew")
+    assert resp.status_code == 302
+
+    latest = db.list_audit(limit=1)[0]
+    assert latest["action"] == "client_renew"
+    assert latest["result"] == "error"

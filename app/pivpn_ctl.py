@@ -38,6 +38,16 @@ class PivpnError(RuntimeError):
     pass
 
 
+class PivpnRenewPartialFailure(PivpnError):
+    """Raised only by renew_client: the old certificate was revoked but
+    reissuing the new one then failed. Unlike every other PivpnError, this
+    means the client now has NO valid certificate at all (not just still
+    on the old one) — revoke is irreversible by design (that's the whole
+    point of PKI revocation), so there's no rollback here, only a louder
+    warning. Callers should surface this distinctly rather than as a
+    generic renew failure."""
+
+
 def validate_name(name: str) -> str:
     name = (name or "").strip()
     if not CLIENT_NAME_RE.match(name):
@@ -173,10 +183,20 @@ def remove_client(name: str) -> None:
 
 
 def renew_client(name: str) -> Path:
-    """Revoke + reissue under the same name (see module docstring)."""
+    """Revoke + reissue under the same name (see module docstring).
+
+    Not atomic: if add_client fails after remove_client already succeeded,
+    the client is left with zero valid access rather than just stuck on
+    the old cert — see PivpnRenewPartialFailure."""
     name = _validate_name(name)
     remove_client(name)
-    return add_client(name)
+    try:
+        return add_client(name)
+    except PivpnError as exc:
+        raise PivpnRenewPartialFailure(
+            f"'{name}' was revoked, but issuing the new certificate failed: {exc} "
+            "This client now has NO valid VPN access — re-add it manually."
+        ) from exc
 
 
 def _parse_status_log(out: str) -> dict:

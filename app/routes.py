@@ -176,6 +176,12 @@ def renew_client(name):
         pivpn_ctl.renew_client(name)
         flash(f"'{name}' renewed: old cert revoked, new cert issued. The client must install the new .ovpn file.", "success")
         _audit("client_renew", name)
+    except pivpn_ctl.PivpnRenewPartialFailure as exc:
+        # Distinct from a generic renew failure: the old cert is already
+        # gone (revoke is irreversible), not just still in place — flag it
+        # separately in the audit log so it's easy to spot in Logs later.
+        flash(str(exc), "error")
+        _audit("client_renew_partial", name, "error", str(exc))
     except pivpn_ctl.PivpnError as exc:
         flash(str(exc), "error")
         _audit("client_renew", name, "error", str(exc))

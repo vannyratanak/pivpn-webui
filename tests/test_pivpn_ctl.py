@@ -51,6 +51,75 @@ def test_list_clients_raises_on_nonzero_exit(monkeypatch):
         pass
 
 
+# --- renew_client: revoke-then-add is two separate pivpn calls, not one
+# atomic operation — if the revoke succeeds but the re-add then fails,
+# the client ends up with NO valid cert at all (revoke can't be undone),
+# which needs to read very differently from an ordinary renew failure.
+
+class _FakeOvpnPath:
+    """Stands in for client_ovpn_path(name)'s return value: add_client
+    checks .exists() before running 'pivpn add' (must be False so the
+    "already exists" guard doesn't fire) and again after (must flip to
+    True only once a simulated add actually 'succeeds')."""
+    def __init__(self):
+        self.created = False
+
+    def exists(self):
+        return self.created
+
+
+def _renew_run_pivpn(fake_path, revoke_rc=0, add_rc=0, add_stdout="boom"):
+    def fake(argv, timeout=30):
+        if argv[1] == "revoke":
+            return _fake_completed("", returncode=revoke_rc)
+        if add_rc == 0:
+            fake_path.created = True
+        return _fake_completed(add_stdout, returncode=add_rc)
+    return fake
+
+
+def test_renew_client_success_returns_new_path(monkeypatch):
+    monkeypatch.setattr(pivpn_ctl, "_require_pivpn_binary", lambda: None)
+    fake_path = _FakeOvpnPath()
+    monkeypatch.setattr(pivpn_ctl, "client_ovpn_path", lambda name: fake_path)
+    monkeypatch.setattr(pivpn_ctl, "_run_pivpn", _renew_run_pivpn(fake_path))
+    assert pivpn_ctl.renew_client("renewtest") is fake_path
+
+
+def test_renew_client_partial_failure_raises_distinct_error(monkeypatch):
+    # revoke succeeds, the re-add then fails — this is the case that used
+    # to surface as an ordinary-looking PivpnError, no different from any
+    # other renew failure, even though the client now has zero access
+    # instead of just being stuck on the old cert.
+    monkeypatch.setattr(pivpn_ctl, "_require_pivpn_binary", lambda: None)
+    fake_path = _FakeOvpnPath()
+    monkeypatch.setattr(pivpn_ctl, "client_ovpn_path", lambda name: fake_path)
+    monkeypatch.setattr(pivpn_ctl, "_run_pivpn", _renew_run_pivpn(fake_path, revoke_rc=0, add_rc=1))
+    try:
+        pivpn_ctl.renew_client("renewtest")
+        assert False, "expected PivpnRenewPartialFailure"
+    except pivpn_ctl.PivpnRenewPartialFailure as exc:
+        assert "NO valid VPN access" in str(exc)
+        assert "boom" in str(exc)  # underlying pivpn add error still surfaced
+
+
+def test_renew_client_revoke_failure_is_plain_pivpn_error_not_partial(monkeypatch):
+    # If revoke itself never succeeds, the old cert was never touched —
+    # this must stay a plain PivpnError, not the "you now have zero
+    # access" PivpnRenewPartialFailure (add_client is never even reached).
+    monkeypatch.setattr(pivpn_ctl, "_require_pivpn_binary", lambda: None)
+    fake_path = _FakeOvpnPath()
+    monkeypatch.setattr(pivpn_ctl, "client_ovpn_path", lambda name: fake_path)
+    monkeypatch.setattr(pivpn_ctl, "_run_pivpn", _renew_run_pivpn(fake_path, revoke_rc=1))
+    try:
+        pivpn_ctl.renew_client("renewtest")
+        assert False, "expected PivpnError"
+    except pivpn_ctl.PivpnRenewPartialFailure:
+        assert False, "revoke never succeeded — must not report itself as a partial failure"
+    except pivpn_ctl.PivpnError:
+        pass
+
+
 # --- import_clients: an unbalanced quote must produce a clean per-line
 # error, not an unhandled ValueError from shlex.split — found live: an
 # import file with a stray quote crashed the whole request with a raw
