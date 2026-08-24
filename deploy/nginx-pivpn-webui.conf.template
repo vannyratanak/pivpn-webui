@@ -17,5 +17,15 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
+
+        # This panel has one-click destructive POST actions (delete a
+        # firewall rule, revoke/block a client) — nothing here legitimately
+        # needs to be framed by another site, so deny it outright rather
+        # than risk a clickjacking overlay tricking a logged-in admin into
+        # an action they didn't mean to take. `always` matters: without it
+        # nginx only adds these on certain status codes, not on 4xx/5xx.
+        add_header X-Frame-Options "DENY" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "same-origin" always;
     }
 }
