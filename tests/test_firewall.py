@@ -440,6 +440,36 @@ def test_import_rules_raw_input_line_no_longer_crashes(monkeypatch):
     assert added == 1
 
 
+# --- _parse_rule_spec: every recognized flag used to assume a following
+# value existed (tokens[i + 1] with no bounds check) — fine for live `-S`
+# output (iptables itself rejects a flag with no value at insert time),
+# but this also parses arbitrary pasted 'iptables -A ...' lines from the
+# rule importer, where nothing guarantees that. A line truncated right
+# after a flag (a typo, a copy-paste cut short) raised a bare IndexError
+# instead of being treated as an incomplete/unrecognized matcher.
+
+@pytest.mark.parametrize("tail", [
+    ["-s"], ["-d"], ["-p"], ["-i"], ["-o"], ["--dport"], ["-j"], ["-m"],
+    ["-j", "DNAT", "--to-destination"], ["-j", "SNAT", "--to-source"],
+])
+def test_parse_rule_spec_truncated_flag_does_not_crash(tail):
+    _parse_rule_spec(["-A", "FORWARD", *tail])  # must not raise IndexError
+
+
+def test_parse_rule_spec_well_formed_line_still_parses_correctly():
+    parsed = _parse_rule_spec(
+        ["-A", "FORWARD", "-s", "10.8.0.5", "-p", "tcp", "--dport", "443", "-j", "ACCEPT"]
+    )
+    assert parsed == {"src": "10.8.0.5", "protocol": "tcp", "dport": "443", "action": "ACCEPT"}
+
+
+def test_import_rules_truncated_iptables_line_does_not_crash(monkeypatch):
+    _patch_insert_and_apply(monkeypatch, existing_input=[])
+    added, errors = import_rules("iptables -A FORWARD -s\n")
+    assert added == 0
+    assert errors == []  # not a recognized rule (no action) — silently skipped, like other unsupported lines
+
+
 # --- rule_client_name: the Active Rules table's dedicated Client column,
 # decoupled from Details' inline "name (ip)" text so it's its own
 # sortable/scannable field regardless of rule kind.

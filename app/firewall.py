@@ -891,40 +891,49 @@ def _parse_rule_spec(tokens: list[str]) -> dict:
     """Walk a tokenized `-A CHAIN <matchers...> -j <target>` spec into a
     flat dict. Handles the flags this app itself ever emits (see the
     _*_argv builders above) plus '-m tcp/udp --dport', which iptables adds
-    on its own when -S echoes back a protocol+port match."""
+    on its own when -S echoes back a protocol+port match.
+
+    Every lookahead is bounds-checked: live `-S` output can never have a
+    flag with no value (iptables itself rejects that at insert time), but
+    this also parses arbitrary pasted 'iptables -A ...' lines from the
+    rule importer (see _iptables_line_to_fields) — free-typed text with no
+    such guarantee. A truncated flag (e.g. a line ending in bare '-s')
+    used to raise an unhandled IndexError instead of just being treated
+    as an unrecognized/incomplete matcher."""
     d = {}
     i = 2  # tokens[0]='-A', tokens[1]=chain name
-    while i < len(tokens):
+    n = len(tokens)
+    while i < n:
         tok = tokens[i]
-        if tok == "-s":
+        if tok == "-s" and i + 1 < n:
             d["src"] = tokens[i + 1]; i += 2
-        elif tok == "-d":
+        elif tok == "-d" and i + 1 < n:
             d["dst"] = tokens[i + 1]; i += 2
-        elif tok == "-p":
+        elif tok == "-p" and i + 1 < n:
             d["protocol"] = tokens[i + 1]; i += 2
-        elif tok == "-i":
+        elif tok == "-i" and i + 1 < n:
             d["in_iface"] = tokens[i + 1]; i += 2
-        elif tok == "-o":
+        elif tok == "-o" and i + 1 < n:
             d["out_iface"] = tokens[i + 1]; i += 2
-        elif tok == "--dport":
+        elif tok == "--dport" and i + 1 < n:
             d["dport"] = tokens[i + 1]; i += 2
-        elif tok == "-m":
-            if tokens[i + 1] == "comment" and i + 3 < len(tokens) and tokens[i + 2] == "--comment":
+        elif tok == "-m" and i + 1 < n:
+            if tokens[i + 1] == "comment" and i + 3 < n and tokens[i + 2] == "--comment":
                 d["comment"] = tokens[i + 3]
                 i += 4
             else:
                 i += 2  # e.g. "-m tcp" alongside --dport — no extra info beyond -p
-        elif tok == "-j":
+        elif tok == "-j" and i + 1 < n:
             d["action"] = tokens[i + 1]
             i += 2
-            if d["action"] == "DNAT" and i < len(tokens) and tokens[i] == "--to-destination":
+            if d["action"] == "DNAT" and i + 1 < n and tokens[i] == "--to-destination":
                 d["to_destination"] = tokens[i + 1]
                 i += 2
-            elif d["action"] == "SNAT" and i < len(tokens) and tokens[i] == "--to-source":
+            elif d["action"] == "SNAT" and i + 1 < n and tokens[i] == "--to-source":
                 d["to_source"] = tokens[i + 1]
                 i += 2
         else:
-            i += 1  # unrecognized matcher we don't model — skip its flag only
+            i += 1  # unrecognized matcher, or a recognized flag with no value left — skip just this token
     return d
 
 
