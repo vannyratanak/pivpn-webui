@@ -13,7 +13,20 @@ server {
 
     location / {
         proxy_pass http://127.0.0.1:8443;
-        proxy_set_header Host $host;
+        # $http_host, not $host: $host strips the port, but if this server
+        # sits behind a relay that exposes it on a non-default port (see
+        # "Real client IPs behind a relay" below for the relay setup itself
+        # — this is a separate concern from that), a browser's Referer on
+        # every POST includes that port (e.g. https://relay:9443/...).
+        # Flask-WTF's CSRF check (WTF_CSRF_SSL_STRICT, on by default)
+        # compares Referer against the request's own Host — stripping the
+        # port here would mismatch it and fail every POST, including
+        # login, with a CSRF 400. $http_host preserves whatever the
+        # browser actually sent, so it always matches. Identical to $host
+        # for a plain default-port deployment (browsers omit the port from
+        # the Host header when it's the scheme's default), so this is safe
+        # either way.
+        proxy_set_header Host $http_host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
