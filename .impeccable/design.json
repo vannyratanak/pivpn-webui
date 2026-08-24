@@ -1,0 +1,179 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-24T00:00:00Z",
+  "title": "Design System: PiVPN Web UI",
+  "extensions": {
+    "colorMeta": {
+      "console-blue": {
+        "role": "primary",
+        "displayName": "Console Blue",
+        "canonical": "#4f8cff",
+        "tonalRamp": ["#0a1f3d", "#123465", "#1a4a8d", "#235fb0", "#3573d9", "#4f8cff", "#7aa8ff", "#adc9ff"]
+      },
+      "console-blue-light": {
+        "role": "primary",
+        "displayName": "Console Blue (light theme)",
+        "canonical": "#2f5fd6",
+        "tonalRamp": ["#e3edff", "#adc9ff", "#7aa8ff", "#4f8cff", "#3573d9", "#2f5fd6", "#1a4a8d", "#123465"]
+      },
+      "deep-slate": {
+        "role": "neutral",
+        "displayName": "Deep Slate",
+        "canonical": "#0f1420",
+        "tonalRamp": ["#05070b", "#0f1420", "#161d2e", "#1c2438", "#29334d", "#3a4666", "#4f5d80", "#6d7a9c"]
+      },
+      "slate-panel": {
+        "role": "neutral",
+        "displayName": "Slate Panel",
+        "canonical": "#161d2e",
+        "tonalRamp": ["#05070b", "#0f1420", "#161d2e", "#1c2438", "#29334d", "#3a4666", "#4f5d80", "#6d7a9c"]
+      },
+      "slate-panel-raised": {
+        "role": "neutral",
+        "displayName": "Slate Panel Raised",
+        "canonical": "#1c2438",
+        "tonalRamp": ["#05070b", "#0f1420", "#161d2e", "#1c2438", "#29334d", "#3a4666", "#4f5d80", "#6d7a9c"]
+      },
+      "slate-border": {
+        "role": "neutral",
+        "displayName": "Slate Border",
+        "canonical": "#5a6a94",
+        "tonalRamp": ["#141824", "#232a3d", "#333d59", "#465277", "#5a6a94", "#7986aa", "#9ba6c1", "#c3cbdc"]
+      },
+      "frost-text": {
+        "role": "neutral",
+        "displayName": "Frost Text",
+        "canonical": "#e6e9f0",
+        "tonalRamp": ["#141824", "#232a3d", "#454f6b", "#7982a0", "#a7aec2", "#c9cddb", "#e6e9f0", "#f7f8fb"]
+      },
+      "slate-muted": {
+        "role": "neutral",
+        "displayName": "Slate Muted",
+        "canonical": "#8a93a8",
+        "tonalRamp": ["#1c2029", "#33384a", "#4a5268", "#626b85", "#8a93a8", "#a5acbd", "#c2c7d3", "#e0e2e8"]
+      },
+      "mint-ok": {
+        "role": "tertiary",
+        "displayName": "Mint OK",
+        "canonical": "#3ecf8e",
+        "tonalRamp": ["#052e1c", "#0a4e2f", "#106f43", "#189056", "#3ecf8e", "#71dcac", "#a8ecc9", "#e3faed"]
+      },
+      "amber-warn": {
+        "role": "tertiary",
+        "displayName": "Amber Warn",
+        "canonical": "#f5a623",
+        "tonalRamp": ["#3d2400", "#663d00", "#8f5400", "#b86e00", "#f5a623", "#f8bc5c", "#fbd494", "#fdedd1"]
+      },
+      "coral-danger": {
+        "role": "secondary",
+        "displayName": "Coral Danger",
+        "canonical": "#f0556c",
+        "tonalRamp": ["#3d0a12", "#661220", "#8f1a2d", "#b8233b", "#f0556c", "#f4839a", "#f9b3c1", "#fde3e8"]
+      },
+      "pure-danger": {
+        "role": "secondary",
+        "displayName": "Pure Danger (Delete button)",
+        "canonical": "#ed0000",
+        "tonalRamp": ["#330000", "#590000", "#800000", "#a60000", "#ed0000", "#f24d4d", "#f78f8f", "#fcd1d1"]
+      }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "Page titles (h1) — one per page." },
+      "title": { "displayName": "Title", "purpose": "Card/section headings (h2)." },
+      "body": { "displayName": "Body", "purpose": "Default running text and most UI copy." },
+      "label": { "displayName": "Label", "purpose": "Hints, table headers, secondary metadata — always in Slate Muted." },
+      "mono": { "displayName": "Mono", "purpose": "Log/journal views and inline code snippets." }
+    },
+    "shadows": [
+      { "name": "button-resting", "value": "0 1px 2px rgba(0,0,0,0.15)", "purpose": "The only shadow present at rest — just enough to lift a filled button off the flat page." },
+      { "name": "button-hover", "value": "0 2px 5px rgba(0,0,0,0.2)", "purpose": "Heavier lift on hover, paired with a brightness increase." },
+      { "name": "dropdown-menu", "value": "0 8px 24px rgba(0,0,0,0.25)", "purpose": "Heaviest shadow in the system — the open custom-select menu, the one element genuinely floating above everything else." }
+    ],
+    "motion": [
+      { "name": "ease-standard", "value": "0.15s ease", "purpose": "Default transition for color/background/border-color state changes (hover, focus, theme toggle)." }
+    ],
+    "breakpoints": [
+      { "name": "sm", "value": "520px" },
+      { "name": "nav-collapse", "value": "600px" },
+      { "name": "md", "value": "900px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The default action button — filled Console Blue, white text.",
+      "html": "<button class=\"ds-btn ds-btn-primary\">Save Rules</button>",
+      "css": ".ds-btn { height: 34px; padding: 0 14px; border: none; border-radius: 6px; font-weight: 500; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,0.15); transition: filter 0.15s ease, box-shadow 0.15s ease; } .ds-btn:hover { filter: brightness(1.1); box-shadow: 0 2px 5px rgba(0,0,0,0.2); } .ds-btn:focus-visible { outline: 2px solid #4f8cff; outline-offset: 2px; } .ds-btn-primary { background: #4f8cff; color: #fff; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Neutral/routine action (e.g. Renew) — outlined, not filled, so it doesn't compete with the semantic-colored buttons.",
+      "html": "<button class=\"ds-btn ds-btn-secondary\">Renew</button>",
+      "css": ".ds-btn-secondary { height: 34px; padding: 0 14px; border: 1px solid #5a6a94; border-radius: 6px; background: #1c2438; color: #e6e9f0; font-weight: 500; cursor: pointer; box-shadow: none; transition: border-color 0.15s ease, color 0.15s ease; } .ds-btn-secondary:hover { border-color: #4f8cff; color: #4f8cff; box-shadow: 0 2px 5px rgba(0,0,0,0.12); } .ds-btn-secondary:focus-visible { outline: 2px solid #4f8cff; outline-offset: 2px; }"
+    },
+    {
+      "name": "Danger Button",
+      "kind": "button",
+      "refersTo": "button-danger",
+      "description": "Destructive action (Delete/Remove) — a specific fixed red distinct from the --danger token, chosen to clear WCAG contrast with white text.",
+      "html": "<button class=\"ds-btn ds-btn-danger\">Delete</button>",
+      "css": ".ds-btn-danger { height: 34px; padding: 0 14px; border: none; border-radius: 6px; background: #ed0000; color: #fff; font-weight: 500; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,0.15); transition: filter 0.15s ease, box-shadow 0.15s ease; } .ds-btn-danger:hover { filter: brightness(1.1); box-shadow: 0 2px 5px rgba(0,0,0,0.2); } .ds-btn-danger:focus-visible { outline: 2px solid #4f8cff; outline-offset: 2px; }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input-field",
+      "description": "Standard text field — 43px tall, Slate Panel Raised background, Console Blue border on focus.",
+      "html": "<input class=\"ds-input\" type=\"text\" placeholder=\"10.202.226.0/24\">",
+      "css": ".ds-input { width: 100%; min-width: 160px; background: #1c2438; border: 1px solid #5a6a94; color: #e6e9f0; border-radius: 8px; padding: 10px 12px; font-size: 14px; line-height: 21px; transition: border-color 0.15s ease; } .ds-input:focus { outline: none; border-color: #4f8cff; } .ds-input::placeholder { color: #8a93a8; }"
+    },
+    {
+      "name": "Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "The base container for every page section — flat, bordered, no shadow.",
+      "html": "<section class=\"ds-card\"><h2 class=\"ds-card-title\">Active rules</h2><p class=\"ds-card-body\">Card content goes here.</p></section>",
+      "css": ".ds-card { background: #161d2e; border: 1px solid #5a6a94; border-radius: 10px; padding: 20px; color: #e6e9f0; } .ds-card-title { font-size: 16px; font-weight: 700; margin: 0 0 12px; } .ds-card-body { font-size: 15px; line-height: 1.5; margin: 0; }"
+    },
+    {
+      "name": "Status Badge",
+      "kind": "chip",
+      "refersTo": "badge",
+      "description": "Pill-shaped status indicator — low-opacity tint background, full-opacity text of the same color. Connected (green) shown here.",
+      "html": "<span class=\"ds-badge ds-badge-connected\">Connected</span>",
+      "css": ".ds-badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; } .ds-badge-connected { background: rgba(62,207,142,0.18); color: #3ecf8e; } .ds-badge-inactive { background: rgba(138,147,168,0.15); color: #8a93a8; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Ops Console",
+    "overview": "This is a dark-first admin console for a job most people only do over SSH: managing an OpenVPN server's clients, firewall rules, and logs. The interface assumes an operator who already knows what an iptables rule or a CIDR block is — nothing here explains itself with icons or friendly copy, because the friendliness would be wasted on this audience and the space would be better spent on the actual data. Density and legibility win over polish; a table of 30 firewall rules with sortable columns matters more than a hero section ever would.\n\nThere is no separate visual brand layered on top of the functionality — the \"brand\" is the discipline of the system itself: one accent color reserved for actionable/selected things, three status colors reserved for real state (success/warning/danger), everything else rendered in a narrow band of near-black slate and muted gray-blue text. Nothing competes for attention that isn't actually meaningful.",
+    "keyCharacteristics": [
+      "Dark by default, with a fully-parallel light theme (same structure, inverted lightness) — never a half-implemented afterthought",
+      "One accent color, three semantic status colors, everything else neutral slate",
+      "Flat surfaces at rest; shadow only appears on things that are genuinely floating (open dropdowns, modals) or interactive (button hover)",
+      "Dense, table-first layouts — real iptables/IP/port values shown verbatim, never paraphrased"
+    ],
+    "rules": [
+      { "name": "The One Accent Rule", "body": "Console Blue is the only color in the system that means \"you can act on this.\" It never appears as pure decoration — every blue pixel is a link, a focus ring, a primary action, or a selected state.", "section": "colors" },
+      { "name": "The No-Webfont Rule", "body": "Typography never loads a custom font file. The system stack is the point — this is a tool, not a brand surface, and a native-feeling font reinforces that.", "section": "typography" },
+      { "name": "The Never-Shrink-Below-Usable Rule", "body": "A table or form never gets visually cramped to fit a narrow screen — it either re-flows to fewer columns or gains a scrollbar, but a value (an IP, a rule, a client name) is never truncated or hidden to save space.", "section": "layout" },
+      { "name": "The Flat-At-Rest Rule", "body": "Nothing gets a shadow just for existing. A card, a table, an input — all flat, bordered, done. Shadow is earned only by floating above the page or reacting to a hover/press.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do keep every button — including any future custom control — at the shared 34px height and 6px radius, so the whole system reads as one consistent control family.",
+      "Do reserve Console Blue for things that are actually actionable (links, primary buttons, focus, selection) — never as pure decoration.",
+      "Do contrast-check any new color pairing against both --bg and --panel before shipping it — this system has already found and fixed two WCAG 1.4.3/1.4.11 failures by doing exactly that.",
+      "Do show real values (IPs, ports, iptables flags, CIDR blocks) verbatim rather than paraphrasing them into friendlier-sounding copy — the audience already speaks this language."
+    ],
+    "donts": [
+      "Don't add a shadow to a surface just because it's a container — flat + a 1px border is the resting state for everything; shadow is earned by floating (dropdowns, modals) or reacting (button hover), not by existing.",
+      "Don't introduce a second border color, a gradient, or decorative iconography — the palette is deliberately narrow, and that narrowness is the actual visual identity, not a placeholder waiting to be replaced.",
+      "Don't let a <button>-based custom control (like the dropdown trigger) inherit native browser button styling unchecked — appearance, display, and explicit height/min-height all need resetting independently, or native button quirks (centered text, wrong auto-height) leak through.",
+      "Don't shrink a table or form to fit a small screen by making values harder to read — reflow to fewer columns or add a scrollbar instead."
+    ]
+  }
+}
