@@ -3,24 +3,6 @@
 {% block content %}
 <h1>Users</h1>
 
-<section class="card">
-  <h2>Change your password</h2>
-  <p class="hint">Changing your own password requires your current one — this is different from an admin resetting someone else's below, which doesn't.</p>
-  <form method="post" action="{{ url_for('main.change_own_password') }}" class="inline-form">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <label><span class="label-text">Current password<span class="required-star" aria-hidden="true">*</span></span>
-      <input type="password" name="current_password" required autocomplete="current-password">
-    </label>
-    <label><span class="label-text">New password<span class="required-star" aria-hidden="true">*</span></span>
-      <input type="password" name="password" required autocomplete="new-password">
-    </label>
-    <label><span class="label-text">Confirm<span class="required-star" aria-hidden="true">*</span></span>
-      <input type="password" name="confirm" required autocomplete="new-password">
-    </label>
-    <button type="submit">Change password</button>
-  </form>
-</section>
-
 {% if current_user.is_admin %}
 <section class="card">
   <details class="collapsible">
@@ -47,6 +29,26 @@
   </details>
 </section>
 {% endif %}
+
+<section class="card">
+  <details class="collapsible">
+    <summary><h2>Change your password</h2></summary>
+    <p class="hint">Changing your own password requires your current one — this is different from an admin resetting someone else's below, which doesn't.</p>
+    <form method="post" action="{{ url_for('main.change_own_password') }}" class="inline-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label><span class="label-text">Current password<span class="required-star" aria-hidden="true">*</span></span>
+        <input type="password" name="current_password" required autocomplete="current-password">
+      </label>
+      <label><span class="label-text">New password<span class="required-star" aria-hidden="true">*</span></span>
+        <input type="password" name="password" required autocomplete="new-password">
+      </label>
+      <label><span class="label-text">Confirm<span class="required-star" aria-hidden="true">*</span></span>
+        <input type="password" name="confirm" required autocomplete="new-password">
+      </label>
+      <button type="submit">Change password</button>
+    </form>
+  </details>
+</section>
 
 <section class="card">
   <h2>Existing users</h2>

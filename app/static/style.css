@@ -850,6 +850,15 @@ dialog.modal::backdrop {
 
 .modal-close-btn:hover { color: var(--text); }
 
+/* .inline-form's 4-column grid is sized for a full-width page card — the
+   modal itself caps out at 640px (see dialog.modal above), so on any
+   viewport wider than 900px (i.e. most desktop browsers) it would still
+   force 4 columns into that much narrower box, squeezing every field
+   down to ~150px regardless of what it actually needs. The existing
+   @media breakpoints only react to viewport width, not the modal's own
+   width, so they never kick in here. Single column always, independent
+   of viewport, matches how narrow this container actually is. */
+dialog.modal .inline-form { grid-template-columns: 1fr; }
 dialog.modal .inline-form .btn-group { justify-self: end; }
 
 dialog.modal code {

@@ -235,6 +235,15 @@ def count_users() -> int:
         conn.close()
 
 
+def count_admins() -> int:
+    conn = get_conn()
+    try:
+        (count,) = conn.execute("SELECT COUNT(*) FROM users WHERE role='admin'").fetchone()
+        return count
+    finally:
+        conn.close()
+
+
 def insert_user(username: str, password_hash: str, role: str = "admin") -> int:
     conn = get_conn()
     try:

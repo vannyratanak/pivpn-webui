@@ -286,6 +286,36 @@ def test_delete_other_user_succeeds(client):
     assert db.get_user_by_username("mod") is None
 
 
+def test_delete_last_admin_refused_even_with_moderators_present(client):
+    # Regression test: the old guard only checked "is this the last user
+    # overall", which missed this exact case — one admin plus any number
+    # of moderators, deleting the admin, leaves moderators who can't
+    # create a new admin to recover from it. count_users() would be 2
+    # here, so the old check would have let this through.
+    _add_moderator()
+    second_moderator = "mod2"
+    _add_moderator(second_moderator)
+    _login_admin(client)
+    admin_row = db.get_user_by_username("admin")
+    resp = client.post(f"/users/{admin_row['id']}/delete")
+    assert resp.status_code == 302
+    assert db.get_user_by_username("admin") is not None
+    assert db.count_users() == 3  # nothing was deleted
+
+
+def test_delete_last_moderator_allowed_when_admin_remains(client):
+    # The "last remaining account" style guard should only ever protect
+    # admins — deleting the very last moderator carries no lockout risk
+    # at all as long as an admin still exists.
+    _add_moderator()
+    _login_admin(client)
+    mod_row = db.get_user_by_username("mod")
+    resp = client.post(f"/users/{mod_row['id']}/delete")
+    assert resp.status_code == 302
+    assert db.get_user_by_username("mod") is None
+    assert db.count_users() == 1
+
+
 def test_delete_user_requires_admin(client):
     _add_moderator()
     _login_moderator(client)
