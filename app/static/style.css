@@ -766,12 +766,14 @@ th {
    the row instead of sitting compactly after Created. 4 columns, no
    checkbox (bulk-select was considered and dropped for this table).
    130px button width fits "Reset password", this table's longest label
-   (vs. clients-table's 71px sized for "Download"). */
-#users-table { table-layout: fixed; min-width: 730px; }
+   (vs. clients-table's 71px sized for "Download") — Actions column is
+   sized for both buttons (130+130+6px gap) plus cell padding to stay on
+   one row instead of .actions' flex-wrap stacking them. */
+#users-table { table-layout: fixed; min-width: 790px; }
 #users-table th:nth-child(1) { width: 220px; }
 #users-table th:nth-child(2) { width: 120px; }
 #users-table th:nth-child(3) { width: 170px; }
-#users-table th:nth-child(4) { width: 220px; }
+#users-table th:nth-child(4) { width: 280px; }
 
 #users-table .actions {
   justify-content: flex-start;
@@ -782,8 +784,8 @@ th {
 }
 
 @media (max-width: 600px) {
-  #users-table { min-width: 850px; }
-  #users-table th:nth-child(4) { width: 340px; }
+  #users-table { min-width: 870px; }
+  #users-table th:nth-child(4) { width: 360px; }
   #users-table .actions .btn { width: 165px; }
 }
 
