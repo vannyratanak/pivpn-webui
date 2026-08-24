@@ -670,6 +670,12 @@ button:disabled:hover, .btn:disabled:hover { filter: none; }
      room to actually center in, since .pagination-nav is otherwise sized
      to its own content once .pagination wraps it onto its own line. */
   .pagination-nav { width: 100%; justify-content: center; }
+  /* Same treatment for "Show N" — scoped to .pagination .pagination-size
+     specifically (not the bare .pagination-size class), since Firewall's
+     "Filter by client" reuses that same class outside of a .pagination
+     bar and centering a label+dropdown pair sitting under its own "Active
+     rules" heading isn't part of this ask. */
+  .pagination .pagination-size { width: 100%; justify-content: center; }
 }
 
 /* .rule-client-filter reuses .pagination-size's label+select layout, but
