@@ -3,9 +3,10 @@
 A small Flask admin panel for a PiVPN (OpenVPN mode) install: create/renew/
 remove VPN clients, download their `.ovpn` files, per-client block/unblock,
 manage iptables FORWARD rules and DNAT port-forwards, control what
-destinations get routed into the tunnel, and view VPN/system/auth logs.
-Ships with a manual-trigger CD pipeline (`git push` → `Deploy` button →
-live on the server) for keeping a running install in sync with this repo.
+destinations get routed into the tunnel, view VPN/system/auth logs, and
+manage multiple accounts with two roles (admin/moderator). Ships with a
+manual-trigger CD pipeline (`git push` → `Deploy` button → live on the
+server) for keeping a running install in sync with this repo.
 
 ## What this actually does
 
@@ -72,11 +73,15 @@ live on the server) for keeping a running install in sync with this repo.
     time yet.
   - *System* — raw tail of the `pivpn-webui` and system journals, for when
     you don't have SSH handy.
-  - *User Auth* — login/logout history for the admin account, from the
-    same local audit trail as the old single Activity Log (`app/db.py`).
+  - *User Auth* — login/logout history for every account, from the same
+    local audit trail as the old single Activity Log (`app/db.py`).
   Sessions and System both read via `pivpn-webui-log-helper.sh`, a second
   narrowly-scoped root helper (see below) — three fixed `journalctl`
   invocations, no caller-supplied arguments.
+
+- **Users** page manages accounts — see
+  [User accounts and roles](#user-accounts-and-roles) below for the full
+  admin/moderator breakdown.
 
 - **CRL permission watcher** (`fix-crl-perms.path`/`.service`, installed by
   `setup.sh`, running independently of the webui itself) — works around a
@@ -114,8 +119,9 @@ firewall logic) is independent of it.
 
 ## Architecture
 
-- Plain Flask app (`app/`), single hardcoded admin account (`Flask-Login`),
-  CSRF protection on all forms (`Flask-WTF`).
+- Plain Flask app (`app/`), real accounts in a `users` table (`Flask-Login`)
+  with two roles — admin and moderator, see "User accounts and roles"
+  below — CSRF protection on all forms (`Flask-WTF`).
 - Runs as your normal user (the one that installed PiVPN), **not root** —
   `pivpn` itself refuses to run as root. It does, however, need passwordless
   sudo for its own internal privileged steps, same as it would if you were
@@ -477,17 +483,41 @@ reinstall steps exist.
    brings back the original untagged rules, which just get rediscovered
    (and re-tagged with fresh IDs) the next time you visit.
 
+## User accounts and roles
+
+The admin username/password from `./setup.sh` becomes the first real
+account the first time the app starts (`app/db.py`'s `init_db()` carries
+it over from `.env` into a `users` table automatically — no manual step).
+From there, add more accounts from the **Users** page:
+
+- **Admin**: full access — everything a single admin had before this
+  feature existed, plus managing other accounts.
+- **Moderator**: the Clients page, and only the Client Sessions + Auth
+  tabs on the Logs page. No Firewall, no VPN Routes, and read-only on the
+  Users page (sees who else has access, can't add/delete/reset anyone's
+  password).
+
+Any account can change its own password from the Users page — that one
+specifically asks for your current password first, since it's the
+self-service path a stolen session cookie could otherwise abuse to
+silently take over the account. An admin resetting *someone else's*
+password doesn't need their current password, since the admin is already
+a separate authenticated party.
+
+Deleting a user is blocked in two cases: the account you're currently
+logged in as (avoids a confusing mid-session logout), and the last
+remaining admin account (would leave nobody who can create a replacement
+admin, manage the firewall, or do anything else admin-only again).
+
 ## Known limitations / things to check
 
-- Two roles, no finer-grained permissions yet: `admin` (full access) and
-  `moderator` (Clients page + Logs' Client Sessions/Auth tabs only — no
-  Firewall, VPN Routes, or user management beyond viewing the list). Manage
-  accounts from the Users page (admin-only for add/delete/reset-password;
-  every user can change their own password from there regardless of role).
-  Changing a password does not invalidate that account's *other* already-open
-  sessions elsewhere — there's no server-side session store to revoke against
-  with Flask's plain cookie sessions, only the account whose password changed
-  needs to log back in anywhere it matters.
+- Only two roles exist (see "User accounts and roles" above), no
+  finer-grained permissions or team/org hierarchy beyond that split yet.
+- Changing a password (self-service or an admin's reset) doesn't
+  invalidate that account's *other* already-open sessions elsewhere —
+  there's no server-side session store to revoke against with Flask's
+  plain cookie sessions, only the account whose password changed needs
+  to log back in anywhere it matters.
 - Login is rate-limited (5 failed attempts / 5 minutes, per source IP —
   see `app/db.py`'s `login_failures` table) and sessions expire after
   `SESSION_LIFETIME_HOURS` (default 8) of inactivity — a sliding window,

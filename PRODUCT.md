@@ -47,10 +47,12 @@ Runs directly on the same Debian/Raspbian box PiVPN is installed on
 (gunicorn app + nginx reverse proxy, both systemd services). Bound to
 localhost by default — reaching it remotely (SSH tunnel, a LAN-scoped
 firewall rule, or a reverse proxy with real TLS) is a deliberate choice
-the operator makes, never a default. A single operator per install, not
-a multi-user team tool. An optional CD pipeline (GitHub Actions,
-manual-trigger only) can push code updates to already-deployed servers
-via a forced-command-restricted SSH key.
+the operator makes, never a default. Supports multiple named accounts
+per install now (an admin plus, optionally, moderators for day-to-day
+client/log work) rather than one shared login, but still no team/org
+hierarchy beyond that two-role split. An optional CD pipeline (GitHub
+Actions, manual-trigger only) can push code updates to already-deployed
+servers via a forced-command-restricted SSH key.
 
 ## Capabilities and Constraints
 
@@ -66,11 +68,18 @@ via a forced-command-restricted SSH key.
   including ones a previous admin added by hand.
 - **Logs**: VPN session history, the web UI's own service log, the
   system journal, and a login audit log.
+- **Users**: multiple accounts, two roles — admin (full access) and
+  moderator (Clients page plus Logs' Client Sessions/Auth tabs only; can
+  view but not modify the account list). Admins add/delete accounts and
+  reset anyone's password; every account can change its own password
+  regardless of role, which requires the current password as
+  confirmation (an admin's reset of someone else's does not).
 - **Constraint (explicit)**: verified against one real PiVPN install —
   other PiVPN versions or OpenVPN configs may name services/scripts
   differently; the app prints reminders to verify assumptions like the
   OpenVPN systemd unit name on a new box rather than assuming they hold.
-- **Constraint**: single static admin user, not built for a team.
+- **Constraint**: two roles only, no finer-grained permissions or
+  team/org hierarchy beyond the admin/moderator split.
 - **Constraint**: never terminates TLS itself — a reverse proxy or SSH
   tunnel must sit in front of it for any real remote access.
 
@@ -98,7 +107,8 @@ here.
    simulate a firewall change's effect and refuse one that would lock the
    admin out, rather than relying on the admin catching it themselves.
 3. No default expansion of attack surface — localhost by default, a
-   single static admin, and every privileged operation goes through a
+   deliberately minimal account model (admin/moderator, nothing more
+   granular), and every privileged operation goes through a
    narrowly-scoped, sudoers-gated helper script rather than a broad root
    shell.
 4. Assume the reader already knows OpenVPN/iptables — show the real
