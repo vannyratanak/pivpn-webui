@@ -320,7 +320,8 @@
           {% if r.kind == 'client_block' %}
           <span class="hint" title="Client blocks always take priority over other rules and can't be reordered">&mdash;</span>
           {% else %}
-          <span class="drag-handle" title="Drag to reorder">&#9776;</span>
+          <span class="drag-handle" title="Drag to reorder, or focus and press ↑/↓"
+                tabindex="0" role="button" aria-label="Reorder rule — press up or down arrow to move it">&#9776;</span>
           {% endif %}
         </td>
         <td>

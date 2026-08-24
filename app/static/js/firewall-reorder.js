@@ -1,19 +1,43 @@
-// Drag-and-drop reordering for the Firewall page's rules table. Native
-// HTML5 drag-and-drop (no library, matching this app's no-dependencies-if-
-// avoidable stance) — each reorderable <tr draggable="true"> can be dragged
-// onto another row; dropping sends which rule it landed before/after to
-// POST /firewall/<id>/reorder via fetch. Unlike every other mutation in
-// this app (see nav-loading.js's comment on why: plain form posts, no AJAX
-// page loads), this one deliberately doesn't redirect/reload — the row is
-// already in its new spot in the DOM the moment it's dropped, so a full
-// reload would just be flicker and a scroll-position jump for a change
-// that's already visible.
+// Reordering for the Firewall page's rules table, two ways: native HTML5
+// drag-and-drop (no library, matching this app's no-dependencies-if-
+// avoidable stance) for the mouse, and ↑/↓ on a focused drag-handle for
+// the keyboard (drag-and-drop has no keyboard equivalent of its own —
+// found by an /impeccable audit, since without this the whole feature was
+// mouse-only). Both send which rule it landed before/after to POST
+// /firewall/<id>/reorder via fetch. Unlike every other mutation in this
+// app (see nav-loading.js's comment on why: plain form posts, no AJAX page
+// loads), this one deliberately doesn't redirect/reload — the row is
+// already in its new spot in the DOM the moment it's dropped/moved, so a
+// full reload would just be flicker and a scroll-position jump for a
+// change that's already visible.
 function attachFirewallReorder(tbodySelector) {
   const tbody = document.querySelector(tbodySelector);
   if (!tbody) return;
   const csrfMeta = document.querySelector('meta[name="csrf-token"]');
   const csrfToken = csrfMeta ? csrfMeta.content : '';
   let draggingRow = null;
+
+  // Shared by the mouse-drag drop handler and the keyboard handler below —
+  // both just need "tell the server the new before/after, then recover if
+  // it disagrees."
+  function sendReorder(ruleId, body, onSuccess) {
+    fetch(`/firewall/${ruleId}/reorder`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+      body: JSON.stringify(body),
+    })
+      .then((resp) => resp.ok ? resp.json() : Promise.reject(resp))
+      .then((data) => {
+        if (!data.ok) return Promise.reject(data);
+        onSuccess();
+      })
+      .catch(() => {
+        // DB and DOM have now disagreed — reload is the honest recovery,
+        // not worth reimplementing "undo this drag" for a rare failure.
+        alert('Could not save that order — reloading to show the real order.');
+        window.location.reload();
+      });
+  }
 
   tbody.addEventListener('dragstart', (e) => {
     const row = e.target.closest('tr[draggable="true"]');
@@ -65,20 +89,32 @@ function attachFirewallReorder(tbodySelector) {
         : null;
     if (!body) return; // dropped in the only slot it could already be in
 
-    fetch(`/firewall/${ruleId}/reorder`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
-      body: JSON.stringify(body),
-    })
-      .then((resp) => resp.ok ? resp.json() : Promise.reject(resp))
-      .then((data) => {
-        if (!data.ok) return Promise.reject(data);
-      })
-      .catch(() => {
-        // DB and DOM have now disagreed — reload is the honest recovery,
-        // not worth reimplementing "undo this drag" for a rare failure.
-        alert('Could not save that order — reloading to show the real order.');
-        window.location.reload();
-      });
+    sendReorder(ruleId, body, () => {});
+  });
+
+  // Keyboard equivalent of the mouse drag above — focus a row's handle,
+  // press ↑/↓ to swap it with the neighbor in that direction. Skips over
+  // (and never lands on) a client_block row, same as dragover already
+  // does, since those aren't reorderable at all (always -I to the front).
+  tbody.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+    const handle = e.target.closest('.drag-handle');
+    if (!handle) return;
+    const row = handle.closest('tr[draggable="true"]');
+    if (!row) return;
+
+    const neighbor = e.key === 'ArrowUp' ? row.previousElementSibling : row.nextElementSibling;
+    if (!neighbor || neighbor.getAttribute('draggable') !== 'true') return; // already at that end
+    e.preventDefault();
+
+    const ruleId = row.dataset.ruleId;
+    const body = e.key === 'ArrowUp'
+      ? { target_id: neighbor.dataset.ruleId, place: 'before' }
+      : { target_id: neighbor.dataset.ruleId, place: 'after' };
+
+    sendReorder(ruleId, body, () => {
+      row.parentNode.insertBefore(row, e.key === 'ArrowUp' ? neighbor : neighbor.nextSibling);
+      handle.focus(); // keep focus on the same handle so repeated ↑/↓ keeps working
+    });
   });
 }
