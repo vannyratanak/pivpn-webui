@@ -11,9 +11,11 @@ from app.firewall import (
     _client_block_input_argv,
     _parse_rule_spec,
     _positions_for_new_specs,
+    _require_proto_for_dport,
     _rule_from_parsed,
     _unapply,
     _would_allow_client,
+    add_forward_rule,
     add_input_rule,
     describe_rule,
     import_rules,
@@ -417,3 +419,36 @@ def test_rule_client_name_no_match_returns_empty_string():
 def test_rule_client_name_no_client_names_dict_returns_empty_string():
     rule = {"kind": "input", "src": "10.202.226.4"}
     assert rule_client_name(rule) == ""
+
+
+# --- _require_proto_for_dport: caught live — the Add forward/INPUT rule
+# forms let you pick Protocol=Any alongside a Dest. port, which iptables
+# then rejected outright at apply time ("unknown option '--dport'", since
+# --dport needs -p tcp/udp loaded first) instead of a clear validation
+# error. add_forward_rule/add_input_rule both call this after validating
+# protocol/dport individually.
+
+def test_require_proto_for_dport_any_with_port_raises():
+    with pytest.raises(FirewallError):
+        _require_proto_for_dport("all", "443")
+
+
+def test_require_proto_for_dport_tcp_with_port_ok():
+    _require_proto_for_dport("tcp", "443")  # no raise
+
+
+def test_require_proto_for_dport_any_with_no_port_ok():
+    _require_proto_for_dport("all", None)  # no raise — "any protocol, any port" is fine
+
+
+def test_add_forward_rule_rejects_any_protocol_with_port():
+    with pytest.raises(FirewallError):
+        add_forward_rule(action="DROP", protocol="all", src=None, dst=None, dport="9991")
+
+
+def test_add_input_rule_rejects_any_protocol_with_port(monkeypatch):
+    inserted, applied = _patch_insert_and_apply(monkeypatch, existing_input=[])
+    with pytest.raises(FirewallError):
+        add_input_rule(action="ACCEPT", protocol="all", src=None, dport="9991")
+    assert inserted == []  # rejected before ever touching the DB or iptables
+    assert applied == []

@@ -98,6 +98,18 @@ def _valid_action(a):
     return a
 
 
+def _require_proto_for_dport(protocol: str, dport: str | None):
+    """iptables' --dport match needs -p tcp/udp loaded first to even be a
+    recognized option — "protocol: any, port: 9991" isn't representable as
+    one rule (TCP and UDP ports are separate address spaces). Caught live:
+    the Add forward/INPUT rule forms let you pick Protocol=Any alongside a
+    Dest. port, which then failed at apply time with a raw
+    'iptables ... unknown option "--dport"' error surfaced straight to the
+    user instead of a clear validation message."""
+    if dport and protocol == "all":
+        raise FirewallError('A destination port needs protocol tcp or udp, not "Any".')
+
+
 # --- argv builders (one iptables invocation each) ---
 
 def _forward_argv(rule, delete=False):
@@ -429,13 +441,16 @@ def _insert_and_apply(rule: dict) -> int:
 
 
 def add_forward_rule(action, protocol, src, dst, dport, comment=""):
+    protocol = _valid_proto(protocol)
+    dport = _valid_port(dport)
+    _require_proto_for_dport(protocol, dport)
     rule = {
         "kind": "forward",
         "action": _valid_action(action),
-        "protocol": _valid_proto(protocol),
+        "protocol": protocol,
         "src": _valid_addr(src),
         "dst": _valid_addr(dst),
-        "dport": _valid_port(dport),
+        "dport": dport,
         "comment": (comment or "")[:200],
         "enabled": 1,
     }
@@ -449,12 +464,15 @@ def add_input_rule(action, protocol, src, dport, comment="", client_ip: str | No
     position, same as every other kind), so simulate it there and run the
     same self-lockout check reorder_rule uses before actually applying
     it."""
+    protocol = _valid_proto(protocol)
+    dport = _valid_port(dport)
+    _require_proto_for_dport(protocol, dport)
     rule = {
         "kind": "input",
         "action": _valid_action(action),
-        "protocol": _valid_proto(protocol),
+        "protocol": protocol,
         "src": _valid_addr(src),
-        "dport": _valid_port(dport),
+        "dport": dport,
         "comment": (comment or "")[:200],
         "enabled": 1,
     }
