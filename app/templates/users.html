@@ -80,10 +80,10 @@
             <h2>Reset password for {{ u.username }}</h2>
             <form method="post" action="{{ url_for('main.reset_user_password', user_id=u.id) }}" class="inline-form">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <label>New password
+              <label><span class="label-text">New password<span class="required-star" aria-hidden="true">*</span></span>
                 <input type="password" name="password" required autocomplete="new-password">
               </label>
-              <label>Confirm
+              <label><span class="label-text">Confirm<span class="required-star" aria-hidden="true">*</span></span>
                 <input type="password" name="confirm" required autocomplete="new-password">
               </label>
               <div class="btn-group">

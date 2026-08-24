@@ -856,9 +856,11 @@ dialog.modal::backdrop {
    force 4 columns into that much narrower box, squeezing every field
    down to ~150px regardless of what it actually needs. The existing
    @media breakpoints only react to viewport width, not the modal's own
-   width, so they never kick in here. Single column always, independent
-   of viewport, matches how narrow this container actually is. */
-dialog.modal .inline-form { grid-template-columns: 1fr; }
+   width, so they never kick in here. Two columns, independent of
+   viewport, gives a 640px-wide modal ~300px per field — enough for a
+   password input to sit comfortably next to its Confirm pair instead of
+   either being squeezed to 1/4 width or stacked one per row. */
+dialog.modal .inline-form { grid-template-columns: repeat(2, 1fr); }
 dialog.modal .inline-form .btn-group { justify-self: end; }
 
 dialog.modal code {
