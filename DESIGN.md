@@ -49,6 +49,18 @@ typography:
     fontWeight: 400
     lineHeight: 1.5
     letterSpacing: "normal"
+  caption:
+    fontFamily: "-apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif"
+    fontSize: "13px"
+    fontWeight: 400
+    lineHeight: 1.5
+    letterSpacing: "normal"
+  control:
+    fontFamily: "-apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif"
+    fontSize: "14px"
+    fontWeight: 400
+    lineHeight: 1.5
+    letterSpacing: "normal"
   mono:
     fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
     fontSize: "12px"
@@ -155,7 +167,9 @@ A narrow, disciplined palette: one accent color that means "actionable," three s
 - **Display** (700, 22px, 1.3 line-height): Page titles only (`<h1>` — "Firewall Rules," "VPN Clients"). One per page.
 - **Title** (700, 16px, 1.3 line-height): Card/section headings (`<h2>` — "Active rules," "Add client").
 - **Body** (400, 15px, 1.5 line-height): Default running text and most UI copy.
-- **Label** (400, 12px, 1.5 line-height, `color: var(--muted)`): Hints, table headers, secondary metadata — always in Slate Muted, never full-contrast text.
+- **Control** (400, 14px, 1.5 line-height): The actual text inside every interactive control — inputs, selects, buttons, the custom-dropdown trigger. Distinct from Body: this is what you type into or click, not what you read.
+- **Caption** (400, 13px, 1.5 line-height, usually `color: var(--muted)`): Table cell content, form field labels (the word above an input, not its value), and pagination text — structural secondary text that's still part of the content, not a pure annotation.
+- **Label** (400, 12px, 1.5 line-height, `color: var(--muted)`): `.hint` text specifically — a purely annotational aside ("optional — leave blank for a passwordless cert"), one step quieter than Caption. Always Slate Muted, never full-contrast text.
 
 ### Named Rules
 **The No-Webfont Rule.** Typography never loads a custom font file. The system stack is the point — this is a tool, not a brand surface, and a native-feeling font reinforces that.
@@ -179,6 +193,7 @@ Flat by default — cards, tables, and inputs use only a single 1px border (`--b
 - **Resting button** (`box-shadow: 0 1px 2px rgba(0,0,0,0.15)`): The one shadow present even at rest — just enough to lift a filled button off the flat page.
 - **Hover button** (`box-shadow: 0 2px 5px rgba(0,0,0,0.2)`): A visibly heavier lift on hover, paired with a brightness increase.
 - **Open dropdown menu** (`box-shadow: 0 8px 24px rgba(0,0,0,0.25)`): The heaviest shadow in the system — reserved for the one element that's genuinely floating above everything else.
+- **Modal backdrop** (`::backdrop { background: rgba(0,0,0,0.6) }`): Not a shadow on the modal itself but the same "floating above the page" signal applied to everything *behind* it — the page dims rather than the dialog casting a shadow onto it.
 
 ### Named Rules
 **The Flat-At-Rest Rule.** Nothing gets a shadow just for existing. A card, a table, an input — all flat, bordered, done. Shadow is earned only by floating above the page or reacting to a hover/press.

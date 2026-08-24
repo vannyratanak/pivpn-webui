@@ -81,13 +81,16 @@
       "display": { "displayName": "Display", "purpose": "Page titles (h1) — one per page." },
       "title": { "displayName": "Title", "purpose": "Card/section headings (h2)." },
       "body": { "displayName": "Body", "purpose": "Default running text and most UI copy." },
-      "label": { "displayName": "Label", "purpose": "Hints, table headers, secondary metadata — always in Slate Muted." },
+      "control": { "displayName": "Control", "purpose": "Text inside interactive controls — inputs, selects, buttons, the custom-dropdown trigger." },
+      "caption": { "displayName": "Caption", "purpose": "Table cell content, form field labels, pagination text — structural secondary text." },
+      "label": { "displayName": "Label", "purpose": "Hints (.hint) specifically — a purely annotational aside, one step quieter than Caption. Always Slate Muted." },
       "mono": { "displayName": "Mono", "purpose": "Log/journal views and inline code snippets." }
     },
     "shadows": [
       { "name": "button-resting", "value": "0 1px 2px rgba(0,0,0,0.15)", "purpose": "The only shadow present at rest — just enough to lift a filled button off the flat page." },
       { "name": "button-hover", "value": "0 2px 5px rgba(0,0,0,0.2)", "purpose": "Heavier lift on hover, paired with a brightness increase." },
-      { "name": "dropdown-menu", "value": "0 8px 24px rgba(0,0,0,0.25)", "purpose": "Heaviest shadow in the system — the open custom-select menu, the one element genuinely floating above everything else." }
+      { "name": "dropdown-menu", "value": "0 8px 24px rgba(0,0,0,0.25)", "purpose": "Heaviest shadow in the system — the open custom-select menu, the one element genuinely floating above everything else." },
+      { "name": "modal-backdrop", "value": "rgba(0,0,0,0.6)", "purpose": "Not a shadow on the modal itself but the same signal applied to everything behind it — the page dims rather than the dialog casting a shadow." }
     ],
     "motion": [
       { "name": "ease-standard", "value": "0.15s ease", "purpose": "Default transition for color/background/border-color state changes (hover, focus, theme toggle)." }
