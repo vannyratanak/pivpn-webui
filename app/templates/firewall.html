@@ -90,13 +90,20 @@
       const dportInput = form.querySelector('input[name="dport"]');
 
       form.addEventListener('submit', () => {
+        // Protocol-agnostic — matches _check_not_unrestricted_forward_drop
+        // (app/firewall.py), which rejects this shape regardless of
+        // protocol. Was previously gated on protocol==='all' only, so a
+        // tcp/udp version of the exact same unrestricted rule got no
+        // warning at all, just a surprise server-side rejection. The
+        // INPUT form's equivalent warning (below) was already built this
+        // way — found and fixed via /impeccable audit.
         const unrestricted = actionSelect.value === 'DROP'
-          && protocolSelect.value === 'all'
           && !hidden.value.trim()
           && !dstInput.value.trim()
           && !dportInput.value.trim();
         if (unrestricted) {
-          form.dataset.confirm = 'This rule has no source, destination, protocol, or port set — it will DROP ALL forwarded traffic through this server, for every VPN client, not just one. Are you sure?';
+          const proto = protocolSelect.value === 'all' ? 'all' : protocolSelect.value;
+          form.dataset.confirm = `This rule has no source, destination, or port set — it will DROP ALL forwarded ${proto} traffic through this server, for every VPN client, not just one. Are you sure?`;
           form.dataset.confirmLabel = 'Add anyway';
         } else {
           delete form.dataset.confirm;
