@@ -11,6 +11,16 @@ from app.auth import login_manager
 
 csrf = CSRFProtect()
 
+# Holds this worker's lock_file object for the life of the process — see
+# _sync_firewall_once. A function-local variable's refcount hits zero the
+# moment the function returns, which closes the file and releases the
+# flock almost immediately (confirmed via a real two-process repro) —
+# not "for this worker's entire lifetime" as intended, letting a
+# later-starting sibling worker acquire the same lock and re-run
+# sync_all(), reproducing the exact duplicate-rule bug this exists to
+# prevent. A module-level reference survives past the function call.
+_firewall_sync_lock_file = None
+
 
 def _sync_firewall_once(app):
     """gunicorn runs multiple worker processes (see the -w flag in the
@@ -18,13 +28,17 @@ def _sync_firewall_once(app):
     startup. Without this lock, every worker's sync_all() races the
     others and each ends up re-adding every rule, leaving N duplicate
     copies of everything in iptables instead of one."""
+    global _firewall_sync_lock_file
     lock_path = Path(config.DB_PATH).parent / ".firewall-sync.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     lock_file = open(lock_path, "w")
     try:
         fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
+        lock_file.close()
         return  # another worker already has this covered
+
+    _firewall_sync_lock_file = lock_file
 
     from app import firewall
     try:
