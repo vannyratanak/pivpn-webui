@@ -12,7 +12,7 @@
   <details class="collapsible" name="firewall-add-rule">
     <summary><h2>Add forward / drop rule</h2></summary>
     <p class="hint">Controls what's allowed through the FORWARD chain — e.g. drop a subnet, or explicitly accept traffic between two ranges.</p>
-    <form method="post" action="{{ url_for('main.add_forward') }}" class="inline-form">
+    <form method="post" action="{{ url_for('main.add_forward') }}" class="inline-form" id="add-forward-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <label>Action
         <select name="action">
@@ -71,6 +71,38 @@
       select.addEventListener('change', sync);
       customInput.addEventListener('input', sync);
       sync();
+
+      // Warn before creating a forward rule with zero restrictions and
+      // action=DROP — exactly the shape that drops ALL forwarded traffic
+      // through this server, for every client, with nothing to indicate
+      // it happened until something stops working. Not hypothetical: an
+      // "Add forward rule" form submitted with just Action switched to
+      // Drop, everything else left at its default, did exactly this in
+      // production. The message is computed at submit time (depends on
+      // the current field values, so it can't be a static data-confirm
+      // set at page-render time) and left for nav-loading.js's own
+      // submit listener to pick up and show the modal, same pattern as
+      // the bulk-action forms use.
+      const form = document.getElementById('add-forward-form');
+      const actionSelect = form.querySelector('select[name="action"]');
+      const protocolSelect = form.querySelector('select[name="protocol"]');
+      const dstInput = form.querySelector('input[name="dst"]');
+      const dportInput = form.querySelector('input[name="dport"]');
+
+      form.addEventListener('submit', () => {
+        const unrestricted = actionSelect.value === 'DROP'
+          && protocolSelect.value === 'all'
+          && !hidden.value.trim()
+          && !dstInput.value.trim()
+          && !dportInput.value.trim();
+        if (unrestricted) {
+          form.dataset.confirm = 'This rule has no source, destination, protocol, or port set — it will DROP ALL forwarded traffic through this server, for every VPN client, not just one. Are you sure?';
+          form.dataset.confirmLabel = 'Add anyway';
+        } else {
+          delete form.dataset.confirm;
+          delete form.dataset.confirmLabel;
+        }
+      });
     })();
   </script>
 </section>
