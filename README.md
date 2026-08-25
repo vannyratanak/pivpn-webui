@@ -8,6 +8,24 @@ manage multiple accounts with two roles (admin/moderator). Ships with a
 manual-trigger CD pipeline (`git push` → `Deploy` button → live on the
 server) for keeping a running install in sync with this repo.
 
+## Screenshots
+
+Dark theme (default) shown throughout, with one page in the light theme too —
+both are available via a persisted toggle, see [Brand Commitments](DESIGN.md).
+Data shown is from a disposable test install, not a real deployment; IP
+addresses are blurred.
+
+| | |
+|---|---|
+| **Login** | **Clients** |
+| ![Login page](docs/screenshots/login.png) | ![Clients page](docs/screenshots/clients.png) |
+| **Firewall Rules** | **VPN Routes** |
+| ![Firewall Rules page](docs/screenshots/firewall.png) | ![VPN Routes page](docs/screenshots/vpn-routes.png) |
+| **Logs — Activity** | **Users** |
+| ![Logs page, Activity tab](docs/screenshots/logs.png) | ![Users page](docs/screenshots/users.png) |
+| **Clients (light theme)** | |
+| ![Clients page, light theme](docs/screenshots/clients-light.png) | |
+
 ## What this actually does
 
 - **Clients** page wraps the `pivpn` CLI:
