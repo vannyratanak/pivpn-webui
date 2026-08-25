@@ -111,7 +111,7 @@
   <details class="collapsible" name="firewall-add-rule">
     <summary><h2>Add INPUT rule</h2></summary>
     <p class="hint">Controls what's allowed to reach this server itself (its web UI, SSH, anything listening here) — not traffic passing through it to somewhere else, that's the FORWARD rule above. A rule that would block your own current connection is refused rather than applied.</p>
-    <form method="post" action="{{ url_for('main.add_input') }}" class="inline-form">
+    <form method="post" action="{{ url_for('main.add_input') }}" class="inline-form" id="add-input-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <label>Action
         <select name="action">
@@ -167,6 +167,25 @@
       select.addEventListener('change', sync);
       customInput.addEventListener('input', sync);
       sync();
+
+      const form = document.getElementById('add-input-form');
+      const actionSelect = form.querySelector('select[name="action"]');
+      const protocolSelect = form.querySelector('select[name="protocol"]');
+      const dportInput = form.querySelector('input[name="dport"]');
+
+      form.addEventListener('submit', () => {
+        const unrestricted = actionSelect.value === 'DROP'
+          && !hidden.value.trim()
+          && !dportInput.value.trim();
+        if (unrestricted) {
+          const proto = protocolSelect.value === 'all' ? 'all' : protocolSelect.value;
+          form.dataset.confirm = `This rule has no source or port set — it will DROP ALL incoming ${proto} traffic to this server, from anywhere, not just one address. A rule that would block this page's own access is refused automatically, but that check only looks at port 443 — it won't stop this from silently cutting off something else, like OpenVPN's own port. Are you sure?`;
+          form.dataset.confirmLabel = 'Add anyway';
+        } else {
+          delete form.dataset.confirm;
+          delete form.dataset.confirmLabel;
+        }
+      });
     })();
   </script>
 </section>
