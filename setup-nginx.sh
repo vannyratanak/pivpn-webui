@@ -23,6 +23,30 @@ if ! command -v nginx >/dev/null 2>&1; then
   sudo apt-get install -y nginx
 fi
 
+# Hide the nginx version banner (the Server: response header, and the
+# version string nginx's own default error pages print) — trivial recon
+# info an attacker doesn't need handed to them for free. server_tokens is
+# an http-block-only directive, so it can't live in the per-vhost template
+# (deploy/nginx-pivpn-webui.conf.template) the way the other hardening
+# headers do — this edits the main nginx.conf directly instead, idempotent
+# (safe to re-run). Debian/Ubuntu's stock nginx.conf ships this line
+# already present but commented out, so the common case is just
+# uncommenting it; falls back to appending after a line every stock
+# nginx.conf has, or a manual instruction, for anything that doesn't.
+if ! grep -qE '^\s*server_tokens\s+off\s*;' /etc/nginx/nginx.conf; then
+  if grep -qE '^\s*#\s*server_tokens off;' /etc/nginx/nginx.conf; then
+    sudo sed -i -E 's/^(\s*)#\s*server_tokens off;/\1server_tokens off;/' /etc/nginx/nginx.conf
+    echo "Uncommented 'server_tokens off;' in /etc/nginx/nginx.conf."
+  elif grep -q 'types_hash_max_size 2048;' /etc/nginx/nginx.conf; then
+    sudo sed -i '/types_hash_max_size 2048;/a\\tserver_tokens off;' /etc/nginx/nginx.conf
+    echo "Added 'server_tokens off;' to /etc/nginx/nginx.conf."
+  else
+    echo "Could not find a safe anchor line in /etc/nginx/nginx.conf to add" >&2
+    echo "'server_tokens off;' automatically — add it yourself inside the" >&2
+    echo "http {} block to hide the nginx version banner." >&2
+  fi
+fi
+
 DEFAULT_SERVER_NAME="$(ip -4 route get 1.1.1.1 2>/dev/null | grep -oP 'src \K\S+' || true)"
 read -rp "Server name (IP or hostname clients will browse to) [${DEFAULT_SERVER_NAME:-<required>}]: " SERVER_NAME
 SERVER_NAME="${SERVER_NAME:-$DEFAULT_SERVER_NAME}"
