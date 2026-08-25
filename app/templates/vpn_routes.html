@@ -52,7 +52,8 @@
           <div class="actions">
           {% if r.managed %}
           <form method="post" action="{{ url_for('main.remove_vpn_route') }}" class="btn-form"
-                data-confirm="Remove this route? Connected clients will stop routing this network into the tunnel.">
+                data-confirm="Remove this route? Connected clients will stop routing this network into the tunnel."
+                data-confirm-label="Remove">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="network" value="{{ r.network }}">
             <input type="hidden" name="netmask" value="{{ r.netmask }}">

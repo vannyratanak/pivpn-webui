@@ -40,22 +40,51 @@ document.addEventListener('DOMContentLoaded', () => {
     start(() => { window.location.href = link.href; });
   });
 
+  // Custom confirm dialog (see base.html for the shared markup) instead of
+  // the browser's native confirm() — styleable to match the app, and lets
+  // a destructive action's button say "Delete"/"Renew"/"Remove" instead of
+  // a generic "OK". One dialog, reused for every data-confirm form on the
+  // page, rather than one per form.
+  const confirmModal = document.getElementById('confirm-modal');
+  const confirmMessage = document.getElementById('confirm-modal-message');
+  const confirmBtn = document.getElementById('confirm-modal-confirm-btn');
+  let confirmHandler = null;
+
+  function askConfirm(message, label, onConfirm) {
+    if (!confirmModal) { onConfirm(); return; } // markup missing somehow — fail open rather than block every destructive action
+    confirmMessage.textContent = message;
+    confirmBtn.textContent = label || 'Confirm';
+    // Drop any previous listener before adding a new one — {once: true}
+    // alone only cleans up *after* it fires; if the last confirm was
+    // dismissed via Cancel/Escape/backdrop instead of the button, that
+    // listener is still attached, and without this it'd fire a second
+    // time (for the wrong form) alongside the new one on the next confirm.
+    if (confirmHandler) confirmBtn.removeEventListener('click', confirmHandler);
+    confirmHandler = () => {
+      confirmModal.close();
+      onConfirm();
+    };
+    confirmBtn.addEventListener('click', confirmHandler, { once: true });
+    confirmModal.showModal();
+  }
+
   document.addEventListener('submit', (e) => {
     if (e.defaultPrevented) return;
     const form = e.target;
-    // A destructive form (delete/remove/renew) sets data-confirm instead of
-    // the classic inline onsubmit="return confirm('...')" — that pattern
-    // breaks the moment interpolated dynamic content (e.g. a username)
-    // contains a single quote: the browser decodes the HTML entity back to
-    // a literal ' before compiling the attribute as JS, so the confirm()
-    // call's own string literal gets cut short — a syntax error that
-    // silently no-ops the whole handler rather than throwing, so the form
-    // just submits with no prompt at all. Reading data-confirm via
-    // .dataset instead means the value is only ever used as a JS *string
-    // argument* to confirm(), never compiled as JS source, so any
-    // character in it — quotes included — is just harmless data.
-    if (form.dataset.confirm && !confirm(form.dataset.confirm)) {
+    // A destructive form (delete/remove/renew) sets data-confirm — read via
+    // .dataset, so the value is only ever used as a JS *string argument*
+    // (to askConfirm below), never compiled as JS source the way the old
+    // inline onsubmit="return confirm('...')" pattern was: that broke the
+    // moment interpolated dynamic content (e.g. a username) contained a
+    // single quote, since the browser decodes the HTML entity back to a
+    // literal ' before compiling the attribute as JS — a syntax error that
+    // silently no-opped the whole handler instead of throwing, so the form
+    // just submitted with no prompt at all.
+    if (form.dataset.confirm) {
       e.preventDefault();
+      askConfirm(form.dataset.confirm, form.dataset.confirmLabel, () => {
+        start(() => { form.submit(); });
+      });
       return;
     }
     e.preventDefault();

@@ -91,7 +91,8 @@
           <a class="btn btn-sm" href="{{ url_for('main.download_client', name=c.name) }}">Download</a>
 
           <form method="post" action="{{ url_for('main.renew_client', name=c.name) }}" class="btn-form"
-                data-confirm="Renew {{ c.name }}? This revokes the current cert and issues a new one — the old .ovpn will stop working immediately.">
+                data-confirm="Renew {{ c.name }}? This revokes the current cert and issues a new one — the old .ovpn will stop working immediately."
+                data-confirm-label="Renew">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="btn btn-sm btn-secondary">Renew</button>
           </form>
@@ -105,7 +106,8 @@
           </form>
 
           <form method="post" action="{{ url_for('main.remove_client', name=c.name) }}" class="btn-form"
-                data-confirm="Permanently remove {{ c.name }}? This cannot be undone.">
+                data-confirm="Permanently remove {{ c.name }}? This cannot be undone."
+                data-confirm-label="Remove">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="btn btn-sm btn-danger">Remove</button>
           </form>
@@ -162,9 +164,14 @@
       bulkForm.addEventListener('submit', (e) => {
         const selected = checkboxes().filter((cb) => cb.checked).map((cb) => cb.value);
         if (selected.length === 0) { e.preventDefault(); return; }
-        if (!confirm(`Permanently remove ${selected.length} client(s) — ${selected.join(', ')}? This revokes their certificates and cannot be undone.`)) {
-          e.preventDefault();
-        }
+        // Message depends on the current selection, so it can't be a
+        // static data-confirm set at page-render time like the per-row
+        // forms — compute it now and let nav-loading.js's own submit
+        // listener (which fires next, since it's on document and this one
+        // is on the form itself) pick it up and show the same custom
+        // modal, instead of duplicating that logic here.
+        bulkForm.dataset.confirm = `Permanently remove ${selected.length} client(s) — ${selected.join(', ')}? This revokes their certificates and cannot be undone.`;
+        bulkForm.dataset.confirmLabel = 'Remove';
       });
     })();
   </script>

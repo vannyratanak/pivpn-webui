@@ -85,5 +85,17 @@
 
     {% block content %}{% endblock %}
   </main>
+
+  <!-- Shared by every data-confirm form on every page (see nav-loading.js) —
+       one dialog, reused, instead of duplicating this markup per form. -->
+  <dialog id="confirm-modal" class="modal" onclick="if (event.target === this) this.close()">
+    <button type="button" class="modal-close-btn" onclick="document.getElementById('confirm-modal').close()" aria-label="Close">&times;</button>
+    <h2>Confirm</h2>
+    <p id="confirm-modal-message"></p>
+    <div class="btn-group">
+      <button type="button" id="confirm-modal-confirm-btn" class="btn btn-danger"></button>
+      <button type="button" class="btn" autofocus onclick="document.getElementById('confirm-modal').close()">Cancel</button>
+    </div>
+  </dialog>
 </body>
 </html>

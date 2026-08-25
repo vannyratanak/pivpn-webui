@@ -331,7 +331,7 @@
             <button type="submit" class="btn btn-sm {{ 'btn-warn' if r.enabled else 'btn-ok' }}">{{ 'Disable' if r.enabled else 'Enable' }}</button>
           </form>
           <form method="post" action="{{ url_for('main.delete_rule', rule_id=r.id) }}" class="btn-form"
-                data-confirm="Delete this rule?">
+                data-confirm="Delete this rule?" data-confirm-label="Delete">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="btn btn-sm btn-danger">Delete</button>
           </form>
@@ -398,11 +398,16 @@
 
       deleteForm.addEventListener('submit', (e) => {
         const checked = checkboxes().filter((cb) => cb.checked).length;
-        if (checked === 0 || !confirm(`Delete ${checked} selected rule(s)? This cannot be undone.`)) {
-          e.preventDefault();
-          return;
-        }
+        if (checked === 0) { e.preventDefault(); return; }
         injectSelectedIds(deleteForm);
+        // Message depends on the current selection, so it can't be a
+        // static data-confirm set at page-render time — compute it now and
+        // let nav-loading.js's own submit listener (which fires next,
+        // since it's on document and this one is on the form itself) pick
+        // it up and show the same custom modal, instead of duplicating
+        // that logic here.
+        deleteForm.dataset.confirm = `Delete ${checked} selected rule(s)? This cannot be undone.`;
+        deleteForm.dataset.confirmLabel = 'Delete';
       });
     })();
   </script>
