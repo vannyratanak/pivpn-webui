@@ -923,6 +923,22 @@ dialog.modal code {
   padding: 6px 8px;
 }
 
+/* Import dialogs' step-by-step help — plain .hint text wrapped as a list
+   reads as one dense paragraph; this keeps the same muted styling but
+   breaks it into scannable, one-idea-per-line bullets instead. */
+.import-help-list {
+  margin: 4px 0 10px;
+  padding-left: 20px;
+}
+
+.import-help-list li {
+  margin-bottom: 6px;
+}
+
+.import-help-list li:last-child {
+  margin-bottom: 0;
+}
+
 .badge {
   display: inline-block;
   padding: 2px 8px;

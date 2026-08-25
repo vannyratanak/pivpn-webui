@@ -40,8 +40,15 @@
   <dialog id="import-clients-dialog" class="modal" onclick="if (event.target === this) this.close()">
     <button type="button" class="modal-close-btn" onclick="document.getElementById('import-clients-dialog').close()" aria-label="Close">&times;</button>
     <h2>Import clients from file</h2>
-    <p class="hint">One client per line: <code>name=laptop-anna passphrase=optional</code>. Blank lines and lines starting with <code>#</code> are ignored. Leave out <code>passphrase</code> for a passwordless cert. Quote values with spaces.</p>
-    <p class="hint">Example:</p>
+    <p class="hint">Upload a plain text file to add several clients at once — one client per line.</p>
+    <ul class="hint import-help-list">
+      <li>Each line looks like <code>name=laptop-anna</code> — just the client's name.</li>
+      <li>Want the certificate password-protected? Add <code>passphrase=yourpassword</code> after the name.</li>
+      <li>No password needed? Leave <code>passphrase</code> out entirely.</li>
+      <li>If the password itself has spaces, wrap it in quotes: <code>passphrase="correct horse battery staple"</code></li>
+      <li>Blank lines, and lines starting with <code>#</code>, are skipped — use <code>#</code> to leave yourself notes.</li>
+    </ul>
+    <p class="hint">Example file:</p>
     <p class="hint"><code>name=laptop-anna</code><br><code>name=phone-anna passphrase="correct horse battery staple"</code></p>
 
     <form method="post" action="{{ url_for('main.import_clients') }}" enctype="multipart/form-data" class="inline-form">

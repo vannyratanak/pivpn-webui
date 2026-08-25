@@ -244,7 +244,12 @@
   <dialog id="import-rules-dialog" class="modal" onclick="if (event.target === this) this.close()">
     <button type="button" class="modal-close-btn" onclick="document.getElementById('import-rules-dialog').close()" aria-label="Close">&times;</button>
     <h2>Import rules from file</h2>
-    <p class="hint">One rule per line: <code>kind key=value key=value ...</code>. Blank lines and lines starting with <code>#</code> are ignored. Quote values with spaces, e.g. <code>comment="block guest wifi"</code>.</p>
+    <p class="hint">Upload a plain text file to add several firewall rules at once — one rule per line.</p>
+    <ul class="hint import-help-list">
+      <li>Each line looks like <code>kind key=value key=value ...</code> — start with the rule's kind (see the table below), then its fields as <code>key=value</code> pairs.</li>
+      <li>Blank lines, and lines starting with <code>#</code>, are skipped — use <code>#</code> to leave yourself notes.</li>
+      <li>If a value has spaces in it, wrap it in quotes, e.g. <code>comment="block guest wifi"</code>.</li>
+    </ul>
 
     <table class="import-example-table">
       <thead>
@@ -255,6 +260,11 @@
           <td>forward</td>
           <td>action, protocol, src, dst, dport, comment</td>
           <td><code>forward action=DROP protocol=tcp src=10.8.0.5 dst=192.168.1.0/24 dport=443</code></td>
+        </tr>
+        <tr>
+          <td>input</td>
+          <td>action, protocol, src, dport, comment</td>
+          <td><code>input action=DROP protocol=tcp dport=22</code></td>
         </tr>
         <tr>
           <td>portforward</td>
@@ -268,10 +278,14 @@
         </tr>
       </tbody>
     </table>
-    <p class="hint">* required. Any field can be left out where the "Add ___ rule" forms above also allow it blank.</p>
-    <p class="hint">Reusable template: a line <code>NAME=value</code> (no rule kind) defines a variable — reference it as <code>$NAME</code> in any rule line after it. E.g. put <code>CLIENT_IP=10.202.226.21</code> at the top, then use <code>src=$CLIENT_IP</code> in every rule below.</p>
-    <p class="hint">A rule's <code>src</code>/<code>dst</code> can also just be a VPN client's name instead of an IP — e.g. <code>src=nurak</code> resolves to that client's current VPN IP automatically.</p>
-    <p class="hint">Lines can also be raw <code>iptables -A FORWARD ...</code> / <code>-A INPUT ...</code> commands instead of <code>kind key=value</code> syntax — an existing shell script's rule lines can be uploaded close to verbatim ($VAR and client-name resolution both still apply). Non-<code>-A</code> lines (e.g. a "clean old rules" <code>-S | grep | ... -D</code> pipeline) are skipped, not an error — this app's own rule sync already replaces the need for that cleanup step.</p>
+    <p class="hint">* means that field is required. Any other field can be left blank, same as on the "Add ___ rule" forms above.</p>
+
+    <p class="hint"><strong>A few shortcuts that also work:</strong></p>
+    <ul class="hint import-help-list">
+      <li><strong>Reusable values.</strong> A line with just <code>NAME=value</code> (no rule kind) defines a variable you can reuse below. E.g. put <code>CLIENT_IP=10.202.226.21</code> at the top of the file, then use <code>src=$CLIENT_IP</code> in any rule line after it.</li>
+      <li><strong>Client names instead of IPs.</strong> For <code>src</code>/<code>dst</code>, you can type a VPN client's name instead of its IP — e.g. <code>src=nurak</code> automatically resolves to that client's current VPN IP.</li>
+      <li><strong>Paste from an existing script.</strong> Lines can also be raw <code>iptables -A FORWARD ...</code> / <code>-A INPUT ...</code> commands instead of <code>kind key=value</code> syntax — an existing shell script's rule lines can be uploaded almost as-is (variables and client names above still work on these too). Any other kind of line, like a "clean up old rules" pipeline, is silently skipped rather than treated as an error — this app's own rule sync already replaces the need for that cleanup step.</li>
+    </ul>
 
     <form method="post" action="{{ url_for('main.import_rules') }}" enctype="multipart/form-data" class="inline-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
