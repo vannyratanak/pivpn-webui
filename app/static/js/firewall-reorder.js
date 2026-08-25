@@ -112,9 +112,18 @@ function attachFirewallReorder(tbodySelector) {
       ? { target_id: neighbor.dataset.ruleId, place: 'before' }
       : { target_id: neighbor.dataset.ruleId, place: 'after' };
 
-    sendReorder(ruleId, body, () => {
-      row.parentNode.insertBefore(row, e.key === 'ArrowUp' ? neighbor : neighbor.nextSibling);
-      handle.focus(); // keep focus on the same handle so repeated ↑/↓ keeps working
-    });
+    // Move immediately (optimistic, same as dragover's live preview above)
+    // instead of waiting for the response — a held-down arrow key's
+    // browser-repeat can fire the next keydown before the previous
+    // request's response comes back, so reading the row's position from
+    // the DOM only *after* the response used to see a stale, not-yet-moved
+    // position and recompute the same neighbor instead of the next one:
+    // the row moved fewer slots than keys pressed. sendReorder's existing
+    // catch()-and-reload already recovers if the server ever disagrees,
+    // same safety net drag-and-drop already relies on.
+    row.parentNode.insertBefore(row, e.key === 'ArrowUp' ? neighbor : neighbor.nextSibling);
+    handle.focus(); // keep focus on the same handle so repeated ↑/↓ keeps working
+
+    sendReorder(ruleId, body, () => {});
   });
 }
