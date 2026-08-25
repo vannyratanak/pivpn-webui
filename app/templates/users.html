@@ -100,7 +100,7 @@
           </dialog>
 
           <form method="post" action="{{ url_for('main.delete_user', user_id=u.id) }}" class="btn-form"
-                onsubmit="return confirm('Permanently remove {{ u.username }}? This cannot be undone.');">
+                data-confirm="Permanently remove {{ u.username }}? This cannot be undone.">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="btn btn-sm btn-danger">Delete</button>
           </form>

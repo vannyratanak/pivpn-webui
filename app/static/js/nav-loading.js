@@ -43,6 +43,21 @@ document.addEventListener('DOMContentLoaded', () => {
   document.addEventListener('submit', (e) => {
     if (e.defaultPrevented) return;
     const form = e.target;
+    // A destructive form (delete/remove/renew) sets data-confirm instead of
+    // the classic inline onsubmit="return confirm('...')" — that pattern
+    // breaks the moment interpolated dynamic content (e.g. a username)
+    // contains a single quote: the browser decodes the HTML entity back to
+    // a literal ' before compiling the attribute as JS, so the confirm()
+    // call's own string literal gets cut short — a syntax error that
+    // silently no-ops the whole handler rather than throwing, so the form
+    // just submits with no prompt at all. Reading data-confirm via
+    // .dataset instead means the value is only ever used as a JS *string
+    // argument* to confirm(), never compiled as JS source, so any
+    // character in it — quotes included — is just harmless data.
+    if (form.dataset.confirm && !confirm(form.dataset.confirm)) {
+      e.preventDefault();
+      return;
+    }
     e.preventDefault();
     start(() => { form.submit(); });
   });

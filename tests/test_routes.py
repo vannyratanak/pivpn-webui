@@ -472,3 +472,27 @@ def test_reorder_route_degrades_cleanly_on_privileged_command_error(client, monk
     audit = db.list_audit(limit=5)
     assert any(a["action"] == "firewall_rule_reorder" and a["result"] == "error" for a in audit)
 
+
+def test_delete_user_form_survives_a_quote_in_the_username(client):
+    # Regression test for a real bug: usernames have no character-set
+    # validation (unlike client names, which are regex-restricted), and
+    # the Delete button's confirmation used an inline
+    # onsubmit="return confirm('...{{ username }}...');" — a username
+    # containing a single quote breaks that embedded JS string. Live-
+    # verified in a real browser: the browser decodes the HTML entity back
+    # to a literal ' before compiling the onsubmit attribute as JS, so the
+    # confirm() call's string literal gets cut short — a syntax error that
+    # silently no-ops the whole handler instead of throwing, meaning the
+    # form submits with NO confirmation prompt at all. Fixed by moving to
+    # a data-confirm="..." attribute read via JS's .dataset (a real
+    # string value, never compiled as JS source) instead of an inline
+    # onsubmit with embedded dynamic content — this test locks in that the
+    # vulnerable pattern doesn't reappear for a username containing a
+    # quote (or any other character that could break embedded JS).
+    _login_admin(client)
+    db.insert_user("O'Brien", generate_password_hash(MOD_PASSWORD), "moderator")
+    resp = client.get("/users")
+    html = resp.data.decode()
+    assert "onsubmit" not in html
+    assert 'data-confirm="Permanently remove O&#39;Brien? This cannot be undone."' in html
+

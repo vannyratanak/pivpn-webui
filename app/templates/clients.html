@@ -91,7 +91,7 @@
           <a class="btn btn-sm" href="{{ url_for('main.download_client', name=c.name) }}">Download</a>
 
           <form method="post" action="{{ url_for('main.renew_client', name=c.name) }}" class="btn-form"
-                onsubmit="return confirm('Renew {{ c.name }}? This revokes the current cert and issues a new one — the old .ovpn will stop working immediately.');">
+                data-confirm="Renew {{ c.name }}? This revokes the current cert and issues a new one — the old .ovpn will stop working immediately.">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="btn btn-sm btn-secondary">Renew</button>
           </form>
@@ -105,7 +105,7 @@
           </form>
 
           <form method="post" action="{{ url_for('main.remove_client', name=c.name) }}" class="btn-form"
-                onsubmit="return confirm('Permanently remove {{ c.name }}? This cannot be undone.');">
+                data-confirm="Permanently remove {{ c.name }}? This cannot be undone.">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="btn btn-sm btn-danger">Remove</button>
           </form>

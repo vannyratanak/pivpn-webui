@@ -331,7 +331,7 @@
             <button type="submit" class="btn btn-sm {{ 'btn-warn' if r.enabled else 'btn-ok' }}">{{ 'Disable' if r.enabled else 'Enable' }}</button>
           </form>
           <form method="post" action="{{ url_for('main.delete_rule', rule_id=r.id) }}" class="btn-form"
-                onsubmit="return confirm('Delete this rule?');">
+                data-confirm="Delete this rule?">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="btn btn-sm btn-danger">Delete</button>
           </form>
