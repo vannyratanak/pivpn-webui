@@ -5,14 +5,14 @@
 
 <div class="tabs">
   {% if current_user.is_admin %}
-  <a href="{{ url_for('main.logs', tab='sessions') }}" class="{{ 'active' if tab == 'sessions' }}">VPN Sessions</a>
+  <a href="{{ url_for('main.logs', tab='sessions') }}" class="{{ 'active' if tab == 'sessions' }}" {% if tab == 'sessions' %}aria-current="page"{% endif %}>VPN Sessions</a>
   {% endif %}
-  <a href="{{ url_for('main.logs', tab='client_sessions') }}" class="{{ 'active' if tab == 'client_sessions' }}">Client Sessions</a>
+  <a href="{{ url_for('main.logs', tab='client_sessions') }}" class="{{ 'active' if tab == 'client_sessions' }}" {% if tab == 'client_sessions' %}aria-current="page"{% endif %}>Client Sessions</a>
   {% if current_user.is_admin %}
-  <a href="{{ url_for('main.logs', tab='system') }}" class="{{ 'active' if tab == 'system' }}">System</a>
-  <a href="{{ url_for('main.logs', tab='activity') }}" class="{{ 'active' if tab == 'activity' }}">Activity</a>
+  <a href="{{ url_for('main.logs', tab='system') }}" class="{{ 'active' if tab == 'system' }}" {% if tab == 'system' %}aria-current="page"{% endif %}>System</a>
+  <a href="{{ url_for('main.logs', tab='activity') }}" class="{{ 'active' if tab == 'activity' }}" {% if tab == 'activity' %}aria-current="page"{% endif %}>Activity</a>
   {% endif %}
-  <a href="{{ url_for('main.logs', tab='auth') }}" class="{{ 'active' if tab == 'auth' }}">User Auth</a>
+  <a href="{{ url_for('main.logs', tab='auth') }}" class="{{ 'active' if tab == 'auth' }}" {% if tab == 'auth' %}aria-current="page"{% endif %}>User Auth</a>
 </div>
 
 {% if tab == 'sessions' %}

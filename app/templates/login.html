@@ -4,7 +4,10 @@
 <div class="login-wrap">
   <form class="login-card" method="post">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <h1>PiVPN Web UI</h1>
+    <div class="login-card-header">
+      <h1>PiVPN Web UI</h1>
+      <p class="login-card-subtitle">Sign in to manage this server</p>
+    </div>
     <label>Username
       <input type="text" name="username" autocomplete="username" required autofocus>
     </label>

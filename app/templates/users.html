@@ -75,7 +75,7 @@
       {% for u in users %}
       <tr>
         <td>{{ u.username }}{% if u.id == current_user.id | int %} <span class="hint">(you)</span>{% endif %}</td>
-        <td><span class="badge {{ 'badge-connected' if u.role == 'admin' else 'badge-inactive' }}">{{ u.role }}</span></td>
+        <td><span class="badge badge-role {{ 'badge-role-moderator' if u.role != 'admin' }}">{{ u.role }}</span></td>
         <td>{{ u.created_at }}</td>
         {% if current_user.is_admin %}
         <td>

@@ -37,6 +37,12 @@ function enhanceSelect(select) {
   wrapper.appendChild(menu);
 
   let activeIndex = -1;
+  // Typeahead: buffer of recently-typed characters, and the timer that
+  // clears it after a pause — the same shape a native <select> uses so
+  // typing "sy" quickly reaches "System" rather than each keystroke
+  // restarting the search from "s".
+  let typeaheadBuffer = '';
+  let typeaheadTimer = null;
 
   function optionId(i) {
     return `${menuId}-option-${i}`;
@@ -147,6 +153,37 @@ function enhanceSelect(select) {
       case 'Tab':
         if (isOpen) closeMenu();
         break;
+      default:
+        // Single printable character (letters/digits/etc, no modifier held)
+        // — everything else (arrows/Home/End/Enter/Escape/Tab) is handled
+        // above already, and a modified keystroke (e.g. Cmd+R) shouldn't
+        // be swallowed as a typeahead character.
+        if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+          e.preventDefault();
+          clearTimeout(typeaheadTimer);
+          typeaheadBuffer += e.key.toLowerCase();
+          typeaheadTimer = setTimeout(() => { typeaheadBuffer = ''; }, 600);
+
+          const options = Array.from(select.options);
+          // Search starting just after the current active option (native
+          // <select> behavior) so repeating the same starting letter cycles
+          // through every match instead of always landing on the first one.
+          const startAt = isOpen ? (activeIndex + 1) % options.length : 0;
+          const ordered = options.slice(startAt).concat(options.slice(0, startAt));
+          const match = ordered.find((opt) => opt.textContent.trim().toLowerCase().startsWith(typeaheadBuffer));
+          if (!match) break;
+          const matchIndex = options.indexOf(match);
+          if (isOpen) {
+            setActive(matchIndex);
+          } else {
+            // Matches this component's own precedent: a closed trigger's
+            // arrow keys open the menu rather than silently changing the
+            // value, so typeahead does the same instead of committing a
+            // selection the user never saw highlighted first.
+            openMenu();
+            setActive(matchIndex);
+          }
+        }
     }
   });
 

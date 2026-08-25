@@ -17,6 +17,19 @@ function attachFirewallReorder(tbodySelector) {
   const csrfToken = csrfMeta ? csrfMeta.content : '';
   let draggingRow = null;
 
+  // The drop/drag path already gives a sighted user the moved row to look
+  // at; a screen reader user gets nothing unless something announces the
+  // result. Created once and reused (persistent live regions are announced
+  // more reliably than one improvised at the moment of use), only ever
+  // populated by the keyboard path below — the mouse-drag path already has
+  // its own equally-immediate visual feedback, and re-announcing every
+  // dragover as the row hops between neighbors would be far too noisy.
+  const announcer = document.createElement('div');
+  announcer.className = 'sr-only';
+  announcer.setAttribute('aria-live', 'polite');
+  announcer.setAttribute('role', 'status');
+  document.body.appendChild(announcer);
+
   // Shared by the mouse-drag drop handler and the keyboard handler below —
   // both just need "tell the server the new before/after, then recover if
   // it disagrees."
@@ -34,8 +47,15 @@ function attachFirewallReorder(tbodySelector) {
       .catch(() => {
         // DB and DOM have now disagreed — reload is the honest recovery,
         // not worth reimplementing "undo this drag" for a rare failure.
-        alert('Could not save that order — reloading to show the real order.');
-        window.location.reload();
+        // Styled toast instead of native alert() (see .reorder-error-toast
+        // in style.css for why) — the short delay before reloading is so
+        // it's actually readable rather than replaced mid-render.
+        const notice = document.createElement('div');
+        notice.className = 'flash flash-error reorder-error-toast';
+        notice.setAttribute('role', 'alert');
+        notice.textContent = 'Could not save that order — reloading to show the real order.';
+        document.body.appendChild(notice);
+        setTimeout(() => window.location.reload(), 1400);
       });
   }
 
@@ -124,6 +144,14 @@ function attachFirewallReorder(tbodySelector) {
     row.parentNode.insertBefore(row, e.key === 'ArrowUp' ? neighbor : neighbor.nextSibling);
     handle.focus(); // keep focus on the same handle so repeated ↑/↓ keeps working
 
-    sendReorder(ruleId, body, () => {});
+    sendReorder(ruleId, body, () => {
+      // Only announced once the server actually agrees with the optimistic
+      // move above — if it doesn't, sendReorder's catch() reloads instead,
+      // and announcing a position that's about to be reverted would be
+      // actively misleading.
+      const reorderable = Array.from(tbody.querySelectorAll('tr[draggable="true"]'));
+      const position = reorderable.indexOf(row) + 1;
+      announcer.textContent = `Moved rule to position ${position} of ${reorderable.length}.`;
+    });
   });
 }

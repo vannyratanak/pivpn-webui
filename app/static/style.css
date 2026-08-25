@@ -118,6 +118,41 @@ body {
   font-size: 13px;
   padding: 9px 12px;
 }
+/* Visually hidden but still reachable by assistive tech — for content
+   that's meaningful to a screen reader but has no useful visual form of
+   its own (an aria-live status announcement, e.g.). Not for anything a
+   sighted user needs; that's what .hint/.muted are for. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Reorder failure notice (firewall-reorder.js) — a styled, non-blocking
+   stand-in for native alert(), which this app already avoids elsewhere
+   (see nav-loading.js's confirm-modal replacing native confirm() for the
+   same "can't be styled, and looks like the browser's dialog, not the
+   app's" reason). Fixed/floating rather than inline, since it's appended
+   straight to <body> right before a reload — there's no .content/.flashes
+   container to sit inside at that point. Shadow matches the "open
+   dropdown menu" entry in DESIGN.md's Shadow Vocabulary: genuinely
+   floating above the whole page, the heaviest shadow the system defines. */
+.reorder-error-toast {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 200;
+  max-width: 420px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+
 .skip-link {
   position: absolute;
   top: -48px;
@@ -542,6 +577,10 @@ button:disabled:hover, .btn:disabled:hover { filter: none; }
   filter: none;
   border-color: var(--accent);
   color: var(--accent);
+  /* Lighter alpha than the documented 0.2 hover-shadow value (see Shadow
+     Vocabulary in DESIGN.md) — deliberate, not a drift: this button is
+     specifically the quieter, non-semantic one (see the comment above),
+     so its hover lift stays a notch subtler too. */
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.12);
 }
 
@@ -630,7 +669,7 @@ button:disabled:hover, .btn:disabled:hover { filter: none; }
 }
 .table-scroll::-webkit-scrollbar-thumb {
   background: var(--border);
-  border-radius: 3px;
+  border-radius: 4px;
 }
 
 .pagination {
@@ -943,7 +982,7 @@ dialog.modal code {
   display: inline-block;
   padding: 2px 8px;
   border-radius: 999px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.03em;
@@ -951,6 +990,13 @@ dialog.modal code {
 
 .badge-connected { background: rgba(var(--ok-rgb), 0.18); color: var(--ok); }
 .badge-inactive { background: rgba(var(--muted-rgb), 0.15); color: var(--muted); }
+
+/* Account role (Users page) is a different kind of label than
+   connected/inactive — it's not a live status, so it deliberately doesn't
+   borrow the ok/muted status-color pair those mean. Neutral outline
+   instead, distinguishing admin/moderator by text weight/color alone. */
+.badge-role { background: transparent; border: 1px solid var(--border); color: var(--text); }
+.badge-role-moderator { color: var(--muted); }
 
 .empty { color: var(--muted); }
 
@@ -1061,6 +1107,16 @@ input[type="text"].filter-input-inline {
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 24px;
+}
+
+/* Width-matches and centers the flash banner to the login card
+   specifically — everywhere else .flashes intentionally spans the full
+   .content width, which reads as a mismatched full-page banner floating
+   above this page's one narrow, centered card. */
+.flashes:has(+ .login-wrap) {
+  max-width: 360px;
+  margin: 0 auto 16px;
 }
 
 .login-card {
@@ -1068,18 +1124,34 @@ input[type="text"].filter-input-inline {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 32px;
-  width: 320px;
+  /* Wider than the general .card token's implicit sizing, and its own gap
+     scale — this is the page's one and only focal element on an otherwise
+     empty viewport, not a stacked section among others, so it earns more
+     breathing room than a dense data-page card would. */
+  width: 360px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
 }
 
-.login-card h1 { font-size: 18px; text-align: center; }
+.login-card-header { text-align: center; }
+
+/* Matches the documented Display token (see the global h1 rule above)
+   instead of the previous undocumented 18px override — this *is* the
+   page's one h1, so it reads at the size DESIGN.md's type ramp defines
+   for a page title, not a smaller ad-hoc size with no written reason. */
+.login-card h1 { margin: 0 0 6px; }
+
+.login-card-subtitle {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
 
 .login-card label {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   font-size: 13px;
   color: var(--muted);
 }

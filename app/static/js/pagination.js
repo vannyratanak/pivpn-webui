@@ -14,6 +14,11 @@ function attachPagination(containerSelector, itemSelector, pageSizeId, controlsI
   const prevBtn = controls.querySelector('[data-page-prev]');
   const nextBtn = controls.querySelector('[data-page-next]');
   const status = controls.querySelector('[data-page-status]');
+  // A screen reader user paging/searching gets no signal that "Page 2 of 5"
+  // changed unless something announces it — set here once, so every page
+  // that calls attachPagination gets it for free instead of needing the
+  // attribute repeated in each page's own template markup.
+  if (status) status.setAttribute('aria-live', 'polite');
 
   let currentPage = 1;
 
