@@ -623,6 +623,14 @@ def reorder_rule(rule_id):
     except firewall.FirewallError as exc:
         _audit("firewall_rule_reorder", f"rule#{rule_id}", "error", str(exc))
         return jsonify(ok=False, error=str(exc)), 400
+    except PrivilegedCommandError as exc:
+        # firewall.reorder_rule's chain rebuild (after its own DB write
+        # already committed) can fail here same as toggle_rule's route
+        # already accounts for — an uncaught PrivilegedCommandError would
+        # otherwise surface as a raw 500 (not this endpoint's documented
+        # {ok, error} JSON shape) and skip the audit trail entirely.
+        _audit("firewall_rule_reorder", f"rule#{rule_id}", "error", str(exc))
+        return jsonify(ok=False, error=str(exc)), 400
 
 
 @bp.route("/firewall/<int:rule_id>/delete", methods=["POST"])

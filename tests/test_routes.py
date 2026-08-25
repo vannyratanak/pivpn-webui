@@ -445,3 +445,30 @@ def test_admin_still_has_full_firewall_access(client):
     _login_admin(client)
     assert client.get("/firewall").status_code == 200
     assert client.get("/vpn-routes").status_code == 200
+
+
+def test_reorder_route_degrades_cleanly_on_privileged_command_error(client, monkeypatch):
+    # Regression test: firewall.reorder_rule's chain rebuild happens after
+    # its own DB write already committed — a PrivilegedCommandError from
+    # that rebuild (e.g. a raced concurrent chain mutation, or any other
+    # iptables failure) used to propagate straight through this JSON
+    # endpoint uncaught, surfacing as a raw 500 instead of the endpoint's
+    # documented {ok, error} shape, and skipping the audit trail entirely.
+    _login_admin(client)
+    r1 = db.insert_rule({"kind": "input", "action": "ACCEPT", "protocol": "tcp",
+                          "src": None, "dport": "443", "enabled": 1, "position": 1.0})
+    r2 = db.insert_rule({"kind": "input", "action": "DROP", "protocol": "tcp",
+                          "src": None, "dport": "80", "enabled": 1, "position": 2.0})
+    import app.firewall as firewall_module
+    from app.privileged import PrivilegedCommandError
+
+    def _boom(argv):
+        raise PrivilegedCommandError("boom")
+
+    monkeypatch.setattr(firewall_module, "run_root", _boom)
+    resp = client.post(f"/firewall/{r2}/reorder", json={"target_id": r1, "place": "before"})
+    assert resp.status_code == 400
+    assert resp.get_json()["ok"] is False
+    audit = db.list_audit(limit=5)
+    assert any(a["action"] == "firewall_rule_reorder" and a["result"] == "error" for a in audit)
+
