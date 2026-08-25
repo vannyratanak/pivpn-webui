@@ -21,6 +21,8 @@ Still worth a sanity check on a different install: PiVPN's scripts have
 drifted across releases/forks before. If something here doesn't match,
 `pivpn -h` and `pivpn add -h` on the box will show the current syntax.
 """
+import contextlib
+import fcntl
 import re
 import shlex
 import shutil
@@ -32,6 +34,38 @@ from app.privileged import PrivilegedCommandError, run_root
 
 CLIENT_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+_ADD_CLIENT_LOCK_PATH = Path(config.DB_PATH).parent / ".add-client.lock"
+
+
+@contextlib.contextmanager
+def _add_client_lock():
+    """Serializes add_client (and, via it, renew_client's re-add half)
+    across both gunicorn worker processes — a plain Python-level Lock
+    wouldn't help, since the two processes don't share memory.
+
+    Without this, two near-simultaneous add_client calls for the same
+    name (a double-click on "Create client" is the realistic trigger —
+    the button isn't disabled while the request is in flight) can both
+    pass the "does this .ovpn already exist?" check before either's
+    `pivpn add` — a slow, multi-second subprocess doing real cert
+    generation — finishes, and both proceed. Reproduced live against an
+    isolated test client on .12 (immediately revoked after): one request
+    succeeded, the other got a confusing "pivpn add reported success but
+    the .ovpn file was not found" error that reads like a PIVPN_OVPN_DIR
+    misconfiguration, not what it actually was.
+
+    fcntl.flock (blocking, no LOCK_NB) makes the second caller wait for
+    the first to fully finish, so it makes its own decision against the
+    real, post-add state — landing on the correct "already exists" error
+    instead."""
+    _ADD_CLIENT_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    lock_file = open(_ADD_CLIENT_LOCK_PATH, "w")
+    try:
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
+        yield
+    finally:
+        lock_file.close()  # releases the flock
 
 
 class PivpnError(RuntimeError):
@@ -120,24 +154,25 @@ def list_clients() -> list[dict]:
 def add_client(name: str, passphrase: str | None = None) -> Path:
     name = _validate_name(name)
     _require_pivpn_binary()
-    if client_ovpn_path(name).exists():
-        raise PivpnError(f"A client named '{name}' already exists.")
+    with _add_client_lock():
+        if client_ovpn_path(name).exists():
+            raise PivpnError(f"A client named '{name}' already exists.")
 
-    if passphrase:
-        argv = ["pivpn", "add", "-p", passphrase, "-n", name, "-d", config.PIVPN_CERT_DAYS]
-    else:
-        argv = ["pivpn", "add", "nopass", "-n", name, "-d", config.PIVPN_CERT_DAYS]
+        if passphrase:
+            argv = ["pivpn", "add", "-p", passphrase, "-n", name, "-d", config.PIVPN_CERT_DAYS]
+        else:
+            argv = ["pivpn", "add", "nopass", "-n", name, "-d", config.PIVPN_CERT_DAYS]
 
-    result = _run_pivpn(argv)
-    if result.returncode != 0:
-        raise PivpnError((result.stdout + result.stderr).strip() or "pivpn add failed")
+        result = _run_pivpn(argv)
+        if result.returncode != 0:
+            raise PivpnError((result.stdout + result.stderr).strip() or "pivpn add failed")
 
-    if not client_ovpn_path(name).exists():
-        raise PivpnError(
-            f"pivpn add reported success but {client_ovpn_path(name)} was not found — "
-            "check PIVPN_OVPN_DIR in your .env."
-        )
-    return client_ovpn_path(name)
+        if not client_ovpn_path(name).exists():
+            raise PivpnError(
+                f"pivpn add reported success but {client_ovpn_path(name)} was not found — "
+                "check PIVPN_OVPN_DIR in your .env."
+            )
+        return client_ovpn_path(name)
 
 
 def import_clients(text: str) -> tuple[int, list[str]]:

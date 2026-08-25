@@ -139,3 +139,58 @@ def test_import_clients_one_bad_line_does_not_stop_the_rest(monkeypatch):
     assert added == 1
     assert len(errors) == 1
     assert "line 1" in errors[0]
+
+
+# --- add_client: a real TOCTOU race — two near-simultaneous calls for the
+# same name (a double-click on "Create client" is the realistic trigger;
+# the button isn't disabled while the request is in flight) could both
+# pass the "does this .ovpn already exist?" check before either's `pivpn
+# add` (a slow, multi-second subprocess doing real cert generation)
+# finished, and both proceed. Reproduced live against an isolated test
+# client on .12 (revoked immediately after): one request succeeded, the
+# other got a confusing "pivpn add reported success but the .ovpn file
+# was not found" error that reads like a PIVPN_OVPN_DIR misconfiguration,
+# not what it actually was.
+
+def test_add_client_race_never_produces_a_confusing_error(tmp_path, monkeypatch):
+    import threading
+    import time
+
+    monkeypatch.setattr(pivpn_ctl, "_require_pivpn_binary", lambda: None)
+    ovpn_path = tmp_path / "racer.ovpn"
+    monkeypatch.setattr(pivpn_ctl, "client_ovpn_path", lambda name: ovpn_path)
+    # raising=False: lets this same test run unmodified against the
+    # pre-fix code too (where this attribute doesn't exist yet) to prove
+    # the race is real, not just theoretical.
+    monkeypatch.setattr(pivpn_ctl, "_ADD_CLIENT_LOCK_PATH", tmp_path / ".add-client.lock", raising=False)
+
+    def _slow_run_pivpn(argv, timeout=30):
+        time.sleep(0.2)  # simulate pivpn add's real cert-generation latency
+        ovpn_path.write_text("fake ovpn content")
+        return subprocess.CompletedProcess(args=argv, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(pivpn_ctl, "_run_pivpn", _slow_run_pivpn)
+
+    results = []
+    barrier = threading.Barrier(2)
+
+    def try_add():
+        barrier.wait()  # line both threads up to maximize the race window
+        try:
+            pivpn_ctl.add_client("racer")
+            results.append("ok")
+        except pivpn_ctl.PivpnError as exc:
+            results.append(str(exc))
+
+    t1 = threading.Thread(target=try_add)
+    t2 = threading.Thread(target=try_add)
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    assert results.count("ok") == 1
+    assert sum(1 for r in results if "already exists" in r) == 1
+    # The confusing, misleading error must never happen — either the
+    # request succeeds, or it's cleanly refused as a duplicate.
+    assert not any("was not found" in r for r in results)
