@@ -64,7 +64,7 @@ server) for keeping a running install in sync with this repo.
   it just can't remove what it can't prove it created. Adding a route
   restarts the OpenVPN service to push it to clients.
 
-- **Logs** page has four tabs:
+- **Logs** page has five tabs:
   - *VPN Sessions* — raw client connect/disconnect events, best-effort
     parsed from the OpenVPN service journal (`app/vpnlog.py`).
   - *Client Sessions* — the same connect/disconnect events paired into
@@ -73,8 +73,13 @@ server) for keeping a running install in sync with this repo.
     time yet.
   - *System* — raw tail of the `pivpn-webui` and system journals, for when
     you don't have SSH handy.
-  - *User Auth* — login/logout history for every account, from the same
-    local audit trail as the old single Activity Log (`app/db.py`).
+  - *Activity* — every audited action (firewall changes, client
+    management, user management), not just login/logout — the full
+    `app/db.py` `audit_log` table, unfiltered. Admin-only, for the same
+    reason System is: it shows detail beyond what a moderator's "client
+    control + who logged in" scope is meant to expose.
+  - *User Auth* — login/logout history for every account, the same
+    `audit_log` table filtered to just those two actions.
   Sessions and System both read via `pivpn-webui-log-helper.sh`, a second
   narrowly-scoped root helper (see below) — three fixed `journalctl`
   invocations, no caller-supplied arguments.

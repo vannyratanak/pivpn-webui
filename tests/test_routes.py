@@ -400,6 +400,27 @@ def test_moderator_logs_tab_falls_back_from_disallowed_tab(client):
     assert b"System journal" not in resp.data
 
 
+def test_moderator_cannot_reach_activity_tab(client):
+    _add_moderator()
+    _login_moderator(client)
+    resp = client.get("/logs?tab=activity")
+    assert resp.status_code == 200
+    assert b"Every audited action" not in resp.data
+
+
+def test_admin_activity_tab_shows_full_unfiltered_log(client):
+    _login_admin(client)
+    # A non-auth action (login/logout are the only things the old Auth
+    # tab ever showed) — Activity is the only place this should surface.
+    client.post("/users/add", data={
+        "username": "activitytest", "password": "x", "confirm": "x", "role": "moderator",
+    })
+    resp = client.get("/logs?tab=activity")
+    assert resp.status_code == 200
+    assert b"user_add" in resp.data
+    assert b"activitytest" in resp.data
+
+
 def test_admin_still_has_full_firewall_access(client):
     _login_admin(client)
     assert client.get("/firewall").status_code == 200

@@ -10,6 +10,7 @@
   <a href="{{ url_for('main.logs', tab='client_sessions') }}" class="{{ 'active' if tab == 'client_sessions' }}">Client Sessions</a>
   {% if current_user.is_admin %}
   <a href="{{ url_for('main.logs', tab='system') }}" class="{{ 'active' if tab == 'system' }}">System</a>
+  <a href="{{ url_for('main.logs', tab='activity') }}" class="{{ 'active' if tab == 'activity' }}">Activity</a>
   {% endif %}
   <a href="{{ url_for('main.logs', tab='auth') }}" class="{{ 'active' if tab == 'auth' }}">User Auth</a>
 </div>
@@ -153,9 +154,65 @@
 </section>
 {% endif %}
 
+{% if tab == 'activity' %}
+<section class="card">
+  <p class="hint">Every audited action — firewall changes, client management, user management — not just login/logout (see User Auth for that), most recent first (last 300).</p>
+  {% if not activity_entries %}
+    <p class="empty">No activity yet.</p>
+  {% else %}
+  <input type="text" id="activity-filter" class="log-filter-input" placeholder="Search…" aria-label="Search activity log">
+  <div class="table-scroll">
+  <table id="activity-table">
+    <thead>
+      <tr>
+        <th scope="col">Time</th>
+        <th scope="col">Actor</th>
+        <th scope="col">Action</th>
+        <th scope="col">Target</th>
+        <th scope="col">Result</th>
+        <th scope="col">Detail</th>
+      </tr>
+    </thead>
+    <tbody id="activity-tbody">
+      {% for e in activity_entries %}
+      <tr class="{{ 'blocked-row' if e.result == 'error' }}">
+        <td>{{ e.ts }}</td>
+        <td>{{ e.actor }}</td>
+        <td>{{ e.action }}</td>
+        <td>{{ e.target or '' }}</td>
+        <td>{{ e.result }}</td>
+        <td>{{ e.detail or '' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <div class="pagination" id="activity-pagination">
+    <label class="pagination-size">Show
+      <select id="activity-page-size">
+        <option value="10" selected>10</option>
+        <option value="25">25</option>
+        <option value="50">50</option>
+        <option value="100">100</option>
+      </select>
+    </label>
+    <div class="pagination-nav">
+      <button type="button" class="btn btn-sm" data-page-prev>Prev</button>
+      <span data-page-status class="hint"></span>
+      <button type="button" class="btn btn-sm" data-page-next>Next</button>
+    </div>
+  </div>
+  <script>
+    const activityPager = attachPagination('#activity-tbody', 'tr', 'activity-page-size', 'activity-pagination');
+    attachLogFilter('activity-filter', '#activity-tbody', 'tr', '#activity-table thead th', () => activityPager && activityPager.refresh());
+  </script>
+  {% endif %}
+</section>
+{% endif %}
+
 {% if tab == 'auth' %}
 <section class="card">
-  <p class="hint">Login and logout events for the admin account, most recent first (last 200).</p>
+  <p class="hint">Login and logout events for every account, most recent first (last 200).</p>
   {% if not auth_entries %}
     <p class="empty">No auth activity yet.</p>
   {% else %}

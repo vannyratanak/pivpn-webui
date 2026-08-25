@@ -733,21 +733,25 @@ def resync_rules():
 AUTH_ACTIONS = ("login", "logout")
 
 
+ALL_LOG_TABS = ("sessions", "client_sessions", "system", "activity", "auth")
 MODERATOR_LOG_TABS = ("client_sessions", "auth")
 
 
 @bp.route("/logs")
 @login_required
 def logs():
-    allowed_tabs = ("sessions", "client_sessions", "system", "auth") if current_user.is_admin else MODERATOR_LOG_TABS
+    allowed_tabs = ALL_LOG_TABS if current_user.is_admin else MODERATOR_LOG_TABS
     default_tab = "sessions" if current_user.is_admin else MODERATOR_LOG_TABS[0]
     tab = request.args.get("tab", default_tab)
     # Enforced here, not just hidden in the template — a moderator editing
-    # the URL's ?tab= directly must not be able to reach Sessions/System.
+    # the URL's ?tab= directly must not be able to reach Sessions/System/
+    # Activity. Activity is admin-only for the same reason System is: it
+    # shows detail (firewall changes, user management) beyond what
+    # "client control + who logged in" is meant to expose to a moderator.
     if tab not in allowed_tabs:
         tab = default_tab
 
-    sessions = client_sessions = webui_log = system_log = auth_entries = None
+    sessions = client_sessions = webui_log = system_log = auth_entries = activity_entries = None
     if tab == "sessions":
         try:
             sessions = vpnlog.list_sessions()
@@ -783,10 +787,17 @@ def logs():
         except PrivilegedCommandError as exc:
             system_log = []
             flash(str(exc), "error")
+    elif tab == "activity":
+        # Unfiltered — every audited action, not just login/logout (see
+        # AUTH_ACTIONS below). This is the only place any of that ever
+        # surfaces in the UI; before this it was write-only, inspectable
+        # only by querying the database directly.
+        activity_entries = db.list_audit(limit=300)
     else:
         auth_entries = db.list_audit_by_actions(AUTH_ACTIONS)
 
     return render_template(
         "logs.html", tab=tab, sessions=sessions, client_sessions=client_sessions,
         webui_log=webui_log, system_log=system_log, auth_entries=auth_entries,
+        activity_entries=activity_entries,
     )
