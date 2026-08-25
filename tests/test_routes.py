@@ -286,6 +286,26 @@ def test_delete_other_user_succeeds(client):
     assert db.get_user_by_username("mod") is None
 
 
+def test_delete_user_db_busy_degrades_cleanly(client, monkeypatch):
+    # Regression test: delete_user_guarded's BEGIN IMMEDIATE can raise
+    # sqlite3.OperationalError if it can't acquire the write lock within
+    # the connection's timeout (extremely unlikely given how fast this
+    # app's own writes are, but a raw 500 is a worse failure mode than a
+    # clean "try again" message when it does happen).
+    import sqlite3
+    _add_moderator()
+    _login_admin(client)
+    mod_row = db.get_user_by_username("mod")
+
+    def fake_guarded(user_id):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr("app.routes.db.delete_user_guarded", fake_guarded)
+    resp = client.post(f"/users/{mod_row['id']}/delete")
+    assert resp.status_code == 302
+    assert db.get_user_by_username("mod") is not None  # nothing deleted
+
+
 def test_delete_last_admin_refused_even_with_moderators_present(client):
     # Regression test: the old guard only checked "is this the last user
     # overall", which missed this exact case — one admin plus any number

@@ -1,3 +1,5 @@
+import sqlite3
+
 from flask import Blueprint, abort, flash, jsonify, redirect, render_template, request, send_file, session, url_for
 from flask_login import current_user, login_required, login_user, logout_user
 
@@ -163,7 +165,17 @@ def delete_user(user_id):
     # from it. delete_user_guarded does the count check and the delete in
     # one locked transaction — a separate count-then-delete had a real
     # race between two concurrent requests (see its docstring).
-    target, error = db.delete_user_guarded(user_id)
+    try:
+        target, error = db.delete_user_guarded(user_id)
+    except sqlite3.OperationalError:
+        # BEGIN IMMEDIATE waits for SQLite's write lock (default 5s
+        # timeout) rather than failing instantly — this app's own writes
+        # are all fast, short transactions, so contention this long isn't
+        # expected, but a raw 500 for "try that again" is a worse failure
+        # mode than a clean message when it does happen.
+        flash("Could not complete that right now — the database was busy. Try again.", "error")
+        _audit("user_delete", str(user_id), "error", "database busy")
+        return redirect(url_for("main.users"))
     if error == "not_found":
         flash("User not found.", "error")
     elif error == "last_admin":
