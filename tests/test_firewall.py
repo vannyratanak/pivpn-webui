@@ -450,18 +450,71 @@ def test_add_input_rule_self_lockout_raises_and_never_applies(tmp_path, monkeypa
 def test_add_input_rule_allowed_when_earlier_accept_still_covers_caller(tmp_path, monkeypatch):
     existing = [_rule(1, "ACCEPT", "203.0.113.0/24", position=1.0, dport="443")]
     applied = _setup_input_rules(tmp_path, monkeypatch, existing_input=existing)
-    # a new blanket DROP lands last (after the existing ACCEPT) — caller's
-    # own connection still matches the earlier ACCEPT first, so this is safe
-    add_input_rule(action="DROP", protocol="all", src=None, dport=None, client_ip="203.0.113.9")
+    # dport=22 (not blank; protocol=tcp since _require_proto_for_dport needs
+    # tcp/udp whenever a port is set) so this only exercises self-lockout,
+    # not the separate _check_not_unrestricted_input_drop guard (see its own
+    # tests below) — caller's own connection still matches the earlier
+    # ACCEPT first, so this is safe.
+    add_input_rule(action="DROP", protocol="tcp", src=None, dport="22", client_ip="203.0.113.9")
     assert len(db.list_rules()) == 2
     assert len(applied) == 1
 
 
 def test_add_input_rule_no_client_ip_skips_guard(tmp_path, monkeypatch):
     # None means "no real request to protect" — e.g. a script/internal
-    # caller, not a browser request that could get locked out.
+    # caller, not a browser request that could get locked out. dport=22 /
+    # protocol=tcp (not blank) for the same reason as the test above.
     applied = _setup_input_rules(tmp_path, monkeypatch, existing_input=[])
-    add_input_rule(action="DROP", protocol="all", src=None, dport=None, client_ip=None)
+    add_input_rule(action="DROP", protocol="tcp", src=None, dport="22", client_ip=None)
+    assert len(db.list_rules()) == 1
+    assert len(applied) == 1
+
+
+# --- _check_not_unrestricted_input_drop: a DROP INPUT rule with no source
+# and no port has no notion of "who," unlike self-lockout — it can't be
+# bypassed just because the caller's own IP happens to already be
+# safelisted by an earlier rule, which is exactly the gap that let a real
+# DROP-all-udp rule take down every VPN client's OpenVPN connection while
+# the admin's own web UI access (covered by an earlier subnet-scoped
+# ACCEPT) kept working fine.
+
+def test_add_input_rule_rejects_unrestricted_drop_even_when_caller_is_safe(tmp_path, monkeypatch):
+    existing = [_rule(1, "ACCEPT", "203.0.113.0/24", position=1.0, dport="443")]
+    applied = _setup_input_rules(tmp_path, monkeypatch, existing_input=existing)
+    with pytest.raises(FirewallError):
+        add_input_rule(action="DROP", protocol="udp", src=None, dport=None, client_ip="203.0.113.9")
+    assert len(db.list_rules()) == 1  # only the pre-existing ACCEPT — nothing new inserted
+    assert applied == []
+
+
+def test_add_input_rule_rejects_unrestricted_drop_even_with_no_client_ip(tmp_path, monkeypatch):
+    # Unlike self-lockout, this guard doesn't skip just because there's no
+    # request to protect — the rule is dangerous regardless of caller.
+    applied = _setup_input_rules(tmp_path, monkeypatch, existing_input=[])
+    with pytest.raises(FirewallError):
+        add_input_rule(action="DROP", protocol="udp", src=None, dport=None, client_ip=None)
+    assert db.list_rules() == []
+    assert applied == []
+
+
+def test_add_input_rule_allows_drop_with_only_a_port_set(tmp_path, monkeypatch):
+    applied = _setup_input_rules(tmp_path, monkeypatch, existing_input=[])
+    add_input_rule(action="DROP", protocol="udp", src=None, dport="53", client_ip=None)
+    assert len(db.list_rules()) == 1
+    assert len(applied) == 1
+
+
+def test_add_input_rule_allows_drop_with_only_a_source_set(tmp_path, monkeypatch):
+    applied = _setup_input_rules(tmp_path, monkeypatch, existing_input=[])
+    add_input_rule(action="DROP", protocol="udp", src="203.0.113.0/24", dport=None, client_ip=None)
+    assert len(db.list_rules()) == 1
+    assert len(applied) == 1
+
+
+def test_add_input_rule_allows_unrestricted_accept(tmp_path, monkeypatch):
+    # The guard is DROP-specific — a blanket ACCEPT has no such danger.
+    applied = _setup_input_rules(tmp_path, monkeypatch, existing_input=[])
+    add_input_rule(action="ACCEPT", protocol="all", src=None, dport=None, client_ip=None)
     assert len(db.list_rules()) == 1
     assert len(applied) == 1
 
@@ -516,6 +569,28 @@ def test_toggle_rule_enable_no_client_ip_skips_guard(tmp_path, monkeypatch):
     _setup_toggle_rule(tmp_path, monkeypatch, rule, other_input_rules=[])
     toggle_rule(1, client_ip=None)
     assert db.get_rule(1)["enabled"] == 1
+
+
+def test_toggle_rule_enable_rejects_unrestricted_drop_even_with_no_client_ip(tmp_path, monkeypatch):
+    # A pre-existing DB row that predates _check_not_unrestricted_input_drop
+    # (e.g. one disabled before this guard shipped) must still be caught on
+    # re-enable, not just on creation — otherwise disable-then-re-enable is
+    # a loophole around the guard entirely.
+    rule = {**_rule(1, "DROP", src=None, position=1.0, dport=None), "kind": "input", "enabled": 0}
+    applied = _setup_toggle_rule(tmp_path, monkeypatch, rule, other_input_rules=[])
+    with pytest.raises(FirewallError):
+        toggle_rule(1, client_ip=None)
+    assert db.get_rule(1)["enabled"] == 0  # stays disabled — refused before ever touching iptables
+    assert applied == []
+
+
+def test_toggle_rule_disable_of_unrestricted_drop_is_unaffected(tmp_path, monkeypatch):
+    # The new guard is enable-direction only — disabling an existing (even
+    # unrestricted) rule only ever removes risk, so it must still work.
+    rule = {**_rule(1, "DROP", src=None, position=1.0, dport=None), "kind": "input", "enabled": 1}
+    applied = _setup_toggle_rule(tmp_path, monkeypatch, rule, other_input_rules=[])
+    toggle_rule(1, client_ip=None)
+    assert db.get_rule(1)["enabled"] == 0
 
 
 def test_delete_rule_self_lockout_raises_and_never_deletes(tmp_path, monkeypatch):

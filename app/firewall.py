@@ -404,6 +404,28 @@ def _check_self_lockout(client_ip: str | None, simulated_input_rules: list[dict]
         )
 
 
+def _check_not_unrestricted_input_drop(rule: dict):
+    """Raise FirewallError for a DROP INPUT rule with no source and no
+    port, regardless of protocol. Unlike _check_self_lockout (which only
+    protects the requester's own port-443 access by simulating whether
+    *their* traffic would still get through), this has no notion of
+    "who" — so it can't be bypassed just because the admin's current IP
+    happens to already be safelisted by an earlier rule, which is
+    exactly the gap that let a real DROP-all-udp rule take down every
+    VPN client's OpenVPN connection while the admin's own web UI access
+    (covered by an earlier subnet-scoped ACCEPT) kept working fine.
+    There's no legitimate reason for a rule this unrestricted; anything
+    narrower — a specific source, a specific port, or both — is
+    unaffected."""
+    if rule["action"] == "DROP" and not rule.get("src") and not rule.get("dport"):
+        raise FirewallError(
+            "A DROP rule with no source and no port would block ALL inbound "
+            f"{rule.get('protocol') or 'all'} traffic to this server, from "
+            "anywhere — refusing to create it. Add a source and/or a port to "
+            "narrow it."
+        )
+
+
 def _check_client_block_self_lockout(admin_ip: str | None, blocked_client_ip: str):
     """Raise FirewallError if blocking blocked_client_ip would cut off the
     request that's asking for it. Unlike _check_self_lockout's position-
@@ -551,6 +573,7 @@ def add_input_rule(action, protocol, src, dport, comment="", client_ip: str | No
         "comment": (comment or "")[:200],
         "enabled": 1,
     }
+    _check_not_unrestricted_input_drop(rule)
     with db.locked_transaction() as conn:
         existing_input = [
             dict(r) for r in conn.execute(
@@ -935,10 +958,13 @@ def toggle_rule(rule_id: int, client_ip: str | None = None):
             others = _other_enabled_input_rules(conn, rule_id)
             # A disabled INPUT rule can be a DROP that was safe to leave off
             # (e.g. the admin's own IP has since moved) — re-enabling it
-            # needs the same guard add_input_rule/reorder_rule already
-            # apply, or a stale rule could silently cut the admin off with
-            # no warning.
+            # needs the same guards add_input_rule already applies, or a
+            # stale rule (possibly one that predates
+            # _check_not_unrestricted_input_drop existing at all) could
+            # silently go live again with no warning.
             simulated = others + [rule] if new_state else others
+            if new_state:
+                _check_not_unrestricted_input_drop(rule)
             _check_self_lockout(client_ip, simulated)
         conn.execute("UPDATE firewall_rules SET enabled=? WHERE id=?", (1 if new_state else 0, rule_id))
 
