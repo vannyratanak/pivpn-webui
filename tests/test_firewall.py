@@ -2,6 +2,8 @@ import shlex
 
 import pytest
 
+import config
+from app import db
 from app.firewall import (
     _IMPORT_ADDERS,
     FirewallError,
@@ -19,7 +21,9 @@ from app.firewall import (
     add_forward_rule,
     add_input_rule,
     describe_rule,
+    disable_rule,
     import_rules,
+    reorder_rule,
     rule_client_name,
     toggle_rule,
 )
@@ -328,61 +332,62 @@ def test_client_block_self_lockout_no_admin_ip_skips_check():
 # unlike client_block's blanket rule this one does need the full
 # position-ordered simulation — same self-lockout guard reorder_rule uses.
 
-def _patch_insert_and_apply(monkeypatch, existing_input):
-    # db.list_rules() rows always carry a "kind" — add_input_rule filters
-    # on it — but the _rule() helper above (shared with the pure
-    # _would_allow_client tests) doesn't set one, so inject it here rather
-    # than changing that shared helper's shape.
-    rows = [{"kind": "input", **r} for r in existing_input]
-    monkeypatch.setattr("app.firewall.db.list_rules", lambda enabled_only=False: rows)
-    inserted = []
-    monkeypatch.setattr("app.firewall.db.insert_rule", lambda rule: inserted.append(rule) or 99)
+def _setup_input_rules(tmp_path, monkeypatch, existing_input):
+    # add_input_rule now opens a real db.locked_transaction() connection
+    # (BEGIN IMMEDIATE against config.DB_PATH) to close the self-lockout
+    # race — that bypasses attribute-level mocks of db.list_rules/
+    # db.insert_rule entirely, so give it a real temp database instead,
+    # matching test_db.py's tmp_path pattern. run_root is still mocked:
+    # self-lockout is what's under test, not real iptables.
+    monkeypatch.setattr(config, "DB_PATH", str(tmp_path / "test.db"))
+    db.init_db()
+    for r in existing_input:
+        db.insert_rule({**r, "kind": "input", "enabled": 1})
     applied = []
     monkeypatch.setattr("app.firewall.run_root", lambda argv: applied.append(argv))
-    return inserted, applied
+    return applied
 
 
-def test_add_input_rule_self_lockout_raises_and_never_applies(monkeypatch):
-    inserted, applied = _patch_insert_and_apply(monkeypatch, existing_input=[])
+def test_add_input_rule_self_lockout_raises_and_never_applies(tmp_path, monkeypatch):
+    applied = _setup_input_rules(tmp_path, monkeypatch, existing_input=[])
     with pytest.raises(FirewallError):
         add_input_rule(action="DROP", protocol="all", src=None, dport=None, client_ip="203.0.113.9")
-    assert inserted == []  # refused before ever touching the DB or iptables
+    assert db.list_rules() == []  # refused before ever touching the DB or iptables
     assert applied == []
 
 
-def test_add_input_rule_allowed_when_earlier_accept_still_covers_caller(monkeypatch):
+def test_add_input_rule_allowed_when_earlier_accept_still_covers_caller(tmp_path, monkeypatch):
     existing = [_rule(1, "ACCEPT", "203.0.113.0/24", position=1.0, dport="443")]
-    inserted, applied = _patch_insert_and_apply(monkeypatch, existing_input=existing)
+    applied = _setup_input_rules(tmp_path, monkeypatch, existing_input=existing)
     # a new blanket DROP lands last (after the existing ACCEPT) — caller's
     # own connection still matches the earlier ACCEPT first, so this is safe
     add_input_rule(action="DROP", protocol="all", src=None, dport=None, client_ip="203.0.113.9")
-    assert len(inserted) == 1
+    assert len(db.list_rules()) == 2
     assert len(applied) == 1
 
 
-def test_add_input_rule_no_client_ip_skips_guard(monkeypatch):
+def test_add_input_rule_no_client_ip_skips_guard(tmp_path, monkeypatch):
     # None means "no real request to protect" — e.g. a script/internal
     # caller, not a browser request that could get locked out.
-    inserted, applied = _patch_insert_and_apply(monkeypatch, existing_input=[])
+    applied = _setup_input_rules(tmp_path, monkeypatch, existing_input=[])
     add_input_rule(action="DROP", protocol="all", src=None, dport=None, client_ip=None)
-    assert len(inserted) == 1
+    assert len(db.list_rules()) == 1
     assert len(applied) == 1
 
 
-def _patch_toggle(monkeypatch, rule, other_input_rules=()):
-    # rule is the row toggle_rule looks up via db.get_rule; other_input_rules
-    # are the rest of the currently-enabled input set db.list_rules(enabled_only=True)
-    # would return, standing in for "everything else already live".
-    monkeypatch.setattr("app.firewall.db.get_rule", lambda rule_id: dict(rule))
-    monkeypatch.setattr(
-        "app.firewall.db.list_rules",
-        lambda enabled_only=False: [{"kind": "input", **r} for r in other_input_rules],
-    )
-    set_enabled_calls = []
-    monkeypatch.setattr(
-        "app.firewall.db.set_enabled",
-        lambda rule_id, enabled: set_enabled_calls.append((rule_id, enabled)),
-    )
+def _setup_toggle_rule(tmp_path, monkeypatch, rule, other_input_rules=()):
+    # toggle_rule/disable_rule now open a real db.locked_transaction()
+    # connection (BEGIN IMMEDIATE against config.DB_PATH) to close the
+    # self-lockout race — that bypasses attribute-level mocks of
+    # db.get_rule/db.list_rules/db.set_enabled entirely, so give it a real
+    # temp database instead, matching _setup_input_rules above. rule's own
+    # "id" is inserted as-is, so callers can still address it by the literal
+    # id _rule() was given. run_root is still mocked.
+    monkeypatch.setattr(config, "DB_PATH", str(tmp_path / "test.db"))
+    db.init_db()
+    db.insert_rule(dict(rule))
+    for r in other_input_rules:
+        db.insert_rule({"kind": "input", "enabled": 1, **r})
     applied = []
 
     def _run_root(argv):
@@ -390,49 +395,157 @@ def _patch_toggle(monkeypatch, rule, other_input_rules=()):
         return ""  # _rebuild_chain treats this as "-S <chain>" output: no owned rules live yet
 
     monkeypatch.setattr("app.firewall.run_root", _run_root)
-    return set_enabled_calls, applied
+    return applied
 
 
-def test_toggle_rule_enable_self_lockout_raises_and_never_applies(monkeypatch):
+def test_toggle_rule_enable_self_lockout_raises_and_never_applies(tmp_path, monkeypatch):
     # Regression test: re-enabling a disabled blanket-DROP input rule used
     # to skip the self-lockout guard entirely (only the disable direction
     # checked it) — a rule that was safe to leave off could silently cut
     # the admin off the moment it was flipped back on.
     rule = {**_rule(1, "DROP", src=None, position=1.0), "kind": "input", "enabled": 0}
-    set_enabled_calls, applied = _patch_toggle(monkeypatch, rule, other_input_rules=[])
+    applied = _setup_toggle_rule(tmp_path, monkeypatch, rule, other_input_rules=[])
     with pytest.raises(FirewallError):
         toggle_rule(1, client_ip="203.0.113.55")
-    assert set_enabled_calls == []  # refused before ever touching the DB or iptables
+    assert db.get_rule(1)["enabled"] == 0  # refused before ever touching the DB or iptables
     assert applied == []
 
 
-def test_toggle_rule_enable_allowed_when_earlier_accept_still_covers_caller(monkeypatch):
+def test_toggle_rule_enable_allowed_when_earlier_accept_still_covers_caller(tmp_path, monkeypatch):
     rule = {**_rule(2, "DROP", src=None, position=2.0), "kind": "input", "enabled": 0}
     earlier_accept = _rule(1, "ACCEPT", "203.0.113.0/24", position=1.0)
-    set_enabled_calls, applied = _patch_toggle(monkeypatch, rule, other_input_rules=[earlier_accept])
+    applied = _setup_toggle_rule(tmp_path, monkeypatch, rule, other_input_rules=[earlier_accept])
     toggle_rule(2, client_ip="203.0.113.55")
-    assert set_enabled_calls == [(2, True)]
+    assert db.get_rule(2)["enabled"] == 1
     assert applied  # chain rebuild actually ran
 
 
-def test_toggle_rule_enable_no_client_ip_skips_guard(monkeypatch):
+def test_toggle_rule_enable_no_client_ip_skips_guard(tmp_path, monkeypatch):
     rule = {**_rule(1, "DROP", src=None, position=1.0), "kind": "input", "enabled": 0}
-    set_enabled_calls, applied = _patch_toggle(monkeypatch, rule, other_input_rules=[])
+    _setup_toggle_rule(tmp_path, monkeypatch, rule, other_input_rules=[])
     toggle_rule(1, client_ip=None)
-    assert set_enabled_calls == [(1, True)]
+    assert db.get_rule(1)["enabled"] == 1
+
+
+def test_disable_and_enable_race_never_locks_out_admin(tmp_path, monkeypatch):
+    # Regression test for a real TOCTOU race: the self-lockout guards used
+    # to read-then-check-then-write via separate, non-atomic DB calls — two
+    # near-simultaneous requests could each read the same pre-write state,
+    # each individually pass its own check (correctly, for the stale state
+    # it saw), and the *combination* still lock the admin out. Reproduced
+    # live before locked_transaction() existed (against an isolated DB
+    # copy, never production): disabling an ACCEPT rule that covers the
+    # admin's IP while concurrently enabling a blanket DROP raced each
+    # other — both checks passed individually, but the resulting state
+    # actually blocked the admin. Real threads, not a simulated
+    # interleaving, so this exercises SQLite's own locking under genuine
+    # concurrency, same pattern as test_db.py's delete_user_guarded race test.
+    import threading
+
+    monkeypatch.setattr(config, "DB_PATH", str(tmp_path / "test.db"))
+    db.init_db()
+    admin_ip = "203.0.113.55"
+    accept_id = db.insert_rule({
+        "kind": "input", "action": "ACCEPT", "protocol": "tcp",
+        "src": f"{admin_ip}/32", "dport": "443", "enabled": 1, "position": 1.0,
+    })
+    drop_id = db.insert_rule({
+        "kind": "input", "action": "DROP", "protocol": "tcp",
+        "src": None, "dport": "443", "enabled": 0, "position": 2.0,
+    })
+    monkeypatch.setattr("app.firewall.run_root", lambda argv: "")
+
+    results = {}
+    barrier = threading.Barrier(2)
+
+    def try_disable_accept():
+        barrier.wait()  # line both threads up to maximize the race window
+        try:
+            disable_rule(accept_id, client_ip=admin_ip)
+            results["disable"] = "ok"
+        except FirewallError:
+            results["disable"] = "refused"
+
+    def try_enable_drop():
+        barrier.wait()
+        try:
+            toggle_rule(drop_id, client_ip=admin_ip)
+            results["enable"] = "ok"
+        except FirewallError:
+            results["enable"] = "refused"
+
+    t1 = threading.Thread(target=try_disable_accept)
+    t2 = threading.Thread(target=try_enable_drop)
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    # Whichever order the lock happens to serialize them in, at least one
+    # of the two must be refused — "both succeed" is exactly the
+    # combination that used to lock the admin out.
+    assert not (results["disable"] == "ok" and results["enable"] == "ok")
+
+    # Not just "one was refused" — the real, final live-equivalent state
+    # must genuinely still let the admin through.
+    final_input = [r for r in db.list_rules(enabled_only=True) if r["kind"] == "input"]
+    assert _would_allow_client(final_input, admin_ip) is True
+
+
+def _setup_reorder_rules(tmp_path, monkeypatch, rules):
+    # reorder_rule now opens a real db.locked_transaction() connection too
+    # — same reason as _setup_input_rules/_setup_toggle_rule above.
+    monkeypatch.setattr(config, "DB_PATH", str(tmp_path / "test.db"))
+    db.init_db()
+    for r in rules:
+        db.insert_rule(dict(r))
+    applied = []
+
+    def _run_root(argv):
+        applied.append(argv)
+        return ""  # _rebuild_chain treats this as "-S <chain>" output: no owned rules live yet
+
+    monkeypatch.setattr("app.firewall.run_root", _run_root)
+    return applied
+
+
+def test_reorder_rule_self_lockout_raises_when_drop_moved_before_accept(tmp_path, monkeypatch):
+    # Same exact shape as _would_allow_client's own order-matters test: an
+    # ACCEPT for the admin's IP only protects them while it's still checked
+    # before the blanket DROP — reordering the DROP ahead of it must be
+    # refused, not silently applied.
+    accept = {**_rule(1, "ACCEPT", "203.0.113.0/24", position=1.0), "kind": "input", "enabled": 1}
+    drop = {**_rule(2, "DROP", src=None, position=2.0), "kind": "input", "enabled": 1}
+    applied = _setup_reorder_rules(tmp_path, monkeypatch, [accept, drop])
+    with pytest.raises(FirewallError):
+        reorder_rule(2, target_id=1, place="before", client_ip="203.0.113.55")
+    assert db.get_rule(2)["position"] == 2.0  # refused before ever writing or applying
+    assert applied == []
+
+
+def test_reorder_rule_allowed_when_unrelated_rule_reordered(tmp_path, monkeypatch):
+    accept = {**_rule(1, "ACCEPT", "203.0.113.0/24", position=1.0), "kind": "input", "enabled": 1}
+    drop = {**_rule(2, "DROP", src=None, position=2.0), "kind": "input", "enabled": 1}
+    # dport 22, not 443 — irrelevant to the self-lockout check regardless
+    # of where it lands, so reordering it ahead of everything else is safe.
+    other = {**_rule(3, "ACCEPT", "198.51.100.0/24", position=3.0, dport="22"),
+              "kind": "input", "enabled": 1}
+    _setup_reorder_rules(tmp_path, monkeypatch, [accept, drop, other])
+    reorder_rule(3, target_id=1, place="before", client_ip="203.0.113.55")
+    assert db.get_rule(3)["position"] < db.get_rule(1)["position"]
 
 
 def test_import_adders_accepts_input_kind():
     assert "input" in _IMPORT_ADDERS
 
 
-def test_import_rules_raw_input_line_no_longer_crashes(monkeypatch):
+def test_import_rules_raw_input_line_no_longer_crashes(tmp_path, monkeypatch):
     # Regression test for the bug this session found: _iptables_line_to_fields
     # returns kind="input" for a raw "-A INPUT ..." line, but "input" was
     # missing from _IMPORT_ADDERS — dispatch raised a bare KeyError, not a
     # catchable FirewallError, so one bad/unexpected line crashed the whole
     # import instead of reporting "line N: ..." like every other bad line.
-    _patch_insert_and_apply(monkeypatch, existing_input=[])
+    _setup_input_rules(tmp_path, monkeypatch, existing_input=[])
     added, errors = import_rules(
         'iptables -A INPUT -s 203.0.113.0/24 -p tcp -m tcp --dport 22 -j ACCEPT\n'
     )
@@ -463,20 +576,20 @@ def test_parse_rule_spec_well_formed_line_still_parses_correctly():
     assert parsed == {"src": "10.8.0.5", "protocol": "tcp", "dport": "443", "action": "ACCEPT"}
 
 
-def test_import_rules_truncated_iptables_line_does_not_crash(monkeypatch):
-    _patch_insert_and_apply(monkeypatch, existing_input=[])
+def test_import_rules_truncated_iptables_line_does_not_crash(tmp_path, monkeypatch):
+    _setup_input_rules(tmp_path, monkeypatch, existing_input=[])
     added, errors = import_rules("iptables -A FORWARD -s\n")
     assert added == 0
     assert errors == []  # not a recognized rule (no action) — silently skipped, like other unsupported lines
 
 
-def test_import_rules_undefined_variable_in_raw_iptables_line_reports_clean_error(monkeypatch):
+def test_import_rules_undefined_variable_in_raw_iptables_line_reports_clean_error(tmp_path, monkeypatch):
     # Regression test: _substitute_vars raises FirewallError (not
     # ValueError) for an undefined $VAR — the raw 'iptables ...' import
     # branch only caught ValueError around that call, so this used to
     # escape import_rules entirely (crashing the whole request) instead
     # of reporting just this one line and continuing to the next.
-    inserted, applied = _patch_insert_and_apply(monkeypatch, existing_input=[])
+    _setup_input_rules(tmp_path, monkeypatch, existing_input=[])
     added, errors = import_rules(
         'iptables -A FORWARD -s $UNDEFINED -p tcp --dport 443 -j ACCEPT\n'
         'iptables -A FORWARD -s 10.8.0.5 -p tcp --dport 80 -j ACCEPT\n'
@@ -484,7 +597,7 @@ def test_import_rules_undefined_variable_in_raw_iptables_line_reports_clean_erro
     assert len(errors) == 1
     assert "$UNDEFINED" in errors[0]
     assert added == 1  # the second, valid line still imported
-    assert len(inserted) == 1
+    assert len(db.list_rules()) == 1
 
 
 # --- rule_client_name: the Active Rules table's dedicated Client column,
@@ -548,12 +661,11 @@ def test_add_forward_rule_rejects_any_protocol_with_port():
         add_forward_rule(action="DROP", protocol="all", src=None, dst=None, dport="9991")
 
 
-def test_add_input_rule_rejects_any_protocol_with_port(monkeypatch):
-    inserted, applied = _patch_insert_and_apply(monkeypatch, existing_input=[])
+def test_add_input_rule_rejects_any_protocol_with_port():
+    # protocol/dport validation happens before add_input_rule ever opens
+    # its locked_transaction — no DB needed to prove this raises.
     with pytest.raises(FirewallError):
         add_input_rule(action="ACCEPT", protocol="all", src=None, dport="9991")
-    assert inserted == []  # rejected before ever touching the DB or iptables
-    assert applied == []
 
 
 # --- _parse_import_line: an unbalanced quote must raise FirewallError,

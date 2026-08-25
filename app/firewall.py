@@ -378,48 +378,62 @@ def reorder_rule(rule_id: int, target_id: int, place: str, client_ip: str | None
     up/down step, see move_rule) needs: the drop target can be any number
     of rows away, not just an adjacent neighbor. Computes an interpolated
     position the same way _positions_for_new_specs does for discovery, then
-    rebuilds every chain the moved rule touches."""
+    rebuilds every chain the moved rule touches.
+
+    The reads (rule/target/siblings), the self-lockout check, and the
+    position write all happen inside one locked transaction — same reason
+    as add_input_rule: a second concurrent INPUT-chain change could
+    otherwise read the same pre-write state, each check passing on its own,
+    while the combination locks the admin out. Rebuilding the live chains
+    happens after the transaction commits — it re-reads the DB itself, so
+    it doesn't need the lock, only the read+check+write does."""
     if place not in ("before", "after"):
         raise FirewallError(f"Invalid place: {place!r}")
-    rule = db.get_rule(rule_id)
-    target = db.get_rule(target_id)
-    if not rule or not target:
-        raise FirewallError("Rule not found.")
-    my_chains = set(_chains_for(rule))
-    if not my_chains:
-        raise FirewallError("This rule can't be reordered.")
-    if not (my_chains & set(_chains_for(target))):
-        raise FirewallError("These rules don't share a chain.")
 
-    siblings = sorted(
-        (r for r in db.list_rules() if r["id"] != rule_id and my_chains & set(_chains_for(r))),
-        key=lambda r: (r["position"], r["id"]),
-    )
-    target_idx = next(i for i, r in enumerate(siblings) if r["id"] == target_id)
-    if place == "before":
-        left = siblings[target_idx - 1] if target_idx > 0 else None
-        right = siblings[target_idx]
-    else:
-        left = siblings[target_idx]
-        right = siblings[target_idx + 1] if target_idx + 1 < len(siblings) else None
+    with db.locked_transaction() as conn:
+        rule_row = conn.execute("SELECT * FROM firewall_rules WHERE id=?", (rule_id,)).fetchone()
+        target_row = conn.execute("SELECT * FROM firewall_rules WHERE id=?", (target_id,)).fetchone()
+        if not rule_row or not target_row:
+            raise FirewallError("Rule not found.")
+        rule = dict(rule_row)
+        target = dict(target_row)
+        my_chains = set(_chains_for(rule))
+        if not my_chains:
+            raise FirewallError("This rule can't be reordered.")
+        if not (my_chains & set(_chains_for(target))):
+            raise FirewallError("These rules don't share a chain.")
 
-    if left is None and right is None:
-        new_pos = 0.0
-    elif left is None:
-        new_pos = right["position"] - 1
-    elif right is None:
-        new_pos = left["position"] + 1
-    else:
-        new_pos = (left["position"] + right["position"]) / 2
+        all_rules = [dict(r) for r in conn.execute("SELECT * FROM firewall_rules").fetchall()]
+        siblings = sorted(
+            (r for r in all_rules if r["id"] != rule_id and my_chains & set(_chains_for(r))),
+            key=lambda r: (r["position"], r["id"]),
+        )
+        target_idx = next(i for i, r in enumerate(siblings) if r["id"] == target_id)
+        if place == "before":
+            left = siblings[target_idx - 1] if target_idx > 0 else None
+            right = siblings[target_idx]
+        else:
+            left = siblings[target_idx]
+            right = siblings[target_idx + 1] if target_idx + 1 < len(siblings) else None
 
-    if rule["kind"] == "input":
-        simulated = [
-            {**r, "position": new_pos} if r["id"] == rule_id else r
-            for r in db.list_rules(enabled_only=True) if r["kind"] == "input"
-        ]
-        _check_self_lockout(client_ip, simulated)
+        if left is None and right is None:
+            new_pos = 0.0
+        elif left is None:
+            new_pos = right["position"] - 1
+        elif right is None:
+            new_pos = left["position"] + 1
+        else:
+            new_pos = (left["position"] + right["position"]) / 2
 
-    db.set_positions({rule_id: new_pos})
+        if rule["kind"] == "input":
+            simulated = [
+                {**r, "position": new_pos} if r["id"] == rule_id else r
+                for r in all_rules if r["enabled"] and r["kind"] == "input"
+            ]
+            _check_self_lockout(client_ip, simulated)
+
+        conn.execute("UPDATE firewall_rules SET position=? WHERE id=?", (new_pos, rule_id))
+
     for chain, table in my_chains:
         _rebuild_chain(chain, table)
 
@@ -463,7 +477,18 @@ def add_input_rule(action, protocol, src, dport, comment="", client_ip: str | No
     always lands last among enabled INPUT rules (db.insert_rule's default
     position, same as every other kind), so simulate it there and run the
     same self-lockout check reorder_rule uses before actually applying
-    it."""
+    it.
+
+    The read (existing rules), the check, and the insert all happen
+    inside one locked transaction (db.locked_transaction) — a separate
+    read-then-check-then-insert has a real race: a second concurrent
+    INPUT-chain change (another add, a reorder, a re-enable) could read
+    the same pre-insert state before either commits, each individually
+    pass its own self-lockout check, and the *combination* still lock
+    the admin out. Reproduced live against an isolated DB copy before
+    this existed. Applying to iptables happens after the transaction
+    commits — it doesn't need the lock, only the DB read+check+write
+    does."""
     protocol = _valid_proto(protocol)
     dport = _valid_port(dport)
     _require_proto_for_dport(protocol, dport)
@@ -476,11 +501,36 @@ def add_input_rule(action, protocol, src, dport, comment="", client_ip: str | No
         "comment": (comment or "")[:200],
         "enabled": 1,
     }
-    existing_input = [r for r in db.list_rules(enabled_only=True) if r["kind"] == "input"]
-    max_pos = max((r["position"] for r in existing_input), default=0.0)
-    simulated = existing_input + [{**rule, "id": -1, "position": max_pos + 1}]
-    _check_self_lockout(client_ip, simulated)
-    return _insert_and_apply(rule)
+    with db.locked_transaction() as conn:
+        existing_input = [
+            dict(r) for r in conn.execute(
+                "SELECT * FROM firewall_rules WHERE enabled=1 AND kind='input'"
+            ).fetchall()
+        ]
+        max_input_pos = max((r["position"] for r in existing_input), default=0.0)
+        simulated = existing_input + [{**rule, "id": -1, "position": max_input_pos + 1}]
+        _check_self_lockout(client_ip, simulated)
+        # Matches db.insert_rule's own default-position logic exactly
+        # (MAX across every rule, any kind, not just input) — every
+        # rule's position increases monotonically regardless of kind, so
+        # this still always lands the new rule last among input rules
+        # too, same guarantee the non-atomic version relied on.
+        (overall_max_pos,) = conn.execute("SELECT COALESCE(MAX(position), 0) FROM firewall_rules").fetchone()
+        rule_to_insert = {**rule, "position": overall_max_pos + 1}
+        cols = list(rule_to_insert.keys())
+        placeholders = ",".join("?" for _ in cols)
+        cur = conn.execute(
+            f"INSERT INTO firewall_rules ({','.join(cols)}) VALUES ({placeholders})",
+            [rule_to_insert[c] for c in cols],
+        )
+        rule_id = cur.lastrowid
+    rule["id"] = rule_id
+    try:
+        _apply(rule)
+    except PrivilegedCommandError as exc:
+        db.delete_rule(rule_id)
+        raise FirewallError(str(exc)) from exc
+    return rule_id
 
 
 def add_portforward_rule(ext_port, target_ip, target_port, protocol="tcp", ext_iface=None, comment=""):
@@ -761,28 +811,44 @@ def set_client_block(client_name: str, client_ip: str, blocked: bool, admin_ip: 
     return None
 
 
-def _input_rules_without(rule_id: int) -> list[dict]:
-    """Currently-enabled INPUT-kind rules, minus one — the simulated state
-    for a disable/delete self-lockout check (both remove a rule from what's
+def _other_enabled_input_rules(conn, rule_id: int) -> list[dict]:
+    """Currently-enabled INPUT-kind rules, minus one, read through an
+    already-open locked_transaction connection — the simulated state for a
+    toggle/disable self-lockout check (both remove a rule from what's
     actually enforced, just via a different DB field)."""
-    return [r for r in db.list_rules(enabled_only=True) if r["kind"] == "input" and r["id"] != rule_id]
+    return [
+        dict(r) for r in conn.execute(
+            "SELECT * FROM firewall_rules WHERE enabled=1 AND kind='input' AND id!=?", (rule_id,)
+        ).fetchall()
+    ]
 
 
 def toggle_rule(rule_id: int, client_ip: str | None = None):
-    rule = db.get_rule(rule_id)
-    if not rule:
-        raise FirewallError("Rule not found.")
-    new_state = not rule["enabled"]
-    if new_state:
-        # A disabled INPUT rule can be a DROP that was safe to leave off
-        # (e.g. the admin's own IP has since moved) — re-enabling it needs
-        # the same guard add_input_rule/reorder_rule already apply, or a
-        # stale rule could silently cut the admin off with no warning.
+    """The read (current state), the self-lockout check, and the enabled
+    flip all happen inside one locked transaction — same race as
+    add_input_rule/reorder_rule otherwise: a second concurrent INPUT-chain
+    change could read the same pre-write state, each check passing on its
+    own, while the combination locks the admin out. Applying to iptables
+    happens after the transaction commits — _rebuild_chain/_apply re-read
+    the DB themselves, so they don't need the lock."""
+    with db.locked_transaction() as conn:
+        row = conn.execute("SELECT * FROM firewall_rules WHERE id=?", (rule_id,)).fetchone()
+        if not row:
+            raise FirewallError("Rule not found.")
+        rule = dict(row)
+        new_state = not rule["enabled"]
         if rule["kind"] == "input":
-            _check_self_lockout(client_ip, _input_rules_without(rule_id) + [rule])
-        # DB flip has to happen before any chain rebuild, since rebuild
-        # re-derives what's live from db.list_rules(enabled_only=True).
-        db.set_enabled(rule_id, True)
+            others = _other_enabled_input_rules(conn, rule_id)
+            # A disabled INPUT rule can be a DROP that was safe to leave off
+            # (e.g. the admin's own IP has since moved) — re-enabling it
+            # needs the same guard add_input_rule/reorder_rule already
+            # apply, or a stale rule could silently cut the admin off with
+            # no warning.
+            simulated = others + [rule] if new_state else others
+            _check_self_lockout(client_ip, simulated)
+        conn.execute("UPDATE firewall_rules SET enabled=? WHERE id=?", (1 if new_state else 0, rule_id))
+
+    if new_state:
         chains = _chains_for(rule)
         if chains:
             for chain, table in chains:
@@ -790,23 +856,34 @@ def toggle_rule(rule_id: int, client_ip: str | None = None):
         else:
             _apply(rule)  # e.g. client_block — outside the position-ordering system, see _CHAIN_FOR_KIND
     else:
-        if rule["kind"] == "input":
-            _check_self_lockout(client_ip, _input_rules_without(rule_id))
         _unapply(rule)
-        db.set_enabled(rule_id, False)
 
 
 def disable_rule(rule_id: int, client_ip: str | None = None):
     """Explicitly disable (not toggle) — used by bulk-disable, where some
     selected rules may already be disabled and a toggle would wrongly
-    re-enable them."""
-    rule = db.get_rule(rule_id)
-    if not rule or not rule["enabled"]:
-        return
-    if rule["kind"] == "input":
-        _check_self_lockout(client_ip, _input_rules_without(rule_id))
+    re-enable them.
+
+    Same locked-transaction treatment as toggle_rule, for the same race."""
+    with db.locked_transaction() as conn:
+        row = conn.execute("SELECT * FROM firewall_rules WHERE id=?", (rule_id,)).fetchone()
+        if not row or not row["enabled"]:
+            return
+        rule = dict(row)
+        if rule["kind"] == "input":
+            _check_self_lockout(client_ip, _other_enabled_input_rules(conn, rule_id))
+        conn.execute("UPDATE firewall_rules SET enabled=0 WHERE id=?", (rule_id,))
     _unapply(rule)
-    db.set_enabled(rule_id, False)
+
+
+def _input_rules_without(rule_id: int) -> list[dict]:
+    """Currently-enabled INPUT-kind rules, minus one — the simulated state
+    for delete_rule's self-lockout check. Still a non-atomic read (unlike
+    toggle_rule/disable_rule's _other_enabled_input_rules) — delete_rule
+    has the same TOCTOU race as the other four guards but wasn't part of
+    the scope approved for this fix; flagged separately, not silently
+    left broken."""
+    return [r for r in db.list_rules(enabled_only=True) if r["kind"] == "input" and r["id"] != rule_id]
 
 
 def delete_rule(rule_id: int, client_ip: str | None = None):

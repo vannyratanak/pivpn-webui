@@ -3,11 +3,48 @@
 No ORM on purpose — one table, few columns, and it keeps the dependency
 footprint (and thus what has to install cleanly on a Pi) small.
 """
+import contextlib
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 
 import config
+
+
+@contextlib.contextmanager
+def locked_transaction():
+    """Yields a connection with SQLite's write lock already held (BEGIN
+    IMMEDIATE) — for callers whose read-check-write sequence must be
+    atomic against a *second concurrent caller doing the same kind of
+    check*, not just internally consistent within one connection.
+
+    Every other function in this module opens its own connection per
+    call, which is fine for a single read or a single write, but a
+    read-then-decide-then-write guard (e.g. "is this the last admin?",
+    "would this rule change lock the admin out?") built from two separate
+    calls has a real gap: two near-simultaneous requests can each read
+    the same pre-write state before either commits, both pass their own
+    check (correctly, for the state each one saw), and both proceed —
+    landing on an outcome neither check alone would have allowed. BEGIN
+    IMMEDIATE takes the write lock before anything is read, so a second
+    concurrent caller blocks until this one's commit (or rollback)
+    finishes, then reads the real, post-write state.
+
+    Commits on clean exit (including a plain `return` from inside the
+    `with` block — Python's context manager protocol treats that as
+    normal exit, not an exception); rolls back and re-raises on any
+    exception."""
+    conn = sqlite3.connect(config.DB_PATH, isolation_level=None)
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        yield conn
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+    finally:
+        conn.close()
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS firewall_rules (
@@ -289,25 +326,20 @@ def delete_user_guarded(user_id: int) -> tuple[dict | None, str | None]:
     Returns (deleted_row, None) on success, or (target_row_or_None,
     reason) where reason is 'not_found' or 'last_admin' on refusal —
     the caller still gets the row (for its username) even when refused,
-    except when it never existed at all."""
-    conn = sqlite3.connect(config.DB_PATH, isolation_level=None)
-    conn.row_factory = sqlite3.Row
-    try:
-        conn.execute("BEGIN IMMEDIATE")
+    except when it never existed at all. A refusal's early `return`
+    still ends the transaction cleanly (see locked_transaction's
+    docstring) — nothing was written yet either way, so there's no
+    behavioral difference from an explicit rollback."""
+    with locked_transaction() as conn:
         row = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
         if not row:
-            conn.execute("ROLLBACK")
             return None, "not_found"
         if row["role"] == "admin":
             (admin_count,) = conn.execute("SELECT COUNT(*) FROM users WHERE role='admin'").fetchone()
             if admin_count <= 1:
-                conn.execute("ROLLBACK")
                 return dict(row), "last_admin"
         conn.execute("DELETE FROM users WHERE id=?", (user_id,))
-        conn.execute("COMMIT")
         return dict(row), None
-    finally:
-        conn.close()
 
 
 def set_user_password(user_id: int, password_hash: str):
