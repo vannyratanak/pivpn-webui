@@ -26,6 +26,7 @@ from app.firewall import (
     import_rules,
     reorder_rule,
     rule_client_name,
+    set_client_block,
     toggle_rule,
 )
 
@@ -323,6 +324,90 @@ def test_client_block_self_lockout_no_admin_ip_skips_check():
     # None means "no real request to protect" (internal caller/tests) —
     # never raise in that case, same convention as _check_self_lockout.
     _check_client_block_self_lockout(None, "10.202.226.21")  # no raise
+
+
+def _setup_client_block_db(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DB_PATH", str(tmp_path / "test.db"))
+    db.init_db()
+    applied = []
+
+    def _run_root(argv):
+        applied.append(argv)
+        return ""
+
+    monkeypatch.setattr("app.firewall.run_root", _run_root)
+    return applied
+
+
+def test_set_client_block_true_creates_one_row_and_applies(tmp_path, monkeypatch):
+    applied = _setup_client_block_db(tmp_path, monkeypatch)
+    rule_id = set_client_block("nurak", "10.202.226.21", True, admin_ip="203.0.113.55")
+    assert db.get_client_block("nurak")["id"] == rule_id
+    assert len(applied) == 2  # FORWARD + INPUT halves
+
+
+def test_set_client_block_true_twice_returns_same_id_no_duplicate(tmp_path, monkeypatch):
+    applied = _setup_client_block_db(tmp_path, monkeypatch)
+    first = set_client_block("nurak", "10.202.226.21", True, admin_ip="203.0.113.55")
+    second = set_client_block("nurak", "10.202.226.21", True, admin_ip="203.0.113.55")
+    assert first == second
+    assert len(applied) == 2  # only the first call actually touched iptables
+
+
+def test_set_client_block_self_lockout_raises_and_never_inserts(tmp_path, monkeypatch):
+    applied = _setup_client_block_db(tmp_path, monkeypatch)
+    with pytest.raises(FirewallError):
+        set_client_block("nurak", "203.0.113.55", True, admin_ip="203.0.113.55")
+    assert db.get_client_block("nurak") is None
+    assert applied == []
+
+
+def test_set_client_block_false_removes_the_row_and_unapplies(tmp_path, monkeypatch):
+    applied = _setup_client_block_db(tmp_path, monkeypatch)
+    set_client_block("nurak", "10.202.226.21", True, admin_ip="203.0.113.55")
+    result = set_client_block("nurak", "10.202.226.21", False, admin_ip="203.0.113.55")
+    assert result is None
+    assert db.get_client_block("nurak") is None
+    assert len(applied) == 4  # 2 to apply the block, 2 more to unapply it
+
+
+def test_set_client_block_false_when_not_blocked_is_a_noop(tmp_path, monkeypatch):
+    applied = _setup_client_block_db(tmp_path, monkeypatch)
+    result = set_client_block("nurak", "10.202.226.21", False, admin_ip="203.0.113.55")
+    assert result is None
+    assert applied == []
+
+
+def test_concurrent_block_requests_never_create_duplicate_rows(tmp_path, monkeypatch):
+    # Regression test for a real race: set_client_block's "already blocked?"
+    # check and the insert used to be two separate, non-atomic steps — two
+    # near-simultaneous "block" requests for the same client could each see
+    # no existing row, both pass, and both insert. Worse than a harmless
+    # duplicate: _client_block_argv's comment tag is keyed by client name,
+    # not rule id, so a single -D on unblock only ever removes one of the
+    # two live rules, leaving the client still actually blocked after a
+    # reported-successful unblock. Real threads, not a simulated
+    # interleaving, same pattern as this file's other race tests.
+    import threading
+
+    _setup_client_block_db(tmp_path, monkeypatch)
+    results = []
+    barrier = threading.Barrier(2)
+
+    def try_block():
+        barrier.wait()
+        results.append(set_client_block("nurak", "10.202.226.21", True, admin_ip=None))
+
+    t1 = threading.Thread(target=try_block)
+    t2 = threading.Thread(target=try_block)
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    assert results[0] == results[1]  # both calls agree on the same one row
+    all_rows = [r for r in db.list_rules() if r["kind"] == "client_block" and r["client_name"] == "nurak"]
+    assert len(all_rows) == 1
 
 
 # --- add_input_rule: previously there was no way to add a brand-new INPUT

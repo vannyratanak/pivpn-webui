@@ -787,28 +787,72 @@ def import_rules(
 
 
 def set_client_block(client_name: str, client_ip: str, blocked: bool, admin_ip: str | None = None):
-    existing = db.get_client_block(client_name)
-    if blocked:
-        if existing:
-            return existing["id"]
-        _check_client_block_self_lockout(admin_ip, client_ip)
-        rule = {
-            "kind": "client_block",
-            "action": "DROP",
-            "protocol": "all",
-            "client_name": client_name,
-            "client_ip": client_ip,
-            "comment": f"Block {client_name}",
-            "enabled": 1,
-        }
-        return _insert_and_apply(rule)
-    if existing:
-        try:
-            _unapply(existing)
-        except PrivilegedCommandError as exc:
-            raise FirewallError(str(exc)) from exc
-        db.delete_rule(existing["id"])
-    return None
+    """The existing-row check and the insert/delete both happen inside one
+    locked transaction — a separate check-then-write has a real race: two
+    concurrent "block" requests for the same client could each see no
+    existing row, both pass, and both insert — a duplicate row *and* a
+    duplicate live iptables DROP rule. Worse than a harmless duplicate:
+    _client_block_argv's comment tag is keyed by client name, not rule id,
+    so a single -D on unblock only ever removes one of the two matching
+    live rules, leaving the client still actually blocked even after a
+    reported-successful unblock.
+
+    Block: the insert happens inside the lock, the live iptables apply
+    after it commits (same shape as add_input_rule) — on apply failure the
+    just-inserted row is deleted as compensation.
+
+    Unblock: unlike the other five guards, the live iptables removal stays
+    *inside* the lock here rather than after it. That preserves the
+    original unapply-then-delete order exactly — a failed unapply must
+    never delete the DB row, or the DB would claim "unblocked" while the
+    live rule is still there. A single -D is fast enough that holding the
+    lock across it isn't worth the compensating-rollback logic a
+    delete-then-unapply split would need instead."""
+    with db.locked_transaction() as conn:
+        existing_row = conn.execute(
+            "SELECT * FROM firewall_rules WHERE kind='client_block' AND client_name=?",
+            (client_name,),
+        ).fetchone()
+        if blocked:
+            if existing_row:
+                return existing_row["id"]
+            _check_client_block_self_lockout(admin_ip, client_ip)
+            rule = {
+                "kind": "client_block",
+                "action": "DROP",
+                "protocol": "all",
+                "client_name": client_name,
+                "client_ip": client_ip,
+                "comment": f"Block {client_name}",
+                "enabled": 1,
+            }
+            (max_pos,) = conn.execute("SELECT COALESCE(MAX(position), 0) FROM firewall_rules").fetchone()
+            rule_to_insert = {**rule, "position": max_pos + 1}
+            cols = list(rule_to_insert.keys())
+            placeholders = ",".join("?" for _ in cols)
+            cur = conn.execute(
+                f"INSERT INTO firewall_rules ({','.join(cols)}) VALUES ({placeholders})",
+                [rule_to_insert[c] for c in cols],
+            )
+            rule_id = cur.lastrowid
+        else:
+            if not existing_row:
+                return None
+            existing = dict(existing_row)
+            try:
+                _unapply(existing)
+            except PrivilegedCommandError as exc:
+                raise FirewallError(str(exc)) from exc
+            conn.execute("DELETE FROM firewall_rules WHERE id=?", (existing["id"],))
+            return None
+
+    rule["id"] = rule_id
+    try:
+        _apply(rule)
+    except PrivilegedCommandError as exc:
+        db.delete_rule(rule_id)
+        raise FirewallError(str(exc)) from exc
+    return rule_id
 
 
 def _other_enabled_input_rules(conn, rule_id: int) -> list[dict]:
