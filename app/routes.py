@@ -143,30 +143,35 @@ def add_user():
 @login_required
 @admin_required
 def delete_user(user_id):
-    target = db.get_user(user_id)
-    if not target:
-        flash("User not found.", "error")
+    # Self-delete doesn't need the atomic guard below — it's based on the
+    # requester's own identity, not global state another concurrent
+    # request could also be changing, so there's no race to close here.
+    if str(user_id) == current_user.id:
+        target = db.get_user(user_id)
+        flash("Cannot delete your own account while logged in as it.", "error")
+        _audit("user_delete", target["username"] if target else "?", "error", "self-delete")
         return redirect(url_for("main.users"))
-    # Both guards protect against the same failure mode the firewall
-    # self-lockout checks exist for: a state nobody can recover from
-    # without direct DB surgery. Only admins can manage Firewall/VPN
-    # Routes/Users at all, so the invariant that actually matters is "at
-    # least one admin always exists" — not "at least one user", which
-    # would wrongly block deleting the very last moderator (no lockout
-    # risk there at all) while missing the real gap: an admin plus any
-    # number of moderators, with that admin deleted, leaves moderators
-    # who can't create a new admin to recover from it.
-    if target["role"] == "admin" and db.count_admins() <= 1:
+    # Both this and the self-delete check above protect against the same
+    # failure mode the firewall self-lockout checks exist for: a state
+    # nobody can recover from without direct DB surgery. Only admins can
+    # manage Firewall/VPN Routes/Users at all, so the invariant that
+    # actually matters is "at least one admin always exists" — not "at
+    # least one user", which would wrongly block deleting the very last
+    # moderator (no lockout risk there at all) while missing the real
+    # gap: an admin plus any number of moderators, with that admin
+    # deleted, leaves moderators who can't create a new admin to recover
+    # from it. delete_user_guarded does the count check and the delete in
+    # one locked transaction — a separate count-then-delete had a real
+    # race between two concurrent requests (see its docstring).
+    target, error = db.delete_user_guarded(user_id)
+    if error == "not_found":
+        flash("User not found.", "error")
+    elif error == "last_admin":
         flash("Cannot delete the last remaining admin account.", "error")
         _audit("user_delete", target["username"], "error", "last remaining admin")
-        return redirect(url_for("main.users"))
-    if str(user_id) == current_user.id:
-        flash("Cannot delete your own account while logged in as it.", "error")
-        _audit("user_delete", target["username"], "error", "self-delete")
-        return redirect(url_for("main.users"))
-    db.delete_user(user_id)
-    flash(f"User '{target['username']}' removed.", "success")
-    _audit("user_delete", target["username"])
+    else:
+        flash(f"User '{target['username']}' removed.", "success")
+        _audit("user_delete", target["username"])
     return redirect(url_for("main.users"))
 
 

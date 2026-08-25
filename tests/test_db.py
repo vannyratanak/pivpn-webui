@@ -194,3 +194,66 @@ def test_init_db_bootstrap_only_runs_once(tmp_path, monkeypatch):
 def test_init_db_no_bootstrap_without_config(tmp_path, monkeypatch):
     _use_temp_db_no_bootstrap(tmp_path, monkeypatch)
     assert db.count_users() == 0
+
+
+def test_delete_user_guarded_basic_cases(tmp_path, monkeypatch):
+    _use_temp_db_no_bootstrap(tmp_path, monkeypatch)
+    admin_id = db.insert_user("admin", "h", "admin")
+    mod_id = db.insert_user("mod", "h", "moderator")
+
+    row, error = db.delete_user_guarded(999999)
+    assert row is None and error == "not_found"
+
+    # Deleting the only moderator with an admin still present: fine.
+    row, error = db.delete_user_guarded(mod_id)
+    assert error is None
+    assert row["username"] == "mod"
+    assert db.get_user(mod_id) is None
+
+    # Now admin is the only user left — deleting it must be refused.
+    row, error = db.delete_user_guarded(admin_id)
+    assert error == "last_admin"
+    assert row["username"] == "admin"
+    assert db.get_user(admin_id) is not None  # never actually deleted
+
+
+def test_delete_user_guarded_closes_the_concurrent_race(tmp_path, monkeypatch):
+    # Regression test for a real TOCTOU race: a separate
+    # count_admins()-then-delete_user() pair let two near-simultaneous
+    # requests each read the same pre-delete admin count before either
+    # committed, both pass "not the last admin", and both proceed —
+    # landing on zero admins. Reproduced live (against an isolated DB
+    # copy, not production) before this fix existed. This test uses real
+    # threads, not a simulated interleaving, so it actually exercises
+    # SQLite's own locking under genuine concurrency.
+    import threading
+
+    _use_temp_db_no_bootstrap(tmp_path, monkeypatch)
+    admin_a = db.insert_user("admin_a", "h", "admin")
+    admin_b = db.insert_user("admin_b", "h", "admin")
+    assert db.count_admins() == 2
+
+    results = {}
+    barrier = threading.Barrier(2)
+
+    def try_delete(name, target_id):
+        barrier.wait()  # line both threads up to maximize the race window
+        _, error = db.delete_user_guarded(target_id)
+        results[name] = error
+
+    # Thread 1 deletes admin_b, thread 2 (concurrently) deletes admin_a —
+    # each targeting the *other* admin, exactly the scenario that used to
+    # let both succeed and zero out every admin.
+    t1 = threading.Thread(target=try_delete, args=("t1", admin_b))
+    t2 = threading.Thread(target=try_delete, args=("t2", admin_a))
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    # Exactly one must have been refused as the last admin — the other
+    # succeeds, leaving exactly one admin standing, never zero.
+    outcomes = list(results.values())
+    assert outcomes.count(None) == 1
+    assert outcomes.count("last_admin") == 1
+    assert db.count_admins() == 1

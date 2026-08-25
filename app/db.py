@@ -269,6 +269,47 @@ def delete_user(user_id: int):
         conn.close()
 
 
+def delete_user_guarded(user_id: int) -> tuple[dict | None, str | None]:
+    """Atomically check-and-delete in one locked transaction. A separate
+    count_admins()-then-delete_user() pair (the original implementation)
+    has a real TOCTOU race: gunicorn runs multiple worker processes, so
+    two near-simultaneous requests can each read the same pre-delete
+    admin count before either commits, both see "not the last admin",
+    and both proceed — landing on zero admins even though each check was
+    individually correct for the state it saw at the time. Reproduced
+    live against an isolated DB copy before this existed.
+
+    BEGIN IMMEDIATE takes SQLite's write lock before reading anything, so
+    a second concurrent call blocks until the first's delete (or
+    refusal) fully commits, and then reads the real, post-delete count —
+    the same fix shape as the firewall self-lockout guards, just for a
+    race between two different admins instead of one admin's own request
+    sequence.
+
+    Returns (deleted_row, None) on success, or (target_row_or_None,
+    reason) where reason is 'not_found' or 'last_admin' on refusal —
+    the caller still gets the row (for its username) even when refused,
+    except when it never existed at all."""
+    conn = sqlite3.connect(config.DB_PATH, isolation_level=None)
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+        if not row:
+            conn.execute("ROLLBACK")
+            return None, "not_found"
+        if row["role"] == "admin":
+            (admin_count,) = conn.execute("SELECT COUNT(*) FROM users WHERE role='admin'").fetchone()
+            if admin_count <= 1:
+                conn.execute("ROLLBACK")
+                return dict(row), "last_admin"
+        conn.execute("DELETE FROM users WHERE id=?", (user_id,))
+        conn.execute("COMMIT")
+        return dict(row), None
+    finally:
+        conn.close()
+
+
 def set_user_password(user_id: int, password_hash: str):
     conn = get_conn()
     try:
