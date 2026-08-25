@@ -303,6 +303,31 @@ def _apply_to_chain(rule: dict, chain: str, table: str | None):
         _apply(rule)
 
 
+def _rebuild_chain_unlocked(chain: str, table: str | None):
+    """The actual rebuild work, assuming the caller already holds
+    _rebuild_chain_lock — see _rebuild_chain (the normal, locked entry
+    point) and discover_cli_rules (which holds the lock across its own
+    read-adopt-rebuild sequence and calls this directly, to avoid
+    self-deadlocking on a lock it already holds — flock isn't reentrant
+    across separate file descriptors, even from the same process)."""
+    for tokens in _list_chain_specs(chain, table):
+        parsed = _parse_rule_spec(tokens)
+        if not _OWNED_TAG_RE.match(parsed.get("comment", "")):
+            continue
+        del_argv = [config.IPTABLES_BIN]
+        if table:
+            del_argv += ["-t", table]
+        del_argv += ["-D"] + tokens[1:]
+        run_root(del_argv)
+
+    rules = sorted(
+        (r for r in db.list_rules(enabled_only=True) if (chain, table) in _chains_for(r)),
+        key=lambda r: (r["position"], r["id"]),
+    )
+    for rule in rules:
+        _apply_to_chain(rule, chain, table)
+
+
 def _rebuild_chain(chain: str, table: str | None):
     """Delete every rule this app currently has live in one chain (matched
     by the plain numeric 'pivpn-webui:<id>' tag only — never a foreign rule,
@@ -328,22 +353,7 @@ def _rebuild_chain(chain: str, table: str | None):
     see its docstring for the concurrent-double-apply race this closes.
     """
     with _rebuild_chain_lock():
-        for tokens in _list_chain_specs(chain, table):
-            parsed = _parse_rule_spec(tokens)
-            if not _OWNED_TAG_RE.match(parsed.get("comment", "")):
-                continue
-            del_argv = [config.IPTABLES_BIN]
-            if table:
-                del_argv += ["-t", table]
-            del_argv += ["-D"] + tokens[1:]
-            run_root(del_argv)
-
-        rules = sorted(
-            (r for r in db.list_rules(enabled_only=True) if (chain, table) in _chains_for(r)),
-            key=lambda r: (r["position"], r["id"]),
-        )
-        for rule in rules:
-            _apply_to_chain(rule, chain, table)
+        _rebuild_chain_unlocked(chain, table)
 
 
 def _input_rule_matches(rule: dict, client_ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
@@ -1378,56 +1388,73 @@ def discover_cli_rules() -> int:
     _rebuild_chain. A plain per-rule delete-then-append used to land an
     adopted rule after everything else in the chain even if, live, it
     actually sat *before* something like a catch-all DROP — silently
-    breaking that rule the moment it got adopted."""
-    imported = 0
-    all_rules = db.list_rules()
-    known_ids = {str(r["id"]) for r in all_rules}
-    positions_by_id = {str(r["id"]): r["position"] for r in all_rules}
-    touched_chains: set[tuple[str, str | None]] = set()
+    breaking that rule the moment it got adopted.
 
-    for chain, table, kind in _DISCOVERY_TARGETS:
-        try:
-            specs = _list_chain_specs(chain, table)
-        except PrivilegedCommandError:
-            continue
+    The whole read-adopt-rebuild sequence runs under _rebuild_chain_lock —
+    not just the final rebuild step. Without covering the adopt loop too,
+    a second concurrent caller's own rebuild (for the same chain) could
+    read this call's just-inserted-but-not-yet-committed-to-live-iptables
+    DB row, apply it live, and then this call's own -D-on-the-original-
+    raw-rule fails (the other caller already claimed it) — cleaning up
+    the DB row, but leaving the live copy the other caller already added
+    orphaned forever, invisible to the DB and never cleaned up by any
+    later rebuild. Reproduced live on an isolated test box (not
+    production) by adding raw untracked rules and loading /firewall
+    twice concurrently — a residual live rule with no matching DB row
+    survived. Calls _rebuild_chain_unlocked (not _rebuild_chain) at the
+    end since this function already holds the lock for its entire body —
+    flock isn't reentrant across separate file descriptors, even from
+    the same process, so calling the locked version here would deadlock."""
+    with _rebuild_chain_lock():
+        imported = 0
+        all_rules = db.list_rules()
+        known_ids = {str(r["id"]) for r in all_rules}
+        positions_by_id = {str(r["id"]): r["position"] for r in all_rules}
+        touched_chains: set[tuple[str, str | None]] = set()
 
-        parsed_list = [_parse_rule_spec(tokens) for tokens in specs]
-        anchor_info = []
-        for parsed in parsed_list:
-            m = _OWNED_TAG_RE.match(parsed.get("comment", ""))
-            if m and m.group(1) in known_ids:
-                anchor_info.append((True, positions_by_id[m.group(1)]))
-            else:
-                anchor_info.append((False, None))
-        new_positions = _positions_for_new_specs(anchor_info)
-
-        for idx, tokens in enumerate(specs):
-            parsed = parsed_list[idx]
-            comment = parsed.get("comment", "")
-            if comment.startswith("pivpn-webui:block"):
-                continue  # client-block rule (FORWARD "block:" or INPUT "block-in:" half) —
-                          # tracked by client name (db.get_client_block), not a numeric id
-            if comment.startswith("pivpn-webui:"):
-                if comment[len("pivpn-webui:"):] in known_ids:
-                    continue  # already ours, and still tracked
-                parsed = {**parsed, "comment": ""}  # orphaned tag, not a real note
-            rule = _rule_from_parsed(kind, parsed)
-            if rule is None:
-                continue  # a shape we don't model (e.g. REJECT, LOG) — leave it alone
-
-            rule["position"] = new_positions[idx]
-            rule_id = db.insert_rule(rule)
+        for chain, table, kind in _DISCOVERY_TARGETS:
             try:
-                del_argv = [config.IPTABLES_BIN]
-                if table:
-                    del_argv += ["-t", table]
-                del_argv += ["-D"] + tokens[1:]  # same spec as seen, -A -> -D
-                run_root(del_argv)
-                imported += 1
-                touched_chains.update(_chains_for(rule))
+                specs = _list_chain_specs(chain, table)
             except PrivilegedCommandError:
-                db.delete_rule(rule_id)  # leave the original CLI rule untouched
+                continue
 
-    for chain, table in touched_chains:
-        _rebuild_chain(chain, table)
-    return imported
+            parsed_list = [_parse_rule_spec(tokens) for tokens in specs]
+            anchor_info = []
+            for parsed in parsed_list:
+                m = _OWNED_TAG_RE.match(parsed.get("comment", ""))
+                if m and m.group(1) in known_ids:
+                    anchor_info.append((True, positions_by_id[m.group(1)]))
+                else:
+                    anchor_info.append((False, None))
+            new_positions = _positions_for_new_specs(anchor_info)
+
+            for idx, tokens in enumerate(specs):
+                parsed = parsed_list[idx]
+                comment = parsed.get("comment", "")
+                if comment.startswith("pivpn-webui:block"):
+                    continue  # client-block rule (FORWARD "block:" or INPUT "block-in:" half) —
+                              # tracked by client name (db.get_client_block), not a numeric id
+                if comment.startswith("pivpn-webui:"):
+                    if comment[len("pivpn-webui:"):] in known_ids:
+                        continue  # already ours, and still tracked
+                    parsed = {**parsed, "comment": ""}  # orphaned tag, not a real note
+                rule = _rule_from_parsed(kind, parsed)
+                if rule is None:
+                    continue  # a shape we don't model (e.g. REJECT, LOG) — leave it alone
+
+                rule["position"] = new_positions[idx]
+                rule_id = db.insert_rule(rule)
+                try:
+                    del_argv = [config.IPTABLES_BIN]
+                    if table:
+                        del_argv += ["-t", table]
+                    del_argv += ["-D"] + tokens[1:]  # same spec as seen, -A -> -D
+                    run_root(del_argv)
+                    imported += 1
+                    touched_chains.update(_chains_for(rule))
+                except PrivilegedCommandError:
+                    db.delete_rule(rule_id)  # leave the original CLI rule untouched
+
+        for chain, table in touched_chains:
+            _rebuild_chain_unlocked(chain, table)
+        return imported

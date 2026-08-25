@@ -27,6 +27,7 @@ from app.firewall import (
     delete_rule,
     describe_rule,
     disable_rule,
+    discover_cli_rules,
     import_rules,
     reorder_rule,
     rule_client_name,
@@ -946,3 +947,57 @@ def test_concurrent_rebuild_chain_never_duplicates_live_rules(tmp_path, monkeypa
     assert len(final) == 3, f"expected 3 live rules, got {len(final)} (duplicated): {final}"
     srcs = [spec[spec.index("-s") + 1] for spec in final if "-s" in spec]
     assert sorted(srcs) == ["10.0.0.1/32", "10.0.0.2/32", "10.0.0.3/32"]
+
+
+def test_concurrent_discover_never_leaves_an_orphaned_live_rule(tmp_path, monkeypatch):
+    # A deeper version of the same bug, found by live-testing the fix
+    # above against an isolated test box (never production): fixing
+    # _rebuild_chain's own concurrency wasn't enough on its own.
+    # discover_cli_rules()'s adopt loop (insert a DB row, then -D the
+    # original raw rule, cleaning the DB row back up if that -D lost the
+    # race) isn't itself covered by any lock — a second concurrent
+    # caller's *rebuild* step can read this call's row in the brief
+    # window between the insert and the cleanup, apply it live, and then
+    # this call's own cleanup deletes the DB row anyway — leaving that
+    # live copy with no matching DB row at all, invisible and never
+    # cleaned up by any later rebuild. Reproduced for real against .12
+    # (raw untracked rules added by hand, /firewall loaded twice
+    # concurrently) before this fix — cleaned up immediately after.
+    monkeypatch.setattr(config, "DB_PATH", str(tmp_path / "test.db"))
+    db.init_db()
+
+    # 6 raw, untracked INPUT rules -- a slice of a large pre-existing
+    # production ruleset (the actual scenario this was found chasing).
+    initial = [
+        ["-s", f"10.0.0.{i}/32", "-p", "tcp", "--dport", "443", "-j", "ACCEPT"]
+        for i in range(1, 7)
+    ]
+    state, fake_run = _stateful_fake_iptables(initial)
+    monkeypatch.setattr("app.firewall.run_root", fake_run)
+
+    results = []
+    barrier = threading.Barrier(2)
+
+    def try_discover():
+        barrier.wait()
+        results.append(discover_cli_rules())
+
+    t1 = threading.Thread(target=try_discover)
+    t2 = threading.Thread(target=try_discover)
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    db_ids = {str(r["id"]) for r in db.list_rules()}
+    live_tags = set()
+    for spec in state["INPUT"]:
+        if "--comment" in spec:
+            live_tags.add(spec[spec.index("--comment") + 1])
+    orphaned = {t for t in live_tags if t.rsplit(":", 1)[-1] not in db_ids}
+    assert not orphaned, f"live rule(s) with no matching DB row: {orphaned}"
+
+    srcs = [spec[spec.index("-s") + 1] for spec in state["INPUT"] if "-s" in spec]
+    assert sorted(srcs) == sorted(f"10.0.0.{i}/32" for i in range(1, 7)), (
+        "every rule should be live exactly once, none missing, none duplicated"
+    )
