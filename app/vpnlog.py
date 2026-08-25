@@ -157,6 +157,19 @@ def list_client_sessions(limit: int = 300) -> list[dict]:
     sessions = []
     for e in events:
         if e["event"] == "connected":
+            stale = open_sessions.get(e["client"])
+            if stale:
+                # Reconnected without a matching disconnect ever being
+                # logged (e.g. a ping-timeout/unclean drop, not a clean
+                # SIGTERM — see DISCONNECT_RE). Close out the stale open
+                # session here instead of just overwriting it below —
+                # otherwise that entire earlier session silently vanishes
+                # from the list instead of ever being shown.
+                sessions.append({
+                    "client": e["client"], "start": stale["start"], "end": None,
+                    "address": stale["address"], "duration": None, "ongoing": False,
+                    "status_note": "Ended (exact time unknown)",
+                })
             open_sessions[e["client"]] = {"start": e["ts"], "address": e["address"]}
         elif e["event"] == "disconnected":
             pending = open_sessions.pop(e["client"], None)

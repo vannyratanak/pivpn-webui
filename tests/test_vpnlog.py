@@ -133,6 +133,30 @@ def test_multiple_ongoing_still_sorted_by_recency_among_themselves(monkeypatch):
     assert all(s["ongoing"] for s in sessions)
 
 
+def test_reconnect_without_matching_disconnect_does_not_lose_the_earlier_session(monkeypatch):
+    # Regression test for a real bug: a second "connected" event for the
+    # same client name (e.g. a ping-timeout/unclean drop that never logs
+    # DISCONNECT_RE's SIGTERM pattern, followed by a reconnect) used to
+    # silently overwrite the still-open first session in open_sessions —
+    # that entire earlier session vanished from the list, never shown as
+    # ended or ongoing, just gone.
+    lines = [
+        _connect_line("2026-08-21T09:00:00", "nurak", "10.66.66.1:1"),
+        # no disconnect for the first connection — tunnel just died
+        _connect_line("2026-08-21T09:30:00", "nurak", "10.66.66.1:2"),
+        _disconnect_line("2026-08-21T10:00:00", "nurak", "10.66.66.1:2"),
+    ]
+    monkeypatch.setattr(vpnlog, "run_root", lambda argv: "\n".join(lines))
+    sessions = list_client_sessions()
+    assert len(sessions) == 2  # both the orphaned first session and the paired second one
+    starts = {s["start"] for s in sessions}
+    assert "2026-08-21 09:00:00" in starts  # the first session is still present, not lost
+    orphaned = next(s for s in sessions if s["start"] == "2026-08-21 09:00:00")
+    assert orphaned["ongoing"] is False
+    assert orphaned["end"] is None
+    assert orphaned["status_note"] == "Ended (exact time unknown)"
+
+
 # --- resolve_real_address: the relay real-IP lookup. Every branch here
 # must fail closed to "show the fallback address" (return None), never
 # raise — a disabled/unreachable relay should never break the Logs page.
