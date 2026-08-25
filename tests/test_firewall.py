@@ -1,9 +1,12 @@
 import shlex
+import threading
+import time
 
 import pytest
 
 import config
 from app import db
+from app.privileged import PrivilegedCommandError
 from app.firewall import (
     _IMPORT_ADDERS,
     FirewallError,
@@ -14,6 +17,7 @@ from app.firewall import (
     _parse_import_line,
     _parse_rule_spec,
     _positions_for_new_specs,
+    _rebuild_chain,
     _require_proto_for_dport,
     _rule_from_parsed,
     _unapply,
@@ -860,3 +864,85 @@ def test_import_rules_variable_substitution_unbalanced_quote_is_caught():
     assert added == 0
     assert len(errors) == 1
     assert "line 2" in errors[0]
+
+
+# --- _rebuild_chain: a real concurrent-double-apply bug, found while
+# specifically auditing for anything that could go wrong adopting a large
+# (40-rule) pre-existing production ruleset via discover_cli_rules() on
+# first deploy. _rebuild_chain does "delete everything currently tagged in
+# this chain, then re-add every enabled DB rule for it" as two separate,
+# non-atomic phases with nothing serializing concurrent callers — two
+# near-simultaneous calls touching the same chain (discover_cli_rules()
+# running twice from a double-clicked page load during that first-deploy
+# adoption is the realistic trigger, but toggle_rule/reorder_rule/sync_all
+# racing each other on the same chain hits the same gap) can each find
+# nothing left to delete yet and then both re-add every rule.
+
+def _stateful_fake_iptables(initial_input_specs):
+    """A minimal, thread-safe, stateful fake of the pieces of iptables
+    _rebuild_chain actually touches (-S/-D/-A on one chain) — needed
+    because the real bug only shows up under genuine concurrent
+    interleaving, which a plain mock (return a fixed value, no shared
+    state) can't reproduce at all. A small artificial delay per call
+    stands in for real subprocess latency — the actual mechanism that
+    gives two real gunicorn worker processes' `sudo iptables` calls a
+    genuine chance to interleave; without it, two fast, all-Python fake
+    calls just run back-to-back under the GIL and never race in practice."""
+    state = {"INPUT": list(initial_input_specs)}
+    lock = threading.Lock()
+
+    def run(argv):
+        time.sleep(0.01)
+        with lock:
+            args = argv[1:]
+            if args[0] == "-S":
+                chain = args[1]
+                lines = [f"-A {chain} " + " ".join(spec) for spec in state.get(chain, [])]
+                return "\n".join(lines) + ("\n" if lines else "")
+            if args[0] == "-D":
+                chain = args[1]
+                spec = args[2:]
+                cur = state.get(chain, [])
+                if spec in cur:
+                    cur.remove(spec)
+                    return ""
+                raise PrivilegedCommandError("no matching rule")
+            if args[0] == "-A":
+                chain = args[1]
+                spec = args[2:]
+                state.setdefault(chain, []).append(spec)
+                return ""
+            return ""
+
+    return state, run
+
+
+def test_concurrent_rebuild_chain_never_duplicates_live_rules(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DB_PATH", str(tmp_path / "test.db"))
+    db.init_db()
+    for i in range(1, 4):
+        db.insert_rule({
+            "kind": "input", "action": "ACCEPT", "protocol": "tcp",
+            "src": f"10.0.0.{i}/32", "dport": "443", "enabled": 1, "position": float(i),
+        })
+
+    state, fake_run = _stateful_fake_iptables([])
+    monkeypatch.setattr("app.firewall.run_root", fake_run)
+
+    barrier = threading.Barrier(2)
+
+    def try_rebuild():
+        barrier.wait()
+        _rebuild_chain("INPUT", None)
+
+    t1 = threading.Thread(target=try_rebuild)
+    t2 = threading.Thread(target=try_rebuild)
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    final = state["INPUT"]
+    assert len(final) == 3, f"expected 3 live rules, got {len(final)} (duplicated): {final}"
+    srcs = [spec[spec.index("-s") + 1] for spec in final if "-s" in spec]
+    assert sorted(srcs) == ["10.0.0.1/32", "10.0.0.2/32", "10.0.0.3/32"]

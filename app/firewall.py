@@ -5,15 +5,51 @@ All rules are persisted in sqlite (see db.py) so they can be reapplied after
 a reboot or an accidental `iptables -F`. Every apply is idempotent (delete
 then add) so re-running sync never produces duplicate rules.
 """
+import contextlib
+import fcntl
 import functools
 import ipaddress
 import re
 import shlex
 import subprocess
+from pathlib import Path
 
 import config
 from app import db
 from app.privileged import PrivilegedCommandError, run_root
+
+_REBUILD_CHAIN_LOCK_PATH = Path(config.DB_PATH).parent / ".rebuild-chain.lock"
+
+
+@contextlib.contextmanager
+def _rebuild_chain_lock():
+    """Serializes _rebuild_chain across concurrent callers, including
+    across both gunicorn worker processes — a plain Python-level Lock
+    wouldn't help, since the two processes don't share memory.
+
+    _rebuild_chain does "delete everything currently tagged in this
+    chain, then re-add every enabled DB rule for it" as two separate,
+    non-atomic phases. Two near-simultaneous callers touching the same
+    chain — discover_cli_rules() running twice from a double-clicked
+    page load is the realistic trigger, but any two of toggle_rule/
+    reorder_rule/sync_all/discover_cli_rules racing on the same chain
+    hits the same gap — can each find nothing left to delete yet (the
+    other hasn't re-added anything yet either) and then *both* re-add
+    every rule. Reproduced with real threads against a fake, isolated
+    iptables backend (never a real box): every rule ended up with two
+    live copies instead of one.
+
+    fcntl.flock (blocking) makes the second caller wait for the first to
+    fully finish before it reads DB state and rebuilds, so it sees the
+    real, already-rebuilt state instead of duplicating everything."""
+    _REBUILD_CHAIN_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    lock_file = open(_REBUILD_CHAIN_LOCK_PATH, "w")
+    try:
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
+        yield
+    finally:
+        lock_file.close()  # releases the flock
+
 
 ALLOWED_PROTO = {"tcp", "udp", "all"}
 ALLOWED_ACTION = {"ACCEPT", "DROP"}
@@ -287,23 +323,27 @@ def _rebuild_chain(chain: str, table: str | None):
     window of *less* restriction, not a lockout) — acceptable for a
     same-box operation that completes in milliseconds, not something to
     do on every single request.
-    """
-    for tokens in _list_chain_specs(chain, table):
-        parsed = _parse_rule_spec(tokens)
-        if not _OWNED_TAG_RE.match(parsed.get("comment", "")):
-            continue
-        del_argv = [config.IPTABLES_BIN]
-        if table:
-            del_argv += ["-t", table]
-        del_argv += ["-D"] + tokens[1:]
-        run_root(del_argv)
 
-    rules = sorted(
-        (r for r in db.list_rules(enabled_only=True) if (chain, table) in _chains_for(r)),
-        key=lambda r: (r["position"], r["id"]),
-    )
-    for rule in rules:
-        _apply_to_chain(rule, chain, table)
+    The whole delete-then-readd sequence runs under _rebuild_chain_lock —
+    see its docstring for the concurrent-double-apply race this closes.
+    """
+    with _rebuild_chain_lock():
+        for tokens in _list_chain_specs(chain, table):
+            parsed = _parse_rule_spec(tokens)
+            if not _OWNED_TAG_RE.match(parsed.get("comment", "")):
+                continue
+            del_argv = [config.IPTABLES_BIN]
+            if table:
+                del_argv += ["-t", table]
+            del_argv += ["-D"] + tokens[1:]
+            run_root(del_argv)
+
+        rules = sorted(
+            (r for r in db.list_rules(enabled_only=True) if (chain, table) in _chains_for(r)),
+            key=lambda r: (r["position"], r["id"]),
+        )
+        for rule in rules:
+            _apply_to_chain(rule, chain, table)
 
 
 def _input_rule_matches(rule: dict, client_ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
