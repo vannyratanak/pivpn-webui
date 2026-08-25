@@ -426,6 +426,33 @@ def _check_not_unrestricted_input_drop(rule: dict):
         )
 
 
+def _check_not_unrestricted_forward_drop(rule: dict):
+    """Raise FirewallError for a DROP FORWARD rule with no source, no
+    destination, and no port, regardless of protocol. FORWARD has no
+    self-lockout equivalent at all (it doesn't gate the web UI), so
+    unlike the INPUT guard above this was the ONLY thing standing
+    between the form and a repeat of the actual incident that started
+    this: a blanket DROP FORWARD rule took down every VPN client's
+    forwarded traffic. Until now the only protection was a client-side
+    warning, which does nothing for bulk Import Rules (it routes
+    through this same function without ever touching that form's JS) or
+    for a raw POST. There's no legitimate reason for a rule this
+    unrestricted; anything narrower — a source, a destination, a port,
+    or any combination — is unaffected."""
+    if (
+        rule["action"] == "DROP"
+        and not rule.get("src")
+        and not rule.get("dst")
+        and not rule.get("dport")
+    ):
+        raise FirewallError(
+            "A DROP rule with no source, destination, or port would block ALL "
+            f"forwarded {rule.get('protocol') or 'all'} traffic through this "
+            "server, for every VPN client — refusing to create it. Add a "
+            "source, destination, and/or a port to narrow it."
+        )
+
+
 def _check_client_block_self_lockout(admin_ip: str | None, blocked_client_ip: str):
     """Raise FirewallError if blocking blocked_client_ip would cut off the
     request that's asking for it. Unlike _check_self_lockout's position-
@@ -540,6 +567,7 @@ def add_forward_rule(action, protocol, src, dst, dport, comment=""):
         "comment": (comment or "")[:200],
         "enabled": 1,
     }
+    _check_not_unrestricted_forward_drop(rule)
     return _insert_and_apply(rule)
 
 

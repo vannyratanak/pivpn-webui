@@ -910,6 +910,59 @@ def test_add_forward_rule_rejects_any_protocol_with_port():
         add_forward_rule(action="DROP", protocol="all", src=None, dst=None, dport="9991")
 
 
+# --- _check_not_unrestricted_forward_drop: FORWARD has no self-lockout
+# equivalent at all (it doesn't gate the web UI), so until this guard
+# existed the ONLY protection against a blanket DROP FORWARD rule was a
+# client-side warning — which does nothing for bulk Import Rules (routes
+# through this same add_forward_rule without ever touching that form's JS)
+# or a raw POST. This is the exact rule shape that caused the real .10
+# incident that started this whole investigation.
+
+def _setup_forward_db(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DB_PATH", str(tmp_path / "test.db"))
+    db.init_db()
+    applied = []
+    monkeypatch.setattr("app.firewall.run_root", lambda argv: applied.append(argv))
+    return applied
+
+
+def test_add_forward_rule_rejects_unrestricted_drop(tmp_path, monkeypatch):
+    applied = _setup_forward_db(tmp_path, monkeypatch)
+    with pytest.raises(FirewallError):
+        add_forward_rule(action="DROP", protocol="udp", src=None, dst=None, dport=None)
+    assert db.list_rules() == []  # refused before ever touching the DB or iptables
+    assert applied == []
+
+
+def test_add_forward_rule_allows_drop_with_only_a_dport_set(tmp_path, monkeypatch):
+    applied = _setup_forward_db(tmp_path, monkeypatch)
+    add_forward_rule(action="DROP", protocol="tcp", src=None, dst=None, dport="9999")
+    assert len(db.list_rules()) == 1
+    assert len(applied) == 1
+
+
+def test_add_forward_rule_allows_drop_with_only_a_src_set(tmp_path, monkeypatch):
+    applied = _setup_forward_db(tmp_path, monkeypatch)
+    add_forward_rule(action="DROP", protocol="udp", src="203.0.113.0/24", dst=None, dport=None)
+    assert len(db.list_rules()) == 1
+    assert len(applied) == 1
+
+
+def test_add_forward_rule_allows_drop_with_only_a_dst_set(tmp_path, monkeypatch):
+    applied = _setup_forward_db(tmp_path, monkeypatch)
+    add_forward_rule(action="DROP", protocol="udp", src=None, dst="203.0.113.0/24", dport=None)
+    assert len(db.list_rules()) == 1
+    assert len(applied) == 1
+
+
+def test_add_forward_rule_allows_unrestricted_accept(tmp_path, monkeypatch):
+    # The guard is DROP-specific — a blanket ACCEPT has no such danger.
+    applied = _setup_forward_db(tmp_path, monkeypatch)
+    add_forward_rule(action="ACCEPT", protocol="all", src=None, dst=None, dport=None)
+    assert len(db.list_rules()) == 1
+    assert len(applied) == 1
+
+
 def test_add_input_rule_rejects_any_protocol_with_port():
     # protocol/dport validation happens before add_input_rule ever opens
     # its locked_transaction — no DB needed to prove this raises.
