@@ -1,0 +1,28 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "design-system-color",
+        "value": "#241a00",
+        "createdAt": "2026-08-25T10:17:27.147Z"
+      },
+      {
+        "rule": "design-system-color",
+        "value": "#04241a",
+        "createdAt": "2026-08-25T10:17:27.357Z"
+      },
+      {
+        "rule": "design-system-color",
+        "value": "rgba(0, 0, 0, 0.12)",
+        "createdAt": "2026-08-25T10:17:27.464Z"
+      },
+      {
+        "rule": "design-system-color",
+        "value": "rgba(0, 0, 0, 0.6)",
+        "createdAt": "2026-08-25T10:17:27.651Z"
+      }
+    ]
+  }
+}
