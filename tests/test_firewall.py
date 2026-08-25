@@ -20,6 +20,7 @@ from app.firewall import (
     _would_allow_client,
     add_forward_rule,
     add_input_rule,
+    delete_rule,
     describe_rule,
     disable_rule,
     import_rules,
@@ -427,6 +428,37 @@ def test_toggle_rule_enable_no_client_ip_skips_guard(tmp_path, monkeypatch):
     assert db.get_rule(1)["enabled"] == 1
 
 
+def test_delete_rule_self_lockout_raises_and_never_deletes(tmp_path, monkeypatch):
+    # delete_rule has the same self-lockout race the other four guards had
+    # — closed the same way (db.locked_transaction), reusing _setup_toggle_rule
+    # since it's the same "one rule plus some enabled siblings" shape.
+    # Deleting the ACCEPT unmasks the DROP that was sitting behind it.
+    rule = {**_rule(1, "ACCEPT", "203.0.113.0/24", position=1.0), "kind": "input", "enabled": 1}
+    drop = _rule(2, "DROP", src=None, position=2.0)
+    applied = _setup_toggle_rule(tmp_path, monkeypatch, rule, other_input_rules=[drop])
+    with pytest.raises(FirewallError):
+        delete_rule(1, client_ip="203.0.113.55")
+    assert db.get_rule(1) is not None  # refused before ever deleting or applying
+    assert applied == []
+
+
+def test_delete_rule_allowed_when_earlier_accept_still_covers_caller(tmp_path, monkeypatch):
+    # dport 22, not 443 — irrelevant to the caller's own self-lockout check,
+    # so deleting it is safe regardless of any other rule.
+    rule = {**_rule(1, "ACCEPT", "203.0.113.0/24", position=1.0, dport="22"), "kind": "input", "enabled": 1}
+    other_accept = _rule(2, "ACCEPT", "203.0.113.0/24", position=2.0)
+    _setup_toggle_rule(tmp_path, monkeypatch, rule, other_input_rules=[other_accept])
+    delete_rule(1, client_ip="203.0.113.55")
+    assert db.get_rule(1) is None
+
+
+def test_delete_rule_no_client_ip_skips_guard(tmp_path, monkeypatch):
+    rule = {**_rule(1, "DROP", src=None, position=1.0), "kind": "input", "enabled": 1}
+    _setup_toggle_rule(tmp_path, monkeypatch, rule, other_input_rules=[])
+    delete_rule(1, client_ip=None)
+    assert db.get_rule(1) is None
+
+
 def test_disable_and_enable_race_never_locks_out_admin(tmp_path, monkeypatch):
     # Regression test for a real TOCTOU race: the self-lockout guards used
     # to read-then-check-then-write via separate, non-atomic DB calls — two
@@ -488,6 +520,58 @@ def test_disable_and_enable_race_never_locks_out_admin(tmp_path, monkeypatch):
 
     # Not just "one was refused" — the real, final live-equivalent state
     # must genuinely still let the admin through.
+    final_input = [r for r in db.list_rules(enabled_only=True) if r["kind"] == "input"]
+    assert _would_allow_client(final_input, admin_ip) is True
+
+
+def test_delete_and_enable_race_never_locks_out_admin(tmp_path, monkeypatch):
+    # Same race, same fix, but for delete_rule specifically (added after
+    # the other three were fixed and verified) — deleting an ACCEPT rule
+    # that covers the admin's IP while concurrently enabling a blanket
+    # DROP must never both succeed.
+    import threading
+
+    monkeypatch.setattr(config, "DB_PATH", str(tmp_path / "test.db"))
+    db.init_db()
+    admin_ip = "203.0.113.55"
+    accept_id = db.insert_rule({
+        "kind": "input", "action": "ACCEPT", "protocol": "tcp",
+        "src": f"{admin_ip}/32", "dport": "443", "enabled": 1, "position": 1.0,
+    })
+    drop_id = db.insert_rule({
+        "kind": "input", "action": "DROP", "protocol": "tcp",
+        "src": None, "dport": "443", "enabled": 0, "position": 2.0,
+    })
+    monkeypatch.setattr("app.firewall.run_root", lambda argv: "")
+
+    results = {}
+    barrier = threading.Barrier(2)
+
+    def try_delete_accept():
+        barrier.wait()
+        try:
+            delete_rule(accept_id, client_ip=admin_ip)
+            results["delete"] = "ok"
+        except FirewallError:
+            results["delete"] = "refused"
+
+    def try_enable_drop():
+        barrier.wait()
+        try:
+            toggle_rule(drop_id, client_ip=admin_ip)
+            results["enable"] = "ok"
+        except FirewallError:
+            results["enable"] = "refused"
+
+    t1 = threading.Thread(target=try_delete_accept)
+    t2 = threading.Thread(target=try_enable_drop)
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    assert not (results["delete"] == "ok" and results["enable"] == "ok")
+
     final_input = [r for r in db.list_rules(enabled_only=True) if r["kind"] == "input"]
     assert _would_allow_client(final_input, admin_ip) is True
 

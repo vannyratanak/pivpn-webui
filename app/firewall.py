@@ -876,28 +876,23 @@ def disable_rule(rule_id: int, client_ip: str | None = None):
     _unapply(rule)
 
 
-def _input_rules_without(rule_id: int) -> list[dict]:
-    """Currently-enabled INPUT-kind rules, minus one — the simulated state
-    for delete_rule's self-lockout check. Still a non-atomic read (unlike
-    toggle_rule/disable_rule's _other_enabled_input_rules) — delete_rule
-    has the same TOCTOU race as the other four guards but wasn't part of
-    the scope approved for this fix; flagged separately, not silently
-    left broken."""
-    return [r for r in db.list_rules(enabled_only=True) if r["kind"] == "input" and r["id"] != rule_id]
-
-
 def delete_rule(rule_id: int, client_ip: str | None = None):
-    rule = db.get_rule(rule_id)
-    if not rule:
-        return
-    if rule["kind"] == "input":
-        _check_self_lockout(client_ip, _input_rules_without(rule_id))
+    """Same locked-transaction treatment as toggle_rule/disable_rule, for
+    the same race — flagged and deliberately left alone when those three
+    were fixed, now closed the same way."""
+    with db.locked_transaction() as conn:
+        row = conn.execute("SELECT * FROM firewall_rules WHERE id=?", (rule_id,)).fetchone()
+        if not row:
+            return
+        rule = dict(row)
+        if rule["kind"] == "input":
+            _check_self_lockout(client_ip, _other_enabled_input_rules(conn, rule_id))
+        conn.execute("DELETE FROM firewall_rules WHERE id=?", (rule_id,))
     if rule["enabled"]:
         try:
             _unapply(rule)
         except PrivilegedCommandError:
             pass
-    db.delete_rule(rule_id)
 
 
 def sync_all():
