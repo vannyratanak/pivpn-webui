@@ -37,7 +37,12 @@ requiring a clean-slate install or ignoring them. Ships a safety guard
 most simple iptables-wrapper UIs don't have: firewall changes are
 simulated against the live rule set before being applied, and any change
 that would lock the admin's own connection out is refused outright,
-before it happens. No separate database server or background agent
+before it happens. A second, unconditional guard rejects a fully
+unrestricted DROP rule (no source, destination, or port) on the INPUT or
+FORWARD chain regardless of who's asking — added after a real incident
+where that exact shape took down VPN connectivity for every client, a
+class of damage the self-lockout guard alone can't see since it only
+ever reasons about the requester's own access. No separate database server or background agent
 process — SQLite plus a handful of narrowly-scoped, sudoers-gated root
 helper scripts, installable on the exact box PiVPN already runs on.
 

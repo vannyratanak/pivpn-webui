@@ -35,10 +35,29 @@ server) for keeping a running install in sync with this repo.
     shows as blockable once it has a ccd entry, which PiVPN assigns at
     creation time.
 
-- **Firewall** page manages two independent things, both stored in a local
-  SQLite DB so they survive reapplication after reboot or an `iptables -F`:
+- **Firewall** page manages several independent things, all stored in a
+  local SQLite DB so they survive reapplication after reboot or an
+  `iptables -F`:
   - General `FORWARD`-chain rules (protocol/source/dest/port → ACCEPT or DROP).
+  - `INPUT`-chain rules — what's allowed to reach the server itself (the
+    web UI, SSH, anything listening here), as opposed to FORWARD's
+    "traffic passing through." A change that would block the admin's own
+    current connection to the web UI (port 443/tcp) is refused server-side
+    before it's applied, simulated against the live rule set in position
+    order — see [Known limitations](#known-limitations--things-to-check)
+    for the real, narrower scope of that guard.
   - DNAT port-forwards (external port → a VPN client's internal IP:port).
+  - SNAT/MASQUERADE rules (rewrite a subnet's outbound source address).
+  - Both `INPUT` and `FORWARD` additionally hard-refuse a `DROP` rule with
+    no source/destination/port set at all, any protocol — there's no
+    legitimate reason for a rule that unrestricted, and there's a
+    client-side warning for the same shape too, but only this server-side
+    check can't be clicked through, skipped by disabling JS, or bypassed
+    via bulk "Import Rules" (which routes through the same code as the
+    Add-rule forms). Unlike the INPUT self-lockout guard above, this one
+    is unconditional — it doesn't matter who's asking or what else is
+    already in the table. Added after a live incident where exactly this
+    shape of FORWARD rule took down VPN connectivity for every client.
   - "Reapply all" reconciles iptables against the DB (idempotent — safe to
     click repeatedly). "Save for reboot" calls `netfilter-persistent save`,
     which requires `iptables-persistent` to be installed.
@@ -516,6 +535,40 @@ admin, manage the firewall, or do anything else admin-only again).
 
 ## Known limitations / things to check
 
+- The INPUT self-lockout guard only ever protects **the requester's own
+  current connection to port 443/tcp** — not other services on the box
+  (SSH, OpenVPN's own listening port), and not anyone else's access. It
+  also simulates rules in position order, so if an earlier `ACCEPT` rule
+  already covers your IP, a new unrestricted `DROP` you add after it
+  passes the check even though it's still catastrophic for everyone/
+  everything it applies to first — this is exactly what let a real
+  `DROP`-all-udp INPUT rule take down every VPN client's OpenVPN
+  connection while the admin's own web UI access kept working. The
+  separate, unconditional guard against a blank-source/blank-port `DROP`
+  (on both `INPUT` and `FORWARD`) exists specifically to not depend on
+  this simulation at all.
+- Rule **discovery** (`discover_cli_rules`, run when connecting to a
+  server with pre-existing iptables rules) and **"Reapply all"**
+  (`sync_all`) both read/write the DB directly and don't go through any
+  of the guards above — by design, since they have to faithfully mirror
+  whatever's already live or already recorded, not gatekeep it. A
+  dangerous rule that already exists on a server before this app manages
+  it (blanket `DROP`, or the port-forward hijack noted below) will be
+  imported/reapplied silently, with no flag or warning — it just shows up
+  in the Active Rules table like any other rule. Worth a manual look at
+  a fresh server's Active Rules list after first sync.
+- **Port-forward rules have no equivalent guard at all.** The DNAT rule
+  they create matches *any* incoming packet on the chosen external
+  port/protocol — there's no restriction on which destination it applies
+  to. Setting External port = `443` (or `22`, or whatever port OpenVPN
+  itself listens on) targeting some VPN client's IP silently redirects
+  *all* incoming traffic on that port to the client instead, making the
+  web UI (or SSH, or OpenVPN) unreachable from anywhere — same severity
+  as the INPUT/FORWARD gaps above, just via DNAT instead of DROP.
+  Deliberately left unaddressed for now — be careful with the External
+  port field. SNAT rules have a smaller version of the same looseness:
+  leaving Source blank rewrites the exit address for *all* outbound
+  traffic on that interface, not just VPN clients' traffic.
 - Only two roles exist (see "User accounts and roles" above), no
   finer-grained permissions or team/org hierarchy beyond that split yet.
 - Changing a password (self-service or an admin's reset) doesn't
