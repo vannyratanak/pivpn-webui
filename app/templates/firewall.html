@@ -201,7 +201,7 @@
   <details class="collapsible" name="firewall-add-rule">
     <summary><h2>Add port-forward rule</h2></summary>
     <p class="hint">DNAT: forward an external port to a VPN client's internal IP.</p>
-    <form method="post" action="{{ url_for('main.add_portforward') }}" class="inline-form">
+    <form method="post" action="{{ url_for('main.add_portforward') }}" class="inline-form" id="add-portforward-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <label><span class="label-text">External port<span class="required-star" aria-hidden="true">*</span></span>
         <input type="text" name="ext_port" required placeholder="8080">
@@ -227,6 +227,29 @@
       <button type="submit">Add rule</button>
     </form>
   </details>
+  <script>
+    (function() {
+      // Mirrors _check_not_hijacking_reserved_port (app/firewall.py) —
+      // early warning only, that server-side check is an unconditional
+      // hard reject with no bypass, same as the DROP guards elsewhere on
+      // this page. "Add anyway" just skips straight to seeing that
+      // rejection instead of it being a surprise.
+      const RESERVED_PORTS = { '443': "this app's own web UI", '22': 'SSH' };
+      const form = document.getElementById('add-portforward-form');
+      const extPortInput = form.querySelector('input[name="ext_port"]');
+
+      form.addEventListener('submit', () => {
+        const reservedFor = RESERVED_PORTS[extPortInput.value.trim()];
+        if (reservedFor) {
+          form.dataset.confirm = `Port ${extPortInput.value.trim()} is needed for ${reservedFor} on this server itself — forwarding it elsewhere will make that unreachable instead of reaching this box. Are you sure?`;
+          form.dataset.confirmLabel = 'Add anyway';
+        } else {
+          delete form.dataset.confirm;
+          delete form.dataset.confirmLabel;
+        }
+      });
+    })();
+  </script>
 </section>
 
 <section class="card">

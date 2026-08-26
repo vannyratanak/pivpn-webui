@@ -575,18 +575,19 @@ admin, manage the firewall, or do anything else admin-only again).
   imported/reapplied silently, with no flag or warning — it just shows up
   in the Active Rules table like any other rule. Worth a manual look at
   a fresh server's Active Rules list after first sync.
-- **Port-forward rules have no equivalent guard at all.** The DNAT rule
-  they create matches *any* incoming packet on the chosen external
-  port/protocol — there's no restriction on which destination it applies
-  to. Setting External port = `443` (or `22`, or whatever port OpenVPN
-  itself listens on) targeting some VPN client's IP silently redirects
-  *all* incoming traffic on that port to the client instead, making the
-  web UI (or SSH, or OpenVPN) unreachable from anywhere — same severity
-  as the INPUT/FORWARD gaps above, just via DNAT instead of DROP.
-  Deliberately left unaddressed for now — be careful with the External
-  port field. SNAT rules have a smaller version of the same looseness:
-  leaving Source blank rewrites the exit address for *all* outbound
-  traffic on that interface, not just VPN clients' traffic.
+- **Port-forward rules hard-reject External port `443` or `22`** — the
+  DNAT rule they create matches *any* incoming packet on the chosen
+  external port/protocol, with no restriction on which destination it
+  applies to, so forwarding one of these would silently redirect *all*
+  traffic on that port away from the box itself (this app's own web UI,
+  or SSH) instead of making it reachable — same severity as the
+  INPUT/FORWARD DROP gaps above, just via redirect instead of drop. This
+  guard can't cover **whatever port OpenVPN itself listens on**, though —
+  that's only knowable by reading `server.conf`, which this check doesn't
+  do; be careful forwarding a port you're not sure is free. SNAT rules
+  have a smaller, still-open version of the same looseness: leaving
+  Source blank rewrites the exit address for *all* outbound traffic on
+  that interface, not just VPN clients' traffic.
 - Only two roles exist (see "User accounts and roles" above), no
   finer-grained permissions or team/org hierarchy beyond that split yet.
 - Changing a password (self-service or an admin's reset) doesn't

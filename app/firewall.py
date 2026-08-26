@@ -453,6 +453,43 @@ def _check_not_unrestricted_forward_drop(rule: dict):
         )
 
 
+_RESERVED_PORTFORWARD_PORTS = {
+    # 443: this app's own web UI — nginx always terminates TLS here
+    # (hardcoded in deploy/nginx-pivpn-webui.conf.template, not
+    # configurable), so unlike everything else this function has to
+    # guess at, this one is knowable for certain.
+    "443": "this app's own web UI",
+    # 22: SSH — not guaranteed (an install could run it elsewhere), but
+    # DNAT'ing away the box's own SSH port has no plausible legitimate
+    # use and near-certain "locked out of the machine entirely" cost, so
+    # it's included as a safe default even without being 100% knowable
+    # the way 443 is.
+    "22": "SSH",
+}
+
+
+def _check_not_hijacking_reserved_port(ext_port: str):
+    """Raise FirewallError for a port-forward whose External port is one
+    this server needs for itself. Unlike the DROP guards above, a
+    port-forward rule always has a real target (ext_port and target_ip
+    are both required — never blank), so there's no "unrestricted" shape
+    to catch here. The danger instead is DNAT with no destination
+    restriction at all (see _portforward_dnat_argv): forwarding external
+    port 443 to some VPN client silently redirects *all* incoming
+    traffic on that port — including the admin's own request — to the
+    client instead, the same "everyone loses reachability" severity as
+    the DROP incidents, just via redirect instead of drop. Doesn't (and
+    can't, without reading server.conf) cover OpenVPN's own listening
+    port — see README's Known Limitations for that residual gap."""
+    reserved_for = _RESERVED_PORTFORWARD_PORTS.get(ext_port)
+    if reserved_for:
+        raise FirewallError(
+            f"Port {ext_port} is needed for {reserved_for} on this server itself — "
+            "forwarding it elsewhere would redirect that traffic away instead, "
+            "making it unreachable. Choose a different external port."
+        )
+
+
 def _check_client_block_self_lockout(admin_ip: str | None, blocked_client_ip: str):
     """Raise FirewallError if blocking blocked_client_ip would cut off the
     request that's asking for it. Unlike _check_self_lockout's position-
@@ -641,6 +678,7 @@ def add_portforward_rule(ext_port, target_ip, target_port, protocol="tcp", ext_i
     ext_port_v = _valid_port(ext_port)
     if not ext_port_v:
         raise FirewallError("External port is required for a port-forward rule.")
+    _check_not_hijacking_reserved_port(ext_port_v)
     rule = {
         "kind": "portforward",
         "action": "ACCEPT",

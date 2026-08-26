@@ -33,6 +33,7 @@ from app.firewall import (
     rule_client_name,
     set_client_block,
     toggle_rule,
+    add_portforward_rule,
 )
 
 
@@ -961,6 +962,37 @@ def test_add_forward_rule_allows_unrestricted_accept(tmp_path, monkeypatch):
     add_forward_rule(action="ACCEPT", protocol="all", src=None, dst=None, dport=None)
     assert len(db.list_rules()) == 1
     assert len(applied) == 1
+
+
+# --- _check_not_hijacking_reserved_port: a port-forward rule always has a
+# real target (ext_port/target_ip are both required), so unlike the DROP
+# guards there's no "unrestricted" shape to catch — the danger is DNAT with
+# no destination restriction at all (_portforward_dnat_argv matches ANY
+# incoming packet on the chosen port), so forwarding port 443 (this app's
+# own web UI) or 22 (SSH) to a VPN client silently redirects that traffic
+# away from the box itself instead.
+
+def test_add_portforward_rule_rejects_ext_port_443(tmp_path, monkeypatch):
+    applied = _setup_forward_db(tmp_path, monkeypatch)
+    with pytest.raises(FirewallError):
+        add_portforward_rule(ext_port="443", target_ip="10.8.0.5", target_port=None)
+    assert db.list_rules() == []
+    assert applied == []
+
+
+def test_add_portforward_rule_rejects_ext_port_22(tmp_path, monkeypatch):
+    applied = _setup_forward_db(tmp_path, monkeypatch)
+    with pytest.raises(FirewallError):
+        add_portforward_rule(ext_port="22", target_ip="10.8.0.5", target_port=None)
+    assert db.list_rules() == []
+    assert applied == []
+
+
+def test_add_portforward_rule_allows_other_ports(tmp_path, monkeypatch):
+    applied = _setup_forward_db(tmp_path, monkeypatch)
+    add_portforward_rule(ext_port="8080", target_ip="10.8.0.5", target_port=None)
+    assert len(db.list_rules()) == 1
+    assert len(applied) == 2  # DNAT (nat/PREROUTING) + the matching FORWARD ACCEPT
 
 
 def test_add_input_rule_rejects_any_protocol_with_port():
