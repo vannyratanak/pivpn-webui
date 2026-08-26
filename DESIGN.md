@@ -234,6 +234,11 @@ Borders are always the single `--border` slate-blue token, always 1px, never a s
 - **Style:** Fully pill-shaped (999px radius), small (11px uppercase text, `0.03em` letter-spacing), background is always a low-opacity (15–18%) tint of the underlying status color with the same color used at full opacity for the text — never a solid fill.
 - **State:** Connected/success uses Mint OK; inactive/neutral uses Slate Muted. No warning or danger badge variant exists yet (both live states covered are binary: connected or not).
 
+### Toasts / Floating Alerts
+- **Distinct from inline flash banners** (`.flash`, in Layout — a translucent color-wash background, 6px radius, tight padding, sized for sitting flush in `.content`'s normal document flow). A floating alert is a container surface, not inline content, so it takes the Card/Modal treatment instead: Slate Panel background (solid, not a wash), 10px radius, a single 1px border in the semantic status color carrying the meaning, generous padding (16px/20px). First established for `.reorder-error-toast` (Firewall page) after it shipped reusing `.flash`'s look and read as flat/undersized once floated — corrected to match `#confirm-modal`'s existing solid-panel precedent for "a surface demanding attention above the page."
+- **Position:** `position: fixed`, offset far enough from the viewport top to clear the sticky topbar's actual height (not a guessed round number — measure it) plus a comment noting the topbar's height, since a floating element's z-index sitting above the topbar's means it will render *on top of* the nav rather than below it if the offset is too small.
+- **Motion:** a brief (~0.2s) fade + slight downward-settle entrance, `prefers-reduced-motion` respected — the one moment this component earns, so it reads as a message arriving rather than a layout jump.
+
 ## Do's and Don'ts
 
 ### Do:
