@@ -65,6 +65,12 @@ addresses are blurred.
     order — see [Known limitations](#known-limitations--things-to-check)
     for the real, narrower scope of that guard.
   - DNAT port-forwards (external port → a VPN client's internal IP:port).
+    Hard-refuses External port `443` or `22` — a port-forward's DNAT rule
+    matches *any* incoming packet on the chosen port with no destination
+    restriction, so forwarding one of these would silently redirect this
+    app's own web UI (or SSH) traffic to the client instead of reaching
+    this box. Can't cover whatever port OpenVPN itself listens on, though
+    — see Known limitations.
   - SNAT/MASQUERADE rules (rewrite a subnet's outbound source address).
   - Both `INPUT` and `FORWARD` additionally hard-refuse a `DROP` rule with
     no source/destination/port set at all, any protocol — there's no
