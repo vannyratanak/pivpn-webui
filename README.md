@@ -594,6 +594,19 @@ admin, manage the firewall, or do anything else admin-only again).
   have a smaller, still-open version of the same looseness: leaving
   Source blank rewrites the exit address for *all* outbound traffic on
   that interface, not just VPN clients' traffic.
+- **An `ACCEPT` FORWARD rule only does something if your FORWARD chain's
+  default policy is `DROP`.** This app never sets that policy itself —
+  it's whatever the box already has (`iptables -L FORWARD -n -v` shows it
+  on the "Chain FORWARD (policy ...)" line). If the default is already
+  `ACCEPT` (common on an install that's never had it explicitly locked
+  down), every destination is already reachable through the box
+  regardless of any `ACCEPT` rule you add or remove here — only a `DROP`
+  rule actually restricts anything in that case. Confirmed live: adding,
+  then disabling, an `ACCEPT` FORWARD rule for a test destination made no
+  observable difference to whether it was reachable, because the
+  underlying chain was `ACCEPT`-by-default with no other rules the whole
+  time. Check your own chain's policy before assuming an `ACCEPT` rule
+  here is the thing making something reachable.
 - Only two roles exist (see "User accounts and roles" above), no
   finer-grained permissions or team/org hierarchy beyond that split yet.
 - Changing a password (self-service or an admin's reset) doesn't
