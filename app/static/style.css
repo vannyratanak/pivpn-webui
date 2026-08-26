@@ -140,15 +140,28 @@ body {
    same "can't be styled, and looks like the browser's dialog, not the
    app's" reason). Fixed/floating rather than inline, since it's appended
    straight to <body> right before a reload — there's no .content/.flashes
-   container to sit inside at that point. Shadow matches the "open
-   dropdown menu" entry in DESIGN.md's Shadow Vocabulary: genuinely
-   floating above the whole page, the heaviest shadow the system defines.
+   container to sit inside at that point.
+
+   Deliberately its own treatment, not a reuse of .flash — .flash is sized
+   and shaped for an inline page banner sitting in normal document flow
+   (6px radius, tight padding, a translucent color wash), which read as
+   flat and undersized once floated. This app's own precedent for "a
+   floating surface demanding attention" is #confirm-modal: a solid
+   --panel background with the semantic color carried by a border, not a
+   wash — matched here instead, at the Card/Modal radius (10px) since
+   that's the scale reserved for the largest floating container surfaces.
+
    top offset clears .topbar (measured ~66.5px tall, sticky at its own
    top:0) plus a 16px gap — this toast's z-index is higher than the
    topbar's, so without this it renders legibly *on top of* the nav
    instead of below it, overlapping "Firewall Rules / VPN Routes / Logs"
    — a real bug shipped and only caught visually afterward, not during
-   the functional (does-it-appear-and-reload) verification pass. */
+   the functional (does-it-appear-and-reload) verification pass. Shadow
+   matches the "open dropdown menu" entry in DESIGN.md's Shadow
+   Vocabulary: genuinely floating above the whole page, the heaviest
+   shadow the system defines. Entrance transition is the one authored
+   motion moment here — an alert that just snaps into existence above
+   the nav reads as a layout jump, not a message. */
 .reorder-error-toast {
   position: fixed;
   top: 82px;
@@ -156,7 +169,25 @@ body {
   transform: translateX(-50%);
   z-index: 200;
   max-width: 420px;
+  background: var(--panel);
+  border: 1px solid var(--danger);
+  border-radius: 10px;
+  padding: 16px 20px;
+  color: var(--danger);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.5;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  animation: reorder-error-toast-in 0.2s ease-out;
+}
+
+@keyframes reorder-error-toast-in {
+  from { opacity: 0; transform: translate(-50%, -8px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reorder-error-toast { animation: none; }
 }
 
 .skip-link {

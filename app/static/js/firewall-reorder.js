@@ -51,7 +51,7 @@ function attachFirewallReorder(tbodySelector) {
         // in style.css for why) — the short delay before reloading is so
         // it's actually readable rather than replaced mid-render.
         const notice = document.createElement('div');
-        notice.className = 'flash flash-error reorder-error-toast';
+        notice.className = 'reorder-error-toast';
         notice.setAttribute('role', 'alert');
         notice.textContent = 'Could not save that order — reloading to show the real order.';
         document.body.appendChild(notice);
