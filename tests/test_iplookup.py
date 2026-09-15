@@ -125,14 +125,14 @@ def _use_temp_db(tmp_path, monkeypatch):
     db.init_db()
 
 
-def test_get_ip_org_private_address_skips_whois_and_shows_its_own_ip(tmp_path, monkeypatch):
+def test_get_ip_org_private_address_skips_whois_entirely(tmp_path, monkeypatch):
     _use_temp_db(tmp_path, monkeypatch)
 
     def fail_if_called(*a, **k):
         raise AssertionError("whois should never be invoked for a private address")
 
     monkeypatch.setattr(subprocess, "run", fail_if_called)
-    assert iplookup.get_ip_org("192.168.100.10") == "192.168.100.10"
+    assert iplookup.get_ip_org("192.168.100.10") == "Private network"
 
 
 def test_get_ip_org_malformed_address_returns_none(tmp_path, monkeypatch):
