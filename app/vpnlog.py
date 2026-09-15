@@ -268,14 +268,15 @@ def list_traffic_flows(limit: int = 300) -> list[dict]:
     # the same handful of destinations (a DNS server, a CDN edge) repeats
     # across most rows, and iplookup.get_ip_org already caches in the DB
     # across requests too, but there's no reason to pay even a dict/DB
-    # lookup twice for the same IP within a single page render.
-    org_by_dst = {}
+    # lookup twice for the same IP within a single page render. Resolved
+    # via get_ip_orgs_bulk so any not-yet-cached destinations (common with
+    # CDN-heavy traffic, e.g. after enabling full-tunnel) are looked up
+    # concurrently instead of serially timing out one at a time.
+    org_by_dst = iplookup.get_ip_orgs_bulk([m.group("dst") for _, m in parsed])
     flows = []
     for ts, m in parsed:
         src = m.group("src")
         dst = m.group("dst")
-        if dst not in org_by_dst:
-            org_by_dst[dst] = iplookup.get_ip_org(dst)
         flows.append({
             "ts": ts,
             "client": ip_to_name.get(src, src),
