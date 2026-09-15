@@ -52,12 +52,14 @@ def extract_org(whois_text: str) -> str | None:
 
 
 def get_ip_org(ip: str) -> str | None:
-    """None means either "private/reserved address" (not worth a WHOIS
-    query at all) or "looked up, nothing usable came back" — both cases
-    the Traffic tab just shows as a blank Organization cell."""
+    """None means "looked up, nothing usable came back" — the Traffic tab
+    shows that as a blank Organization cell. A private/reserved address
+    isn't worth a WHOIS query at all (there's no public registry entry to
+    find) — its own IP is returned instead, so the column is never blank
+    for internal traffic, just not an "organization" in the WHOIS sense."""
     try:
         if ipaddress.ip_address(ip).is_private:
-            return "Private network"
+            return ip
     except ValueError:
         return None
 
