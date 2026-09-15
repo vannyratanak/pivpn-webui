@@ -9,6 +9,7 @@
   {% endif %}
   <a href="{{ url_for('main.logs', tab='client_sessions') }}" class="{{ 'active' if tab == 'client_sessions' }}" {% if tab == 'client_sessions' %}aria-current="page"{% endif %}>Client Sessions</a>
   {% if current_user.is_admin %}
+  <a href="{{ url_for('main.logs', tab='traffic') }}" class="{{ 'active' if tab == 'traffic' }}" {% if tab == 'traffic' %}aria-current="page"{% endif %}>Traffic</a>
   <a href="{{ url_for('main.logs', tab='system') }}" class="{{ 'active' if tab == 'system' }}" {% if tab == 'system' %}aria-current="page"{% endif %}>System</a>
   <a href="{{ url_for('main.logs', tab='activity') }}" class="{{ 'active' if tab == 'activity' }}" {% if tab == 'activity' %}aria-current="page"{% endif %}>Activity</a>
   {% endif %}
@@ -123,6 +124,62 @@
   <script>
     const clientSessionsPager = attachPagination('#client-sessions-tbody', 'tr', 'client-sessions-page-size', 'client-sessions-pagination');
     attachLogFilter('client-sessions-filter', '#client-sessions-tbody', 'tr', '#client-sessions-table thead th', () => clientSessionsPager && clientSessionsPager.refresh());
+  </script>
+  {% endif %}
+</section>
+{% endif %}
+
+{% if tab == 'traffic' %}
+<section class="card">
+  <p class="hint">Which client talked to which destination and when — one row per new connection (not every packet), parsed from the kernel's netfilter log (last 6 hours; a browsing session can open hundreds of connections in minutes, so this tab uses a much shorter window than the others). Requires deploy/setup-traffic-log.sh to have been run on this server.</p>
+  {% if not traffic_flows %}
+    <p class="empty">No traffic flow events found (or deploy/setup-traffic-log.sh hasn't been run on this server yet).</p>
+  {% else %}
+  <input type="text" id="traffic-filter" class="log-filter-input" placeholder="Search…" aria-label="Search traffic flows">
+  <div class="table-scroll">
+  <table id="traffic-table">
+    <thead>
+      <tr>
+        <th scope="col">Time</th>
+        <th scope="col">Client</th>
+        <th scope="col">Source</th>
+        <th scope="col">Destination</th>
+        <th scope="col">Proto</th>
+        <th scope="col">Port</th>
+      </tr>
+    </thead>
+    <tbody id="traffic-tbody">
+      {% for f in traffic_flows %}
+      <tr>
+        <td>{{ f.ts }}</td>
+        <td>{{ f.client }}</td>
+        <td>{{ f.src }}{% if f.sport %}:{{ f.sport }}{% endif %}</td>
+        <td>{{ f.dst }}{% if f.dport %}:{{ f.dport }}{% endif %}</td>
+        <td>{{ f.proto }}</td>
+        <td>{{ f.dport or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <div class="pagination" id="traffic-pagination">
+    <label class="pagination-size">Show
+      <select id="traffic-page-size">
+        <option value="10" selected>10</option>
+        <option value="25">25</option>
+        <option value="50">50</option>
+        <option value="100">100</option>
+      </select>
+    </label>
+    <div class="pagination-nav">
+      <button type="button" class="btn btn-sm" data-page-prev>Prev</button>
+      <span data-page-status class="hint"></span>
+      <button type="button" class="btn btn-sm" data-page-next>Next</button>
+    </div>
+  </div>
+  <script>
+    const trafficPager = attachPagination('#traffic-tbody', 'tr', 'traffic-page-size', 'traffic-pagination');
+    attachLogFilter('traffic-filter', '#traffic-tbody', 'tr', '#traffic-table thead th', () => trafficPager && trafficPager.refresh());
   </script>
   {% endif %}
 </section>

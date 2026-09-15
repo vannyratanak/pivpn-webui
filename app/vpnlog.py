@@ -17,6 +17,7 @@ import subprocess
 from datetime import datetime
 
 import config
+from app import pivpn_ctl
 from app.privileged import run_root
 
 CONNECT_RE = re.compile(
@@ -28,6 +29,17 @@ DISCONNECT_RE = re.compile(
 
 # journalctl -o short-iso lines look like: "2026-08-17T10:22:31+0700 host proc[pid]: message"
 JOURNAL_LINE_RE = re.compile(r"^(?P<ts>\S+)\s+\S+\s+\S+?(?:\[\d+\])?:\s?(?P<msg>.*)$")
+
+# One line per new connection from the kernel's netfilter LOG target (see
+# deploy/setup-traffic-log.sh's mangle-table FORWARD rule) — the standard
+# `IN=... OUT=... SRC=... DST=... ... PROTO=... SPT=... DPT=...` shape every
+# iptables/nftables LOG line uses, unlike OpenVPN's own log lines this
+# format is stable/kernel-defined, not something that drifts per version.
+FLOW_RE = re.compile(
+    r"IN=(?P<in_if>\S*)\s+OUT=(?P<out_if>\S*).*?"
+    r"SRC=(?P<src>[0-9.]+)\s+DST=(?P<dst>[0-9.]+).*?"
+    r"PROTO=(?P<proto>\w+)(?:\s+SPT=(?P<sport>\d+))?(?:\s+DPT=(?P<dport>\d+))?"
+)
 
 
 def _format_ts(ts: str) -> str:
@@ -204,6 +216,64 @@ def list_client_sessions(limit: int = 300) -> list[dict]:
         if s["ongoing"]:
             s["real_address"] = resolve_real_address(s["address"])
     return sessions
+
+
+def _client_ip_map() -> dict[str, str]:
+    """Best-effort VPN virtual IP -> client name map, used to label traffic
+    flow rows with a name instead of a bare IP. Static ccd IPs are loaded
+    first, then overwritten by whoever's connected right now — live status
+    is more authoritative (covers a client with no ccd-pinned IP, whose
+    virtual address is only known while actually connected), but a flow
+    logged just after that same client disconnects should still resolve via
+    its static IP rather than fall back to showing a bare IP."""
+    ip_to_name = {}
+    for name, ip in pivpn_ctl.list_client_ips().items():
+        if ip:
+            ip_to_name[ip] = name
+    for name, info in pivpn_ctl.list_connected_clients().items():
+        vip = info.get("virtual_address")
+        if vip:
+            ip_to_name[vip] = name
+    return ip_to_name
+
+
+def list_traffic_flows(limit: int = 300) -> list[dict]:
+    """Per-flow, client-initiated connections (src client -> dst anywhere),
+    parsed from the kernel LOG lines deploy/setup-traffic-log.sh's
+    mangle-table FORWARD rule produces — one line per NEW connection from
+    the VPN client subnet, not every packet, most recent first.
+
+    Genuinely different volume profile than the other Logs tabs (a single
+    browsing session can open hundreds of connections in minutes), so the
+    log helper uses a much shorter time window for this action specifically
+    — see SINCE_FLOW in deploy/pivpn-webui-log-helper.sh.
+
+    Best-effort, same as the rest of this module: a source IP that doesn't
+    resolve to a known client (already disconnected, mapping gone stale) is
+    shown as a bare IP rather than dropped, and setup-traffic-log.sh never
+    having been run at all just means an empty list, not an error."""
+    ip_to_name = _client_ip_map()
+    out = run_root([config.LOG_HELPER, "flow"])
+    flows = []
+    for raw_line in out.splitlines():
+        ts, msg = _split_journal_line(raw_line.strip())
+        m = FLOW_RE.search(msg)
+        if not m:
+            continue
+        src = m.group("src")
+        flows.append({
+            "ts": ts,
+            "client": ip_to_name.get(src, src),
+            "src": src,
+            "dst": m.group("dst"),
+            "proto": m.group("proto"),
+            "sport": m.group("sport") or "",
+            "dport": m.group("dport") or "",
+            "in_if": m.group("in_if"),
+            "out_if": m.group("out_if"),
+        })
+    flows.reverse()
+    return flows[:limit]
 
 
 def list_webui_log(limit: int = 300) -> list[str]:

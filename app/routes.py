@@ -753,7 +753,7 @@ def resync_rules():
 AUTH_ACTIONS = ("login", "logout")
 
 
-ALL_LOG_TABS = ("sessions", "client_sessions", "system", "activity", "auth")
+ALL_LOG_TABS = ("sessions", "client_sessions", "traffic", "system", "activity", "auth")
 MODERATOR_LOG_TABS = ("client_sessions", "auth")
 
 
@@ -772,6 +772,7 @@ def logs():
         tab = default_tab
 
     sessions = client_sessions = webui_log = system_log = auth_entries = activity_entries = None
+    traffic_flows = None
     if tab == "sessions":
         try:
             sessions = vpnlog.list_sessions()
@@ -796,6 +797,12 @@ def logs():
         except PrivilegedCommandError as exc:
             client_sessions = []
             flash(str(exc), "error")
+    elif tab == "traffic":
+        try:
+            traffic_flows = vpnlog.list_traffic_flows()
+        except PrivilegedCommandError as exc:
+            traffic_flows = []
+            flash(str(exc), "error")
     elif tab == "system":
         try:
             webui_log = vpnlog.list_webui_log()
@@ -818,6 +825,6 @@ def logs():
 
     return render_template(
         "logs.html", tab=tab, sessions=sessions, client_sessions=client_sessions,
-        webui_log=webui_log, system_log=system_log, auth_entries=auth_entries,
-        activity_entries=activity_entries,
+        traffic_flows=traffic_flows, webui_log=webui_log, system_log=system_log,
+        auth_entries=auth_entries, activity_entries=activity_entries,
     )

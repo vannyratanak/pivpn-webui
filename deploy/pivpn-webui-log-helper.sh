@@ -26,8 +26,19 @@ WEBUI_UNIT="pivpn-webui"
 SINCE="3 days ago"
 LINES=5000
 
+# Flow-log rows (see deploy/setup-traffic-log.sh) are a different order of
+# magnitude from connect/disconnect events — one browsing session alone can
+# open hundreds of connections in minutes. The same 3-day/5000-line window
+# used above would silently collapse down to just the last few minutes, so
+# this action gets its own, much shorter window instead.
+SINCE_FLOW="6 hours ago"
+LINES_FLOW=5000
+
+# The prefix setup-traffic-log.sh's LOG rule tags every flow line with.
+FLOW_LOG_PREFIX="VPNFLOW"
+
 usage() {
-  echo "usage: $0 openvpn | webui | system" >&2
+  echo "usage: $0 openvpn | webui | system | flow" >&2
   exit 1
 }
 
@@ -43,6 +54,9 @@ case "$action" in
     ;;
   system)
     journalctl --since "$SINCE" -n "$LINES" --no-pager -o short-iso
+    ;;
+  flow)
+    journalctl -k --since "$SINCE_FLOW" -n "$LINES_FLOW" --no-pager -o short-iso -g "$FLOW_LOG_PREFIX"
     ;;
   *)
     usage

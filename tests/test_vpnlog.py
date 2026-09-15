@@ -1,13 +1,16 @@
 import subprocess
 
 import config
-from app import vpnlog
+from app import pivpn_ctl, vpnlog
 from app.vpnlog import (
     CONNECT_RE,
     DISCONNECT_RE,
+    FLOW_RE,
+    _client_ip_map,
     _format_duration,
     _split_journal_line,
     list_client_sessions,
+    list_traffic_flows,
     resolve_real_address,
 )
 
@@ -221,3 +224,79 @@ def test_resolve_ssh_binary_missing_returns_none_not_raise(monkeypatch):
 
     monkeypatch.setattr(subprocess, "run", raise_oserror)
     assert resolve_real_address("10.66.66.1:36530") is None
+
+
+# --- FLOW_RE / list_traffic_flows: the netfilter LOG target's own line
+# shape (kernel-defined, stable across versions, unlike OpenVPN's own log
+# format — see this module's docstring) produced by
+# deploy/setup-traffic-log.sh's mangle-table FORWARD rule.
+
+# Real line captured live from a production install (a real "mobile" client
+# making a DNS-over-TLS connection through .10) — includes the "MAC= "
+# (empty) field between OUT= and SRC= that a hand-written example would
+# easily miss.
+TCP_FLOW_LINE = (
+    "2026-09-15T10:11:14+0700 vpn kernel: VPNFLOW IN=tun0 OUT=ens18 MAC= "
+    "SRC=10.202.226.2 DST=149.112.112.112 LEN=64 TOS=0x00 PREC=0x00 TTL=63 "
+    "ID=0 DF PROTO=TCP SPT=52250 DPT=443 WINDOW=65535 RES=0x00 CWR ECE SYN URGP=0"
+)
+# Synthetic (ordinary client browsing traffic doesn't generate ICMP) — just
+# exercises the no-ports branch.
+ICMP_FLOW_LINE = (
+    "2026-09-15T09:41:00+0700 vpn kernel: VPNFLOW IN=tun0 OUT=ens18 MAC= "
+    "SRC=10.202.226.4 DST=1.1.1.1 LEN=84 TOS=0x00 PREC=0x00 TTL=64 ID=1 DF "
+    "PROTO=ICMP TYPE=8 CODE=0 ID=1 SEQ=1"
+)
+
+
+def test_flow_re_matches_tcp_line_with_ports():
+    _, msg = _split_journal_line(TCP_FLOW_LINE)
+    m = FLOW_RE.search(msg)
+    assert m is not None
+    assert m.group("in_if") == "tun0"
+    assert m.group("out_if") == "ens18"
+    assert m.group("src") == "10.202.226.2"
+    assert m.group("dst") == "149.112.112.112"
+    assert m.group("proto") == "TCP"
+    assert m.group("sport") == "52250"
+    assert m.group("dport") == "443"
+
+
+def test_flow_re_matches_icmp_line_without_ports():
+    _, msg = _split_journal_line(ICMP_FLOW_LINE)
+    m = FLOW_RE.search(msg)
+    assert m is not None
+    assert m.group("proto") == "ICMP"
+    assert m.group("sport") is None
+    assert m.group("dport") is None
+
+
+def test_client_ip_map_prefers_live_over_static(monkeypatch):
+    # "nurak" has moved off its static ccd IP onto a dynamically-assigned
+    # one for this session — the live status should win, not the stale
+    # static mapping.
+    monkeypatch.setattr(pivpn_ctl, "list_client_ips", lambda: {"nurak": "10.202.226.2"})
+    monkeypatch.setattr(
+        pivpn_ctl, "list_connected_clients",
+        lambda: {"nurak": {"virtual_address": "10.202.226.9"}},
+    )
+    assert _client_ip_map() == {"10.202.226.2": "nurak", "10.202.226.9": "nurak"}
+
+
+def test_list_traffic_flows_resolves_known_client_and_falls_back_to_ip(monkeypatch):
+    monkeypatch.setattr(pivpn_ctl, "list_client_ips", lambda: {})
+    monkeypatch.setattr(
+        pivpn_ctl, "list_connected_clients",
+        lambda: {"mobile": {"virtual_address": "10.202.226.2"}},
+    )
+    unknown_src_line = TCP_FLOW_LINE.replace("10.202.226.2", "10.202.226.77")
+    monkeypatch.setattr(vpnlog, "run_root", lambda argv: "\n".join([TCP_FLOW_LINE, unknown_src_line]))
+
+    flows = list_traffic_flows()
+
+    assert len(flows) == 2
+    # most recent first
+    assert flows[0]["client"] == "10.202.226.77"  # no known mapping -> bare IP
+    assert flows[0]["dst"] == "149.112.112.112"
+    assert flows[1]["client"] == "mobile"
+    assert flows[1]["dport"] == "443"

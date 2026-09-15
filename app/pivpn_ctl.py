@@ -249,10 +249,11 @@ def _parse_status_log(out: str) -> dict:
         parts = raw_line.rstrip("\n").split("\t")
         if len(parts) < 8 or parts[0] != "CLIENT_LIST":
             continue
-        name, real_addr = parts[1], parts[2]
+        name, real_addr, virtual_addr = parts[1], parts[2], parts[3]
         bytes_recv, bytes_sent, since = parts[5], parts[6], parts[7]
         connected[name] = {
             "real_address": real_addr,
+            "virtual_address": virtual_addr,
             "bytes_recv": bytes_recv,
             "bytes_sent": bytes_sent,
             "since": since,
@@ -267,7 +268,8 @@ def list_connected_clients() -> dict:
     deploy/pivpn-webui-ccd-helper.sh; remove that source once that instance
     is torn down).
 
-    Returns {common_name: {"real_address", "bytes_recv", "bytes_sent", "since"}}.
+    Returns {common_name: {"real_address", "virtual_address", "bytes_recv",
+    "bytes_sent", "since"}}.
     Empty dict (not an error) if a log is unreadable or nothing's connected —
     this is a "best effort" status view, not something client add/remove
     depends on. STATUS_LOG in deploy/pivpn-webui-ccd-helper.sh is verified
