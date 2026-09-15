@@ -79,6 +79,11 @@ else
   echo "netfilter-persistent not found — this rule will NOT survive a reboot until you persist it another way." >&2
 fi
 
+if ! command -v whois >/dev/null 2>&1; then
+  echo "Note: 'whois' isn't installed — the Traffic tab will still show" >&2
+  echo "rows, just with a blank Organization column until you 'apt install whois'." >&2
+fi
+
 echo
 echo "Verify with a real connection from a connected client, then:"
 echo "  journalctl -k -g '$LOG_PREFIX' --since '10 min ago' --no-pager -o short-iso"

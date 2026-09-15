@@ -102,6 +102,18 @@ CREATE TABLE IF NOT EXISTS users (
     role TEXT NOT NULL DEFAULT 'admin',
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Destination IP -> organization, for the Traffic log (see
+-- app/iplookup.py). org-to-IP-block ownership essentially never changes,
+-- so this is a permanent cache, not a TTL'd one — org IS NULL means "we
+-- already looked this IP up and found nothing usable," which is itself
+-- worth remembering so a persistently-unresolvable IP only ever costs one
+-- real WHOIS query, not one per page load.
+CREATE TABLE IF NOT EXISTS ip_org_cache (
+    ip TEXT PRIMARY KEY,
+    org TEXT,
+    looked_up_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 
@@ -443,5 +455,30 @@ def list_audit_by_actions(actions: tuple[str, ...], limit: int = 200) -> list[di
             (*actions, limit),
         ).fetchall()
         return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def get_cached_ip_org(ip: str) -> tuple[bool, str | None]:
+    """(found, org) — found=False means this IP has never been looked up
+    at all (org=None alone can't distinguish that from "looked up, found
+    nothing"), which is exactly what a cache-fill caller needs to know."""
+    conn = get_conn()
+    try:
+        row = conn.execute("SELECT org FROM ip_org_cache WHERE ip = ?", (ip,)).fetchone()
+        return (True, row["org"]) if row else (False, None)
+    finally:
+        conn.close()
+
+
+def cache_ip_org(ip: str, org: str | None):
+    conn = get_conn()
+    try:
+        conn.execute(
+            "INSERT INTO ip_org_cache (ip, org) VALUES (?, ?) "
+            "ON CONFLICT(ip) DO UPDATE SET org = excluded.org, looked_up_at = CURRENT_TIMESTAMP",
+            (ip, org),
+        )
+        conn.commit()
     finally:
         conn.close()

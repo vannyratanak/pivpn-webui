@@ -144,6 +144,7 @@
         <th scope="col">Client</th>
         <th scope="col">Source</th>
         <th scope="col">Destination</th>
+        <th scope="col">Organization</th>
         <th scope="col">Proto</th>
         <th scope="col">Port</th>
       </tr>
@@ -155,6 +156,7 @@
         <td>{{ f.client }}</td>
         <td>{{ f.src }}{% if f.sport %}:{{ f.sport }}{% endif %}</td>
         <td>{{ f.dst }}{% if f.dport %}:{{ f.dport }}{% endif %}</td>
+        <td>{{ f.dst_org or '—' }}</td>
         <td>{{ f.proto }}</td>
         <td>{{ f.dport or '—' }}</td>
       </tr>

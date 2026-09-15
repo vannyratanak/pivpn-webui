@@ -291,6 +291,7 @@ def test_list_traffic_flows_resolves_known_client_and_falls_back_to_ip(monkeypat
     )
     unknown_src_line = TCP_FLOW_LINE.replace("10.202.226.2", "10.202.226.77")
     monkeypatch.setattr(vpnlog, "run_root", lambda argv: "\n".join([TCP_FLOW_LINE, unknown_src_line]))
+    monkeypatch.setattr(vpnlog.iplookup, "get_ip_org", lambda ip: "Meta Platforms Ireland Limited")
 
     flows = list_traffic_flows()
 
@@ -298,5 +299,26 @@ def test_list_traffic_flows_resolves_known_client_and_falls_back_to_ip(monkeypat
     # most recent first
     assert flows[0]["client"] == "10.202.226.77"  # no known mapping -> bare IP
     assert flows[0]["dst"] == "149.112.112.112"
+    assert flows[0]["dst_org"] == "Meta Platforms Ireland Limited"
     assert flows[1]["client"] == "mobile"
     assert flows[1]["dport"] == "443"
+
+
+def test_list_traffic_flows_looks_up_org_once_per_unique_destination(monkeypatch):
+    # Two rows, same destination — the org lookup itself should only run
+    # once, not once per row (see list_traffic_flows' org_by_dst comment).
+    monkeypatch.setattr(pivpn_ctl, "list_client_ips", lambda: {})
+    monkeypatch.setattr(pivpn_ctl, "list_connected_clients", lambda: {})
+    monkeypatch.setattr(vpnlog, "run_root", lambda argv: "\n".join([TCP_FLOW_LINE, TCP_FLOW_LINE]))
+    calls = []
+
+    def fake_get_ip_org(ip):
+        calls.append(ip)
+        return "Meta Platforms Ireland Limited"
+
+    monkeypatch.setattr(vpnlog.iplookup, "get_ip_org", fake_get_ip_org)
+
+    flows = list_traffic_flows()
+
+    assert len(flows) == 2
+    assert calls == ["149.112.112.112"]

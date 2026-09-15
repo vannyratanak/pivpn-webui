@@ -17,7 +17,7 @@ import subprocess
 from datetime import datetime
 
 import config
-from app import pivpn_ctl
+from app import iplookup, pivpn_ctl
 from app.privileged import run_root
 
 CONNECT_RE = re.compile(
@@ -254,26 +254,41 @@ def list_traffic_flows(limit: int = 300) -> list[dict]:
     having been run at all just means an empty list, not an error."""
     ip_to_name = _client_ip_map()
     out = run_root([config.LOG_HELPER, "flow"])
-    flows = []
+    parsed = []
     for raw_line in out.splitlines():
         ts, msg = _split_journal_line(raw_line.strip())
         m = FLOW_RE.search(msg)
         if not m:
             continue
+        parsed.append((ts, m))
+    parsed.reverse()
+    parsed = parsed[:limit]
+
+    # One org lookup per unique destination in this batch, not per row —
+    # the same handful of destinations (a DNS server, a CDN edge) repeats
+    # across most rows, and iplookup.get_ip_org already caches in the DB
+    # across requests too, but there's no reason to pay even a dict/DB
+    # lookup twice for the same IP within a single page render.
+    org_by_dst = {}
+    flows = []
+    for ts, m in parsed:
         src = m.group("src")
+        dst = m.group("dst")
+        if dst not in org_by_dst:
+            org_by_dst[dst] = iplookup.get_ip_org(dst)
         flows.append({
             "ts": ts,
             "client": ip_to_name.get(src, src),
             "src": src,
-            "dst": m.group("dst"),
+            "dst": dst,
+            "dst_org": org_by_dst[dst],
             "proto": m.group("proto"),
             "sport": m.group("sport") or "",
             "dport": m.group("dport") or "",
             "in_if": m.group("in_if"),
             "out_if": m.group("out_if"),
         })
-    flows.reverse()
-    return flows[:limit]
+    return flows
 
 
 def list_webui_log(limit: int = 300) -> list[str]:
