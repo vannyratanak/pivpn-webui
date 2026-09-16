@@ -3,19 +3,29 @@
 {% block content %}
 
 {# Shared by the three DB-backed, server-paginated tabs (VPN Sessions,
-   Client Sessions, Traffic) — search box + Refresh now, then real page
-   navigation over the *full* retained history (not just a fixed-size
-   recent slice; see vpnlog.py's docstrings for why that distinction
-   matters once retention holds a real week of data). Not used by
-   System/Activity/User Auth — those stay on the older client-side
-   filter+paginate pattern (small, fixed-size lists, no separate DB-backed
+   Client Sessions, Traffic). search_box sits in the page-header-row up
+   top (matching every other page's search box); range_and_refresh stays
+   in the tab's own card, above its table. Split into two forms/macros
+   so each carries the other's current value as a hidden field — moving
+   the search box up shouldn't mean losing the selected range (or vice
+   versa) when either one submits on its own. Not used by System/
+   Activity/User Auth — those stay on the older client-side filter+
+   paginate pattern (small, fixed-size lists, no separate DB-backed
    history to page into). #}
-{% macro search_toolbar(tab_name, label) %}
+{% macro search_box(tab_name, label) %}
+  <form method="get" action="{{ url_for('main.logs') }}" class="search-form">
+    <input type="hidden" name="tab" value="{{ tab_name }}">
+    <input type="hidden" name="range" value="{{ log_range }}">
+    <input type="text" name="q" value="{{ q or '' }}" class="log-filter-input"
+           placeholder="Search…" aria-label="Search {{ label }}">
+  </form>
+{% endmacro %}
+
+{% macro range_and_refresh(tab_name) %}
   <div class="table-toolbar">
-    <form method="get" action="{{ url_for('main.logs') }}" class="search-form">
+    <form method="get" action="{{ url_for('main.logs') }}">
       <input type="hidden" name="tab" value="{{ tab_name }}">
-      <input type="text" name="q" value="{{ q or '' }}" class="log-filter-input"
-             placeholder="Search…" aria-label="Search {{ label }}">
+      {% if q %}<input type="hidden" name="q" value="{{ q }}">{% endif %}
       <span class="pagination-size log-range-filter">
         <select name="range" onchange="this.form.submit()" aria-label="Time range">
           {% for key, opt_label in log_range_options %}
@@ -68,7 +78,7 @@
 <div class="page-header-row">
   <h1>Logs</h1>
   {% if tab in log_search_labels %}
-    {{ search_toolbar(tab, log_search_labels[tab]) }}
+    {{ search_box(tab, log_search_labels[tab]) }}
   {% endif %}
 </div>
 
@@ -88,6 +98,7 @@
 {% if tab == 'sessions' %}
 <section class="card">
   <p class="hint">Client connect/disconnect events parsed from the OpenVPN service journal, most recent first (last 7 days). Parsing is best-effort — lines that don't match a known OpenVPN log format show up with event "other" and the raw message in Detail.</p>
+  {{ range_and_refresh('sessions') }}
   <div class="table-scroll">
   <table id="sessions-table">
     <thead>
@@ -130,6 +141,7 @@
 {% if tab == 'client_sessions' %}
 <section class="card">
   <p class="hint">Each client's login sessions — when, how long, and how many — paired from the same connect/disconnect journal events as VPN Sessions. A session still in progress shows as "ongoing" with no end time or duration yet.</p>
+  {{ range_and_refresh('client_sessions') }}
   <div class="table-scroll">
   <table id="client-sessions-table">
     <thead>
@@ -179,6 +191,7 @@
 {% if tab == 'traffic' %}
 <section class="card">
   <p class="hint">Which client talked to which destination and when — one row per new connection (not every packet), parsed from the kernel's netfilter log (last 7 days, searchable and paginated below). Requires deploy/setup-traffic-log.sh to have been run on this server; new flows can take up to ~10 seconds to appear (ingested periodically in the background, not fetched live on page load) — or use Refresh for less than that.</p>
+  {{ range_and_refresh('traffic') }}
   <div class="table-scroll">
   <table id="traffic-table">
     <thead>
