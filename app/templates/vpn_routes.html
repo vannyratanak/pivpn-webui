@@ -9,8 +9,16 @@
 </div>
 
 <section class="card">
-  <details class="collapsible">
-    <summary><h2>Push a new route</h2></summary>
+  <div class="card-header-row">
+    <h2>Routes pushed to clients</h2>
+    <button type="button" class="btn" onclick="document.getElementById('add-route-dialog').showModal()">Push a new route</button>
+  </div>
+  <p class="hint">Controls what destinations VPN clients send into the tunnel at all. Without a route here, a client never attempts to reach that network through the VPN &mdash; see the <a href="{{ url_for('main.firewall_rules') }}">Firewall</a> page's NAT/SNAT rules, which handle the return path once traffic arrives.</p>
+
+  <dialog id="add-route-dialog" class="modal" onclick="closeDialogIfClickedOutside(event, this)">
+    <button type="button" class="modal-close-btn" onclick="document.getElementById('add-route-dialog').close()" aria-label="Close">&times;</button>
+    <h2>Push a new route</h2>
+    <p class="hint">Applies immediately and restarts the OpenVPN service to take effect &mdash; already-connected clients will briefly reconnect.</p>
     <form method="post" action="{{ url_for('main.add_vpn_route') }}" class="inline-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <label><span class="label-text">Network<span class="required-star" aria-hidden="true">*</span></span>
@@ -19,15 +27,11 @@
       <label><span class="label-text">Netmask<span class="required-star" aria-hidden="true">*</span></span>
         <input type="text" name="netmask" required placeholder="255.255.255.0">
       </label>
-      <button type="submit">Push route</button>
+      <div class="btn-group">
+        <button type="submit">Push route</button>
+      </div>
     </form>
-    <p class="hint">Applies immediately and restarts the OpenVPN service to take effect &mdash; already-connected clients will briefly reconnect.</p>
-  </details>
-</section>
-
-<section class="card">
-  <h2>Routes pushed to clients</h2>
-  <p class="hint">Controls what destinations VPN clients send into the tunnel at all. Without a route here, a client never attempts to reach that network through the VPN &mdash; see the <a href="{{ url_for('main.firewall_rules') }}">Firewall</a> page's NAT/SNAT rules, which handle the return path once traffic arrives.</p>
+  </dialog>
 
   <div class="table-scroll">
   <table id="routes-table">

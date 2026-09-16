@@ -52,14 +52,19 @@
 </section>
 
 <section class="card">
-  <h2>Firewall rules for {{ client.name }}</h2>
+  <div class="card-header-row">
+    <h2>Firewall rules for {{ client.name }}</h2>
+    {% if client.ip %}
+    <button type="button" class="btn" onclick="document.getElementById('add-client-rule-dialog').showModal()">Add rule</button>
+    {% endif %}
+  </div>
   <p class="hint">Only rules whose source or destination matches this client's VPN IP — for everything else (INPUT/SNAT/port-forward rules, or rules for other clients), see the full <a href="{{ url_for('main.firewall_rules') }}">Firewall Rules</a> page.</p>
-
-  <details class="collapsible">
-    <summary><h2>Add rule for {{ client.name }}</h2></summary>
-    {% if not client.ip %}
-    <p class="empty">{{ client.name }} has no static VPN IP yet (only assigned once it connects at least once) — rules can't be scoped to it until then. Use the full <a href="{{ url_for('main.firewall_rules') }}">Firewall Rules</a> page in the meantime.</p>
-    {% else %}
+  {% if not client.ip %}
+  <p class="empty">{{ client.name }} has no static VPN IP yet (only assigned once it connects at least once) — rules can't be scoped to it until then. Use the full <a href="{{ url_for('main.firewall_rules') }}">Firewall Rules</a> page in the meantime.</p>
+  {% else %}
+  <dialog id="add-client-rule-dialog" class="modal" onclick="closeDialogIfClickedOutside(event, this)">
+    <button type="button" class="modal-close-btn" onclick="document.getElementById('add-client-rule-dialog').close()" aria-label="Close">&times;</button>
+    <h2>Add rule for {{ client.name }}</h2>
     <form method="post" action="{{ url_for('main.client_add_rule', name=client.name) }}" class="inline-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <label>Source
@@ -89,10 +94,12 @@
       <label>Comment
         <input type="text" name="comment" placeholder="optional note">
       </label>
-      <button type="submit">Add rule</button>
+      <div class="btn-group">
+        <button type="submit">Add rule</button>
+      </div>
     </form>
-    {% endif %}
-  </details>
+  </dialog>
+  {% endif %}
 
   <div class="table-scroll">
   <table>

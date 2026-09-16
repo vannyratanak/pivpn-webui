@@ -9,54 +9,64 @@
 </div>
 
 {% if current_user.is_admin %}
-<section class="card">
-  <details class="collapsible" name="users-page-section">
-    <summary><h2>Add user</h2></summary>
-    <form method="post" action="{{ url_for('main.add_user') }}" class="inline-form">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <label><span class="label-text">Username<span class="required-star" aria-hidden="true">*</span></span>
-        <input type="text" name="username" required autocomplete="off">
-      </label>
-      <label><span class="label-text">Password<span class="required-star" aria-hidden="true">*</span></span>
-        <input type="password" name="password" required autocomplete="new-password">
-      </label>
-      <label><span class="label-text">Confirm<span class="required-star" aria-hidden="true">*</span></span>
-        <input type="password" name="confirm" required autocomplete="new-password">
-      </label>
-      <label>Role
-        <select name="role">
-          <option value="admin">Admin (full access)</option>
-          <option value="moderator">Moderator (clients + logs only)</option>
-        </select>
-      </label>
+<dialog id="add-user-dialog" class="modal" onclick="closeDialogIfClickedOutside(event, this)">
+  <button type="button" class="modal-close-btn" onclick="document.getElementById('add-user-dialog').close()" aria-label="Close">&times;</button>
+  <h2>Add user</h2>
+  <form method="post" action="{{ url_for('main.add_user') }}" class="inline-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label><span class="label-text">Username<span class="required-star" aria-hidden="true">*</span></span>
+      <input type="text" name="username" required autocomplete="off">
+    </label>
+    <label><span class="label-text">Password<span class="required-star" aria-hidden="true">*</span></span>
+      <input type="password" name="password" required autocomplete="new-password">
+    </label>
+    <label><span class="label-text">Confirm<span class="required-star" aria-hidden="true">*</span></span>
+      <input type="password" name="confirm" required autocomplete="new-password">
+    </label>
+    <label>Role
+      <select name="role">
+        <option value="admin">Admin (full access)</option>
+        <option value="moderator">Moderator (clients + logs only)</option>
+      </select>
+    </label>
+    <div class="btn-group">
       <button type="submit">Create user</button>
-    </form>
-  </details>
-</section>
+    </div>
+  </form>
+</dialog>
 {% endif %}
 
-<section class="card">
-  <details class="collapsible" name="users-page-section">
-    <summary><h2>Change your password</h2></summary>
-    <p class="hint">Changing your own password requires your current one — this is different from an admin resetting someone else's below, which doesn't.</p>
-    <form method="post" action="{{ url_for('main.change_own_password') }}" class="inline-form">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <label><span class="label-text">Current password<span class="required-star" aria-hidden="true">*</span></span>
-        <input type="password" name="current_password" required autocomplete="current-password">
-      </label>
-      <label><span class="label-text">New password<span class="required-star" aria-hidden="true">*</span></span>
-        <input type="password" name="password" required autocomplete="new-password">
-      </label>
-      <label><span class="label-text">Confirm<span class="required-star" aria-hidden="true">*</span></span>
-        <input type="password" name="confirm" required autocomplete="new-password">
-      </label>
+<dialog id="change-password-dialog" class="modal" onclick="closeDialogIfClickedOutside(event, this)">
+  <button type="button" class="modal-close-btn" onclick="document.getElementById('change-password-dialog').close()" aria-label="Close">&times;</button>
+  <h2>Change your password</h2>
+  <p class="hint">Changing your own password requires your current one — this is different from an admin resetting someone else's below, which doesn't.</p>
+  <form method="post" action="{{ url_for('main.change_own_password') }}" class="inline-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label><span class="label-text">Current password<span class="required-star" aria-hidden="true">*</span></span>
+      <input type="password" name="current_password" required autocomplete="current-password">
+    </label>
+    <label><span class="label-text">New password<span class="required-star" aria-hidden="true">*</span></span>
+      <input type="password" name="password" required autocomplete="new-password">
+    </label>
+    <label><span class="label-text">Confirm<span class="required-star" aria-hidden="true">*</span></span>
+      <input type="password" name="confirm" required autocomplete="new-password">
+    </label>
+    <div class="btn-group">
       <button type="submit">Change password</button>
-    </form>
-  </details>
-</section>
+    </div>
+  </form>
+</dialog>
 
 <section class="card">
-  <h2>Existing users</h2>
+  <div class="card-header-row">
+    <h2>Existing users</h2>
+    <div class="btn-group">
+      {% if current_user.is_admin %}
+      <button type="button" class="btn" onclick="document.getElementById('add-user-dialog').showModal()">Add user</button>
+      {% endif %}
+      <button type="button" class="btn" onclick="document.getElementById('change-password-dialog').showModal()">Change password</button>
+    </div>
+  </div>
 
   <div class="table-scroll">
   <table id="users-table">
