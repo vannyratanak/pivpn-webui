@@ -23,8 +23,24 @@ WEBUI_UNIT="pivpn-webui"
 # of how chatty traffic gets; -n stays on alongside it purely as a safety
 # cap against a truly pathological volume within that window, not as the
 # primary limit.
-SINCE="3 days ago"
-LINES=5000
+#
+# openvpn gets its own (smaller-for-now) window, split out from
+# webui/system below — vpnlog.py regex-parses every raw line of this one
+# (pairing connect/disconnect events), measured at ~1.5s for a real 7-day
+# volume (~13k lines) on this box, so widening it isn't free the way
+# webui/system's plain-text display is. Left at 3 days until that parsing
+# cost is addressed properly (see the project notes on moving Sessions to
+# DB-backed storage); bump SINCE_OPENVPN/LINES_OPENVPN directly if you want
+# more history sooner and can accept the added per-request parse time.
+SINCE_OPENVPN="3 days ago"
+LINES_OPENVPN=5000
+
+# webui/system are never regex-parsed — vpnlog.py just splits and reverses
+# the raw lines for display (verified: ~30k lines/week parses in ~0.02s on
+# this box) — so their window can be widened for free, independent of
+# openvpn's above.
+SINCE="7 days ago"
+LINES=60000
 
 # Flow-log rows (see deploy/setup-traffic-log.sh) are a different order of
 # magnitude from connect/disconnect events — one browsing session alone can
@@ -47,7 +63,7 @@ action="${1:-}"
 
 case "$action" in
   openvpn)
-    journalctl -u "$OPENVPN_UNIT" --since "$SINCE" -n "$LINES" --no-pager -o short-iso
+    journalctl -u "$OPENVPN_UNIT" --since "$SINCE_OPENVPN" -n "$LINES_OPENVPN" --no-pager -o short-iso
     ;;
   webui)
     journalctl -u "$WEBUI_UNIT" --since "$SINCE" -n "$LINES" --no-pager -o short-iso
