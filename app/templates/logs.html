@@ -116,7 +116,7 @@
     </thead>
     <tbody id="sessions-tbody">
       {% if not sessions %}
-      <tr><td colspan="5" class="empty">{{ 'No sessions match that search.' if q else 'No session events found — run deploy/setup-log-ingest.sh on this server if you haven\'t yet (see README), then allow a minute or two for the first backfill.' }}</td></tr>
+      <tr><td colspan="5" class="empty">{{ 'No sessions match that search.' if q else 'No session events found.' }}</td></tr>
       {% endif %}
       {% for e in sessions %}
       <tr>
@@ -159,7 +159,7 @@
     </thead>
     <tbody id="client-sessions-tbody">
       {% if not client_sessions %}
-      <tr><td colspan="5" class="empty">{{ 'No sessions match that search.' if q else 'No session events found — run deploy/setup-log-ingest.sh on this server if you haven\'t yet (see README), then allow a minute or two for the first backfill.' }}</td></tr>
+      <tr><td colspan="5" class="empty">{{ 'No sessions match that search.' if q else 'No session events found.' }}</td></tr>
       {% endif %}
       {% for s in client_sessions %}
       <tr>
@@ -211,7 +211,7 @@
     </thead>
     <tbody id="traffic-tbody">
       {% if not traffic_flows %}
-      <tr><td colspan="7" class="empty">{{ 'No flows match that search.' if q else "No traffic flow events found — either deploy/setup-traffic-log.sh hasn't been run on this server yet, or deploy/setup-log-ingest.sh hasn't (see README); allow a minute or two after both for the first backfill." }}</td></tr>
+      <tr><td colspan="7" class="empty">{{ 'No flows match that search.' if q else "No traffic flow events found." }}</td></tr>
       {% endif %}
       {% for f in traffic_flows %}
       <tr>
