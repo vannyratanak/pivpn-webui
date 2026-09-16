@@ -679,10 +679,26 @@ button:disabled:hover, .btn:disabled:hover { filter: none; }
 }
 
 .btn-form { display: inline; }
-/* Icon-only button (the Logs tabs' Refresh now) — .btn-sm's own padding
-   (0 8px) is meant for text labels and would leave a 14px icon sitting
-   off-center in a too-wide box; this makes it a plain square instead. */
-.btn-icon { width: 26px; padding: 0; flex-shrink: 0; }
+/* Icon-only button (the Logs tabs' Refresh now) — a plain 34px square
+   (matching the Range select's own height right next to it) instead of
+   a text button's padding, which would leave a 14px icon sitting off-
+   center in a too-wide box. Ghost-styled (no background/shadow) since
+   it sits beside the Range select as a secondary action, not the main
+   "submit" affordance the base button/.btn styling is for. */
+.btn-icon {
+  width: 34px;
+  padding: 0;
+  flex-shrink: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--muted);
+}
+.btn-icon:hover {
+  background: var(--panel-2);
+  filter: none;
+  box-shadow: none;
+  color: var(--text);
+}
 .btn-group { display: flex; align-items: center; gap: 10px; }
 .btn-group-stack { display: flex; flex-direction: column; align-items: stretch; gap: 10px; }
 .header-col { display: flex; flex-direction: column; gap: 10px; }
@@ -1138,27 +1154,18 @@ dialog.modal code {
   margin: 10px 0;
 }
 
-/* Logs page tabs (Sessions/Client Sessions/Traffic): the search form (with
-   its Range select) and the Refresh now icon button share one row, button
-   pushed to the far right — sits directly above the table it refreshes.
-   Both are real server-submitted <form>s (search/range reload with
-   ?q=...&range=..., Refresh now POSTs) — search_toolbar() in logs.html,
-   not client-side JS. Pagination itself (pagination_nav()) sits below the
-   table instead, same as every other paginated table in this app. */
+/* Logs page tabs (Sessions/Client Sessions/Traffic): the Range select and
+   Refresh now icon button sit right next to each other in one row, above
+   the table they filter/refresh — range_and_refresh() in logs.html. Both
+   are real server-submitted <form>s (range reloads with ?range=...,
+   Refresh now POSTs), not client-side JS. Pagination itself
+   (pagination_nav()) sits below the table instead, same as every other
+   paginated table in this app. */
 .table-toolbar {
   display: flex;
   align-items: center;
   gap: 10px;
-  justify-content: space-between;
   margin: 10px 0;
-}
-.table-toolbar .search-form {
-  display: flex;
-  gap: 8px;
-}
-.table-toolbar .log-filter-input {
-  flex: 0 0 240px;
-  margin: 0;
 }
 
 input[type="text"].filter-input-inline {
