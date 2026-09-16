@@ -94,7 +94,7 @@ addresses are blurred.
     here by accident, since both pages phrase their dialog the same way
     ("Import ... from file"). Instead of a generic "Unknown rule kind"
     error per line, it says so directly and points at the Clients page's
-    Import Client dialog instead.
+    Import Clients dialog instead.
 
 - **VPN Routes** page manages `push "route ..."` lines in `server.conf` —
   what destinations get routed into the tunnel at all for every client
