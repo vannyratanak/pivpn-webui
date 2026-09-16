@@ -73,11 +73,6 @@
     <p class="hint">Controls what's allowed through the FORWARD chain for {{ client.name }} — e.g. drop a destination, or explicitly accept traffic to a range. For INPUT/port-forward/SNAT rules, use the full <a href="{{ url_for('main.firewall_rules') }}">Firewall Rules</a> page instead.</p>
     <form method="post" action="{{ url_for('main.client_add_rule', name=client.name) }}" class="inline-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <label>Source
-        <select disabled aria-label="Source (fixed to this client)">
-          <option>{{ client.name }} ({{ client.ip }})</option>
-        </select>
-      </label>
       <label>Action
         <select name="action">
           <option value="ACCEPT">Forward (ACCEPT)</option>
@@ -89,6 +84,11 @@
           <option value="all">Any</option>
           <option value="tcp">tcp</option>
           <option value="udp">udp</option>
+        </select>
+      </label>
+      <label>Source
+        <select disabled aria-label="Source (fixed to this client)">
+          <option>{{ client.name }} ({{ client.ip }})</option>
         </select>
       </label>
       <label>Destination <span class="hint">(IP/CIDR, blank = any)</span>
