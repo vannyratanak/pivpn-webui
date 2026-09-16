@@ -202,6 +202,20 @@ _MIGRATIONS = {
 def init_db():
     conn = get_conn()
     try:
+        # WAL ("write-ahead log") mode: a write in progress (the log
+        # ingestion job, every 10s) no longer blocks a concurrent read (a
+        # page load), and vice versa — the default rollback-journal mode
+        # makes one wait for the other. This setting is sticky (persists
+        # in the database file itself), so setting it once here at
+        # startup is enough — every later connection from get_conn()/
+        # locked_transaction() picks it up automatically, no per-call
+        # pragma needed. synchronous=NORMAL is WAL mode's own recommended
+        # pairing (SQLite docs): still safe against an application crash,
+        # just not against the OS losing power at the exact wrong instant
+        # — a trade this app already makes elsewhere for a Pi-friendly
+        # footprint, not a new risk being introduced here.
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
         conn.executescript(SCHEMA)
         for table, columns in _MIGRATIONS.items():
             existing_cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}

@@ -7,7 +7,15 @@ Type=simple
 User=__USER__
 WorkingDirectory=__APP_DIR__
 EnvironmentFile=__APP_DIR__/.env
-ExecStart=__APP_DIR__/venv/bin/gunicorn -w 2 -b ${BIND_HOST}:${BIND_PORT} wsgi:app
+# --worker-class gthread --threads 4: this app is almost entirely
+# I/O-bound (subprocess calls to pivpn/iptables/journalctl, network calls
+# to WHOIS/the relay) — a thread waiting on one of those releases Python's
+# GIL, so a second thread in the same worker can pick up another request
+# in the meantime. Still 2 separate worker *processes* (-w 2, unchanged)
+# for the same crash/fault isolation as before — this adds concurrency
+# within each one (up to 8 requests in flight at once total, up from 2),
+# it doesn't consolidate anything into a single process.
+ExecStart=__APP_DIR__/venv/bin/gunicorn -w 2 --worker-class gthread --threads 4 -b ${BIND_HOST}:${BIND_PORT} wsgi:app
 Restart=on-failure
 RestartSec=5
 # Must stay false: this service calls `sudo` for the privileged operations
