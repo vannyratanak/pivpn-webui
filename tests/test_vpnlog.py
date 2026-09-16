@@ -353,6 +353,22 @@ def test_list_traffic_flows_looks_up_org_once_per_unique_destination(monkeypatch
     assert flows[1]["dst_org"] == "Meta Platforms Ireland Limited"
 
 
+def test_list_traffic_flows_handles_journalctl_no_entries_output(monkeypatch):
+    # Regression test: journalctl -g/--grep (used only by the "flow" log
+    # helper action) exits 1 — not 0 — when its pattern matches nothing,
+    # printing "-- No entries --" to stdout. deploy/pivpn-webui-log-helper.sh
+    # now tolerates that specific exit code (see its own comment) rather
+    # than letting `set -e` turn "no traffic in this window" into a raised
+    # PrivilegedCommandError — this is the Python-side half of that fix:
+    # run_root's returned text in that case is just this literal line, and
+    # it must parse as "no flows", not raise or produce a bogus row.
+    monkeypatch.setattr(pivpn_ctl, "list_client_ips", lambda: {})
+    monkeypatch.setattr(pivpn_ctl, "list_connected_clients", lambda: {})
+    monkeypatch.setattr(vpnlog, "run_root", lambda argv: "-- No entries --")
+
+    assert list_traffic_flows() == []
+
+
 def test_list_traffic_flows_leaves_uncached_destination_pending(monkeypatch):
     # The other half of the contract above: a destination get_cached_ip_orgs
     # doesn't return at all (never queried, never cached) must render as

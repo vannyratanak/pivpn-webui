@@ -56,7 +56,21 @@ case "$action" in
     journalctl --since "$SINCE" -n "$LINES" --no-pager -o short-iso
     ;;
   flow)
+    # journalctl -g/--grep exits 1 (not 0) when the pattern matches nothing
+    # — unlike every other action above, which just print an empty stream
+    # and exit 0 when there's nothing to show. Under `set -e` that turns
+    # "no traffic in this window" (completely normal — a quiet period
+    # longer than SINCE_FLOW, or before setup-traffic-log.sh's ever been
+    # run) into a hard script failure the web UI shows as a broken command
+    # instead of an empty Traffic tab. Exit 1 specifically is that benign
+    # case (its own "-- No entries --" line already gets silently skipped
+    # by the app's own line parser, same as any other unparseable line);
+    # anything else nonzero is a real problem and should still fail loudly.
+    set +e
     journalctl -k --since "$SINCE_FLOW" -n "$LINES_FLOW" --no-pager -o short-iso -g "$FLOW_LOG_PREFIX"
+    rc=$?
+    set -e
+    [[ $rc -eq 0 || $rc -eq 1 ]] || exit "$rc"
     ;;
   *)
     usage
