@@ -94,12 +94,16 @@ def _parse_openvpn_events() -> list[dict]:
     return db.list_vpn_events()
 
 
-def list_sessions(limit: int = 300) -> list[dict]:
+def list_sessions(
+    q: str | None = None, page: int = 1, page_size: int = 50
+) -> tuple[list[dict], int]:
     """Best-effort connect/disconnect events parsed from the OpenVPN
-    service journal, most recent first."""
-    events = _parse_openvpn_events()
-    events.reverse()
-    return events[:limit]
+    service journal, most recent first, server-side paginated and
+    searched over the full retained history. Returns (events,
+    total_matching_count). Flat event log, no pairing involved (unlike
+    list_client_sessions below), so this can go straight to a paginated
+    SQL query instead of reading everything into Python first."""
+    return db.list_vpn_events_page(q=q, page=page, page_size=page_size)
 
 
 def _format_duration(start: str, end: str) -> str | None:
@@ -203,10 +207,23 @@ def sort_client_sessions(sessions: list[dict]) -> None:
     sessions.sort(key=lambda s: not s["ongoing"])
 
 
-def list_client_sessions(limit: int = 300) -> list[dict]:
+def list_client_sessions(
+    q: str | None = None, page: int = 1, page_size: int = 50
+) -> tuple[list[dict], int]:
     """Per-client login sessions — each a paired connect+disconnect (or
-    still-open connect with no disconnect yet), most recent first. Answers
-    "how many sessions, when, how long" per client, as opposed to
+    still-open connect with no disconnect yet), most recent first,
+    searched and paginated over the full retained history. Returns
+    (sessions, total_matching_count).
+
+    Unlike list_sessions/list_traffic_flows, this can't push search/
+    pagination down into SQL: pairing a connect with its disconnect needs
+    to see the *whole* chronological event stream first (a session's two
+    halves can be far apart in the raw table), so search+pagination has to
+    apply to the already-paired result instead — real event volume here
+    (~13k/week observed live) is small enough that doing this in Python
+    each request is still fast.
+
+    Answers "how many sessions, when, how long" per client, as opposed to
     list_sessions' flat raw event log.
 
     A client reconnecting mid-window is handled by tracking one "currently
@@ -264,7 +281,20 @@ def list_client_sessions(limit: int = 300) -> list[dict]:
             "real_address": pending["real_address"],
         })
     sort_client_sessions(sessions)
-    return sessions[:limit]
+
+    if q:
+        needle = q.lower()
+        sessions = [
+            s for s in sessions
+            if needle in " ".join(
+                str(s.get(f) or "") for f in
+                ("client", "start", "end", "duration", "address", "status_note", "real_address")
+            ).lower()
+        ]
+
+    total = len(sessions)
+    start = (page - 1) * page_size
+    return sessions[start:start + page_size], total
 
 
 def _client_ip_map() -> dict[str, str]:
@@ -286,9 +316,14 @@ def _client_ip_map() -> dict[str, str]:
     return ip_to_name
 
 
-def list_traffic_flows(limit: int = 300) -> list[dict]:
+def list_traffic_flows(
+    q: str | None = None, page: int = 1, page_size: int = 50
+) -> tuple[list[dict], int]:
     """Per-flow, client-initiated connections (src client -> dst anywhere),
-    most recent first.
+    most recent first, server-side paginated and searched over the full
+    retained history (not just a fixed-size recent slice — see db.py's
+    list_traffic_flows for why this matters once retention holds a real
+    week of data). Returns (flows, total_matching_count).
 
     Reads from the traffic_flows table (populated periodically by
     deploy/ingest_logs.py, not on any request path) — client name and
@@ -305,8 +340,9 @@ def list_traffic_flows(limit: int = 300) -> list[dict]:
     mapping gone stale) is shown as a bare IP rather than dropped, and
     setup-traffic-log.sh never having been run at all just means an empty
     list, not an error."""
+    rows, total = db.list_traffic_flows(q=q, page=page, page_size=page_size)
     flows = []
-    for row in db.list_traffic_flows(limit):
+    for row in rows:
         flows.append({
             "ts": row["ts"],
             "client": row["client"] or row["src"],
@@ -319,7 +355,7 @@ def list_traffic_flows(limit: int = 300) -> list[dict]:
             "in_if": row["in_if"],
             "out_if": row["out_if"],
         })
-    return flows
+    return flows, total
 
 
 def list_webui_log(limit: int = 300) -> list[str]:

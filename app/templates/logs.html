@@ -1,6 +1,59 @@
 {% extends "base.html" %}
 {% block title %}Logs — PiVPN Web UI{% endblock %}
 {% block content %}
+
+{# Shared by the three DB-backed, server-paginated tabs (VPN Sessions,
+   Client Sessions, Traffic) — search box + Refresh now, then real page
+   navigation over the *full* retained history (not just a fixed-size
+   recent slice; see vpnlog.py's docstrings for why that distinction
+   matters once retention holds a real week of data). Not used by
+   System/Activity/User Auth — those stay on the older client-side
+   filter+paginate pattern (small, fixed-size lists, no separate DB-backed
+   history to page into). #}
+{% macro search_and_pagination(tab_name, label) %}
+  <div class="table-toolbar">
+    <form method="get" action="{{ url_for('main.logs') }}" class="search-form">
+      <input type="hidden" name="tab" value="{{ tab_name }}">
+      <input type="text" name="q" value="{{ q or '' }}" class="log-filter-input"
+             placeholder="Search…" aria-label="Search {{ label }}">
+      <button type="submit" class="btn btn-sm">Search</button>
+    </form>
+    <form method="post" action="{{ url_for('main.logs_refresh') }}" class="btn-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="tab" value="{{ tab_name }}">
+      <button type="submit" class="btn btn-sm btn-icon" title="Refresh now" aria-label="Refresh now">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+      </button>
+    </form>
+  </div>
+  <div class="pagination">
+    <form method="get" action="{{ url_for('main.logs') }}">
+      <input type="hidden" name="tab" value="{{ tab_name }}">
+      {% if q %}<input type="hidden" name="q" value="{{ q }}">{% endif %}
+      <label class="pagination-size">Show
+        <select name="page_size" onchange="this.form.submit()" aria-label="Rows per page">
+          {% for n in (10, 25, 50, 100) %}
+          <option value="{{ n }}" {{ 'selected' if page_size == n else '' }}>{{ n }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </form>
+    <div class="pagination-nav">
+      {% if page > 1 %}
+      <a class="btn btn-sm" href="{{ url_for('main.logs', tab=tab_name, q=q, page=page-1, page_size=page_size) }}">Prev</a>
+      {% else %}
+      <button type="button" class="btn btn-sm" disabled>Prev</button>
+      {% endif %}
+      <span class="hint" aria-live="polite">Page {{ page }} of {{ total_pages }} ({{ total }} total)</span>
+      {% if page < total_pages %}
+      <a class="btn btn-sm" href="{{ url_for('main.logs', tab=tab_name, q=q, page=page+1, page_size=page_size) }}">Next</a>
+      {% else %}
+      <button type="button" class="btn btn-sm" disabled>Next</button>
+      {% endif %}
+    </div>
+  </div>
+{% endmacro %}
+
 <h1>Logs</h1>
 
 <div class="tabs">
@@ -19,20 +72,9 @@
 {% if tab == 'sessions' %}
 <section class="card">
   <p class="hint">Client connect/disconnect events parsed from the OpenVPN service journal, most recent first (last 7 days). Parsing is best-effort — lines that don't match a known OpenVPN log format show up with event "other" and the raw message in Detail.</p>
-  <div class="table-toolbar">
-    {% if sessions %}
-    <input type="text" id="sessions-filter" class="log-filter-input" placeholder="Search…" aria-label="Search VPN sessions">
-    {% endif %}
-    <form method="post" action="{{ url_for('main.logs_refresh') }}" class="btn-form">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <input type="hidden" name="tab" value="sessions">
-      <button type="submit" class="btn btn-sm btn-icon" title="Refresh now" aria-label="Refresh now">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
-      </button>
-    </form>
-  </div>
+  {{ search_and_pagination('sessions', 'VPN sessions') }}
   {% if not sessions %}
-    <p class="empty">No session events found — run deploy/setup-log-ingest.sh on this server if you haven't yet (see README), then allow a minute or two for the first backfill.</p>
+    <p class="empty">{{ 'No sessions match that search.' if q else 'No session events found — run deploy/setup-log-ingest.sh on this server if you haven\'t yet (see README), then allow a minute or two for the first backfill.' }}</p>
   {% else %}
   <div class="table-scroll">
   <table id="sessions-table">
@@ -66,7 +108,6 @@
     </tbody>
   </table>
   </div>
-  <script>attachLogFilter('sessions-filter', '#sessions-tbody', 'tr', '#sessions-table thead th');</script>
   {% endif %}
 </section>
 {% endif %}
@@ -74,20 +115,9 @@
 {% if tab == 'client_sessions' %}
 <section class="card">
   <p class="hint">Each client's login sessions — when, how long, and how many — paired from the same connect/disconnect journal events as VPN Sessions. A session still in progress shows as "ongoing" with no end time or duration yet.</p>
-  <div class="table-toolbar">
-    {% if client_sessions %}
-    <input type="text" id="client-sessions-filter" class="log-filter-input" placeholder="Search…" aria-label="Search client sessions">
-    {% endif %}
-    <form method="post" action="{{ url_for('main.logs_refresh') }}" class="btn-form">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <input type="hidden" name="tab" value="client_sessions">
-      <button type="submit" class="btn btn-sm btn-icon" title="Refresh now" aria-label="Refresh now">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
-      </button>
-    </form>
-  </div>
+  {{ search_and_pagination('client_sessions', 'client sessions') }}
   {% if not client_sessions %}
-    <p class="empty">No session events found — run deploy/setup-log-ingest.sh on this server if you haven't yet (see README), then allow a minute or two for the first backfill.</p>
+    <p class="empty">{{ 'No sessions match that search.' if q else 'No session events found — run deploy/setup-log-ingest.sh on this server if you haven\'t yet (see README), then allow a minute or two for the first backfill.' }}</p>
   {% else %}
   <div class="table-scroll">
   <table id="client-sessions-table">
@@ -128,46 +158,16 @@
     </tbody>
   </table>
   </div>
-  <div class="pagination" id="client-sessions-pagination">
-    <label class="pagination-size">Show
-      <select id="client-sessions-page-size">
-        <option value="10" selected>10</option>
-        <option value="25">25</option>
-        <option value="50">50</option>
-        <option value="100">100</option>
-      </select>
-    </label>
-    <div class="pagination-nav">
-      <button type="button" class="btn btn-sm" data-page-prev>Prev</button>
-      <span data-page-status class="hint"></span>
-      <button type="button" class="btn btn-sm" data-page-next>Next</button>
-    </div>
-  </div>
-  <script>
-    const clientSessionsPager = attachPagination('#client-sessions-tbody', 'tr', 'client-sessions-page-size', 'client-sessions-pagination');
-    attachLogFilter('client-sessions-filter', '#client-sessions-tbody', 'tr', '#client-sessions-table thead th', () => clientSessionsPager && clientSessionsPager.refresh());
-  </script>
   {% endif %}
 </section>
 {% endif %}
 
 {% if tab == 'traffic' %}
 <section class="card">
-  <p class="hint">Which client talked to which destination and when — one row per new connection (not every packet), parsed from the kernel's netfilter log (last 7 days, showing the most recent 300). Requires deploy/setup-traffic-log.sh to have been run on this server; new flows can take up to ~10 seconds to appear (ingested periodically in the background, not fetched live on page load) — or use Refresh for less than that.</p>
-  <div class="table-toolbar">
-    {% if traffic_flows %}
-    <input type="text" id="traffic-filter" class="log-filter-input" placeholder="Search…" aria-label="Search traffic flows">
-    {% endif %}
-    <form method="post" action="{{ url_for('main.logs_refresh') }}" class="btn-form">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <input type="hidden" name="tab" value="traffic">
-      <button type="submit" class="btn btn-sm btn-icon" title="Refresh now" aria-label="Refresh now">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
-      </button>
-    </form>
-  </div>
+  <p class="hint">Which client talked to which destination and when — one row per new connection (not every packet), parsed from the kernel's netfilter log (last 7 days, searchable and paginated below). Requires deploy/setup-traffic-log.sh to have been run on this server; new flows can take up to ~10 seconds to appear (ingested periodically in the background, not fetched live on page load) — or use Refresh for less than that.</p>
+  {{ search_and_pagination('traffic', 'traffic flows') }}
   {% if not traffic_flows %}
-    <p class="empty">No traffic flow events found — either deploy/setup-traffic-log.sh hasn't been run on this server yet, or deploy/setup-log-ingest.sh hasn't (see README); allow a minute or two after both for the first backfill.</p>
+    <p class="empty">{{ 'No flows match that search.' if q else "No traffic flow events found — either deploy/setup-traffic-log.sh hasn't been run on this server yet, or deploy/setup-log-ingest.sh hasn't (see README); allow a minute or two after both for the first backfill." }}</p>
   {% else %}
   <div class="table-scroll">
   <table id="traffic-table">
@@ -197,25 +197,6 @@
     </tbody>
   </table>
   </div>
-  <div class="pagination" id="traffic-pagination">
-    <label class="pagination-size">Show
-      <select id="traffic-page-size">
-        <option value="10" selected>10</option>
-        <option value="25">25</option>
-        <option value="50">50</option>
-        <option value="100">100</option>
-      </select>
-    </label>
-    <div class="pagination-nav">
-      <button type="button" class="btn btn-sm" data-page-prev>Prev</button>
-      <span data-page-status class="hint"></span>
-      <button type="button" class="btn btn-sm" data-page-next>Next</button>
-    </div>
-  </div>
-  <script>
-    const trafficPager = attachPagination('#traffic-tbody', 'tr', 'traffic-page-size', 'traffic-pagination');
-    attachLogFilter('traffic-filter', '#traffic-tbody', 'tr', '#traffic-table thead th', () => trafficPager && trafficPager.refresh());
-  </script>
   {% endif %}
 </section>
 {% endif %}

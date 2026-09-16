@@ -1,3 +1,4 @@
+import math
 import sqlite3
 
 from flask import Blueprint, abort, flash, jsonify, redirect, render_template, request, send_file, session, url_for
@@ -773,15 +774,35 @@ def logs():
 
     sessions = client_sessions = webui_log = system_log = auth_entries = activity_entries = None
     traffic_flows = None
+    # Shared by the three DB-backed tabs below (Sessions/Client Sessions/
+    # Traffic) — real server-side search + pagination over the *full*
+    # retained history (up to 7 days), not just a fixed-size recent slice.
+    # See vpnlog.py's list_sessions/list_client_sessions/list_traffic_flows
+    # for why "just raise the old limit=300" wasn't the right fix: at real
+    # traffic volume, even a few hundred rows can be just the last few
+    # minutes.
+    q = (request.args.get("q") or "").strip() or None
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except ValueError:
+        page = 1
+    try:
+        page_size = int(request.args.get("page_size", 50))
+    except ValueError:
+        page_size = 50
+    if page_size not in (10, 25, 50, 100):
+        page_size = 50
+    total = 0
+
     if tab == "sessions":
         try:
-            sessions = vpnlog.list_sessions()
+            sessions, total = vpnlog.list_sessions(q=q, page=page, page_size=page_size)
         except PrivilegedCommandError as exc:
             sessions = []
             flash(str(exc), "error")
     elif tab == "client_sessions":
         try:
-            client_sessions = vpnlog.list_client_sessions()
+            client_sessions, total = vpnlog.list_client_sessions(q=q, page=page, page_size=page_size)
             # "ongoing" only means "no disconnect event matched our known log
             # patterns" (see DISCONNECT_RE's SIGTERM-only match in vpnlog.py)
             # — a session that ended via timeout/ping-restart/unclean drop
@@ -808,7 +829,7 @@ def logs():
             flash(str(exc), "error")
     elif tab == "traffic":
         try:
-            traffic_flows = vpnlog.list_traffic_flows()
+            traffic_flows, total = vpnlog.list_traffic_flows(q=q, page=page, page_size=page_size)
         except PrivilegedCommandError as exc:
             traffic_flows = []
             flash(str(exc), "error")
@@ -832,10 +853,14 @@ def logs():
     else:
         auth_entries = db.list_audit_by_actions(AUTH_ACTIONS)
 
+    total_pages = max(1, math.ceil(total / page_size))
+    page = min(page, total_pages)
+
     return render_template(
         "logs.html", tab=tab, sessions=sessions, client_sessions=client_sessions,
         traffic_flows=traffic_flows, webui_log=webui_log, system_log=system_log,
         auth_entries=auth_entries, activity_entries=activity_entries,
+        q=q, page=page, page_size=page_size, total=total, total_pages=total_pages,
     )
 
 

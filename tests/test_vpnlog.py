@@ -127,7 +127,7 @@ def test_ongoing_session_sorts_above_more_recent_ended_ones(temp_db):
         _connected("2026-08-21 15:50:00", "test", "10.66.66.1:2"),
         _disconnected("2026-08-21 15:50:10", "test", "10.66.66.1:2"),
     ])
-    sessions = list_client_sessions()
+    sessions, _total = list_client_sessions()
     assert [s["client"] for s in sessions] == ["old", "test"]
     assert sessions[0]["ongoing"] is True
     assert sessions[1]["ongoing"] is False
@@ -138,7 +138,7 @@ def test_multiple_ongoing_still_sorted_by_recency_among_themselves(temp_db):
         _connected("2026-08-21 10:00:00", "early-bird", "10.66.66.1:1"),
         _connected("2026-08-21 14:00:00", "late-riser", "10.66.66.1:2"),
     ])
-    sessions = list_client_sessions()
+    sessions, _total = list_client_sessions()
     assert [s["client"] for s in sessions] == ["late-riser", "early-bird"]
     assert all(s["ongoing"] for s in sessions)
 
@@ -156,7 +156,7 @@ def test_reconnect_without_matching_disconnect_does_not_lose_the_earlier_session
         _connected("2026-08-21 09:30:00", "nurak", "10.66.66.1:2"),
         _disconnected("2026-08-21 10:00:00", "nurak", "10.66.66.1:2"),
     ])
-    sessions = list_client_sessions()
+    sessions, _total = list_client_sessions()
     assert len(sessions) == 2  # both the orphaned first session and the paired second one
     starts = {s["start"] for s in sessions}
     assert "2026-08-21 09:00:00" in starts  # the first session is still present, not lost
@@ -178,7 +178,7 @@ def test_real_address_carries_through_from_the_connected_event(temp_db):
         _disconnected("2026-08-21 10:00:00", "nurak", "10.66.66.1:2"),
         _connected("2026-08-21 11:00:00", "mobile", "10.66.66.1:3", real_address="9.9.9.9:7"),
     ])
-    sessions = list_client_sessions()
+    sessions, _total = list_client_sessions()
 
     stale = next(s for s in sessions if s.get("status_note") == "Ended (exact time unknown)")
     assert stale["real_address"] == "1.2.3.4:5"
@@ -381,8 +381,9 @@ def test_list_traffic_flows_reads_most_recent_first(temp_db):
                    dst_org="Meta Platforms Ireland Limited"),
     ])
 
-    flows = list_traffic_flows()
+    flows, total = list_traffic_flows()
 
+    assert total == 2
     assert len(flows) == 2
     # most recent first
     assert flows[0]["dst"] == "149.112.112.112"
@@ -392,12 +393,31 @@ def test_list_traffic_flows_reads_most_recent_first(temp_db):
     assert flows[1]["dport"] == "443"
 
 
-def test_list_traffic_flows_respects_limit(temp_db):
+def test_list_traffic_flows_paginates_over_the_full_history(temp_db):
+    # Real regression test for "why only 300 rows" — page_size caps what's
+    # shown per page, but `total` must reflect everything that matches, so
+    # a caller can page all the way through instead of hitting a wall.
     db.insert_traffic_flows([
         _flow_row(f"2026-09-16 10:00:{i:02d}", "10.202.226.2", "1.1.1.1")
         for i in range(5)
     ])
-    assert len(list_traffic_flows(limit=2)) == 2
+    flows, total = list_traffic_flows(page=1, page_size=2)
+    assert total == 5
+    assert len(flows) == 2
+
+    flows_p3, total_p3 = list_traffic_flows(page=3, page_size=2)
+    assert total_p3 == 5
+    assert len(flows_p3) == 1  # last page, partial
+
+
+def test_list_traffic_flows_search_matches_across_full_history_not_just_one_page(temp_db):
+    db.insert_traffic_flows([
+        _flow_row("2026-09-16 10:00:00", "10.202.226.2", "1.1.1.1", client="mobile"),
+        _flow_row("2026-09-16 10:00:05", "10.202.226.77", "149.112.112.112", client="laptop"),
+    ])
+    flows, total = list_traffic_flows(q="laptop")
+    assert total == 1
+    assert flows[0]["client"] == "laptop"
 
 
 def test_client_ip_map_prefers_live_over_static(monkeypatch):

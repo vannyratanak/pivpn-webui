@@ -119,7 +119,8 @@ def test_ingest_traffic_flows_resolves_client_and_org(temp_db, monkeypatch):
     count = ingest_logs.ingest_traffic_flows()
 
     assert count == 1
-    rows = db.list_traffic_flows()
+    rows, total = db.list_traffic_flows()
+    assert total == 1
     assert len(rows) == 1
     assert rows[0]["client"] == "mobile"
     assert rows[0]["dst_org"] == "Meta Platforms Ireland Limited"
@@ -138,7 +139,7 @@ def test_ingest_traffic_flows_handles_journalctl_no_entries_output(temp_db, monk
     monkeypatch.setattr(ingest_logs, "run_root", lambda argv, timeout=None: "-- No entries --")
 
     assert ingest_logs.ingest_traffic_flows() == 0
-    assert db.list_traffic_flows() == []
+    assert db.list_traffic_flows() == ([], 0)
 
 
 def test_ingest_traffic_flows_looks_up_org_once_per_unique_destination(temp_db, monkeypatch):

@@ -582,6 +582,48 @@ def insert_vpn_events(rows: list[tuple[str, str, str, str, str, str | None]]):
         conn.close()
 
 
+def _escape_like(s: str) -> str:
+    """Escapes SQL LIKE's own wildcard characters in a *user-supplied*
+    search term, so e.g. a client name containing a literal underscore
+    (a valid character per pivpn_ctl.CLIENT_NAME_RE) doesn't get
+    interpreted as LIKE's own single-character wildcard. Paired with
+    ESCAPE '\\' at every call site below."""
+    return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def list_vpn_events_page(
+    q: str | None = None, page: int = 1, page_size: int = 50
+) -> tuple[list[dict], int]:
+    """Most recent first, server-side paginated and searched — for the
+    flat VPN Sessions tab (app/vpnlog.py's list_sessions). Returns (rows,
+    total_matching_count) so the caller can render real page numbers
+    instead of guessing from just one page's worth of rows.
+
+    `q`, if given, matches as a case-insensitive substring against any of
+    the columns actually shown in that tab (event/client/address/detail)
+    — same "any column" search the old client-side filter used to do."""
+    conn = get_conn()
+    try:
+        where_sql = ""
+        params: list = []
+        if q:
+            like = f"%{_escape_like(q)}%"
+            where_sql = (
+                "WHERE (event LIKE ? ESCAPE '\\' OR client LIKE ? ESCAPE '\\' "
+                "OR address LIKE ? ESCAPE '\\' OR detail LIKE ? ESCAPE '\\')"
+            )
+            params = [like, like, like, like]
+        total = conn.execute(f"SELECT COUNT(*) FROM vpn_events {where_sql}", params).fetchone()[0]
+        rows = conn.execute(
+            f"SELECT ts, event, client, address, detail, real_address FROM vpn_events "
+            f"{where_sql} ORDER BY ts DESC, id DESC LIMIT ? OFFSET ?",
+            [*params, page_size, (page - 1) * page_size],
+        ).fetchall()
+        return [dict(r) for r in rows], total
+    finally:
+        conn.close()
+
+
 def list_vpn_events(limit: int = 50000) -> list[dict]:
     """Oldest first — matches what app/vpnlog.py's pairing logic expects
     (it walks events in the order they actually happened), same contract
@@ -622,18 +664,30 @@ def insert_traffic_flows(rows: list[tuple]):
         conn.close()
 
 
-def list_traffic_flows(limit: int = 300) -> list[dict]:
-    """Most recent first — this is a display list, unlike list_vpn_events
-    above (which feeds a pairing algorithm that wants chronological
-    order)."""
+def list_traffic_flows(q: str | None = None, page: int = 1, page_size: int = 50) -> tuple[list[dict], int]:
+    """Most recent first, server-side paginated and searched — this is a
+    display list, unlike list_vpn_events above (which feeds a pairing
+    algorithm that wants chronological order). Returns (rows,
+    total_matching_count); see list_vpn_events_page's docstring for why."""
     conn = get_conn()
     try:
+        where_sql = ""
+        params: list = []
+        if q:
+            like = f"%{_escape_like(q)}%"
+            where_sql = (
+                "WHERE (client LIKE ? ESCAPE '\\' OR src LIKE ? ESCAPE '\\' "
+                "OR dst LIKE ? ESCAPE '\\' OR dst_org LIKE ? ESCAPE '\\' "
+                "OR proto LIKE ? ESCAPE '\\' OR dport LIKE ? ESCAPE '\\')"
+            )
+            params = [like, like, like, like, like, like]
+        total = conn.execute(f"SELECT COUNT(*) FROM traffic_flows {where_sql}", params).fetchone()[0]
         rows = conn.execute(
-            "SELECT ts, src, dst, dst_org, client, proto, sport, dport, in_if, out_if "
-            "FROM traffic_flows ORDER BY ts DESC, id DESC LIMIT ?",
-            (limit,),
+            f"SELECT ts, src, dst, dst_org, client, proto, sport, dport, in_if, out_if "
+            f"FROM traffic_flows {where_sql} ORDER BY ts DESC, id DESC LIMIT ? OFFSET ?",
+            [*params, page_size, (page - 1) * page_size],
         ).fetchall()
-        return [dict(r) for r in rows]
+        return [dict(r) for r in rows], total
     finally:
         conn.close()
 

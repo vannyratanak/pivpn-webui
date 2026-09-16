@@ -480,6 +480,70 @@ def test_client_sessions_relabeled_ended_session_resorts_below_more_recent_ones(
     assert body.index("recentclient") < body.index("staleclient")
 
 
+def test_traffic_tab_search_matches_across_full_history(client, monkeypatch):
+    db.insert_traffic_flows([
+        ("2026-09-16 10:00:00", "10.202.226.2", "1.1.1.1", None, "mobile",
+         "TCP", "1234", "443", "tun0", "ens18"),
+        ("2026-09-16 10:00:05", "10.202.226.3", "2.2.2.2", None, "laptop",
+         "TCP", "1235", "443", "tun0", "ens18"),
+    ])
+    _login_admin(client)
+    resp = client.get("/logs?tab=traffic&q=laptop")
+    assert resp.status_code == 200
+    assert b"laptop" in resp.data
+    assert b"mobile" not in resp.data
+    assert b"1 total" in resp.data
+
+
+def test_traffic_tab_pagination_reaches_rows_past_the_old_300_cap(client, monkeypatch):
+    # The actual regression this exists for: with the old fixed limit=300,
+    # anything past the 300th-most-recent row was simply unreachable from
+    # the UI, no matter what. Seeds 21 rows at page_size=10 (a real,
+    # supported option) to prove page 3 reaches the oldest, distinct row
+    # in a genuine partial last page -- real pagination, not just "shows
+    # some rows".
+    db.insert_traffic_flows([
+        (f"2026-09-16 10:{i:02d}:00", "10.202.226.2", "1.1.1.1", None, f"client{i}",
+         "TCP", "1234", "443", "tun0", "ens18")
+        for i in range(21)
+    ])
+    _login_admin(client)
+    resp = client.get("/logs?tab=traffic&page=3&page_size=10")
+    assert resp.status_code == 200
+    body = resp.data.decode()
+    assert "client0" in body  # most recent first -> last (partial) page has the oldest
+    assert "client1<" not in body  # client1..client9 belong on earlier pages
+    assert "Page 3 of 3" in body
+
+
+def test_sessions_tab_pagination_and_search(client, monkeypatch):
+    db.insert_vpn_events([
+        ("2026-09-16 10:00:00", "connected", "mobile", "10.66.66.1:1", "", None),
+        ("2026-09-16 10:00:05", "connected", "laptop", "10.66.66.1:2", "", None),
+    ])
+    _login_admin(client)
+    resp = client.get("/logs?tab=sessions&q=laptop")
+    assert resp.status_code == 200
+    assert b"laptop" in resp.data
+    assert b"mobile" not in resp.data
+
+
+def test_client_sessions_tab_search(client, monkeypatch):
+    db.insert_vpn_events([
+        ("2026-09-16 10:00:00", "connected", "mobile", "10.66.66.1:1", "", None),
+        ("2026-09-16 10:00:05", "connected", "laptop", "10.66.66.1:2", "", None),
+    ])
+    monkeypatch.setattr(
+        "app.routes.pivpn_ctl.list_connected_clients",
+        lambda: {"mobile": {}, "laptop": {}},
+    )
+    _login_admin(client)
+    resp = client.get("/logs?tab=client_sessions&q=laptop")
+    assert resp.status_code == 200
+    assert b"laptop" in resp.data
+    assert b"mobile" not in resp.data
+
+
 def test_logs_refresh_requires_login(client):
     resp = client.post("/logs/refresh", data={"tab": "client_sessions"})
     assert resp.status_code == 302

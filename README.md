@@ -499,6 +499,60 @@ aren't part of the CD forced command; reinstall them by hand
 (`sudo install ...` + `sudo systemctl daemon-reload`) if you ever change
 those specifically.
 
+## Database concurrency and gunicorn workers
+
+Two small changes, made together since they both target the same
+question — "does this hold up once traffic grows a lot?":
+
+- **SQLite runs in WAL mode** (`PRAGMA journal_mode=WAL` +
+  `synchronous=NORMAL`, both set once in `db.init_db()` — WAL is sticky,
+  persisted in the database file itself, so every later connection picks
+  it up automatically). Without this, a write in progress (the ingestion
+  job, every 10s) can make a concurrent page read wait its turn, and vice
+  versa — the default rollback-journal mode takes turns instead of
+  allowing both at once.
+- **gunicorn runs threaded workers**: `-w 2 --worker-class gthread
+  --threads 4` (was `-w 2` alone) in `pivpn-webui.service.template` — still
+  2 separate worker *processes* (same crash/fault isolation as before),
+  each one now able to juggle several in-flight requests via threads
+  instead of blocking on one at a time. This app is almost entirely
+  I/O-bound (`pivpn`, `iptables`, `journalctl`, WHOIS, SSH to the relay all
+  release Python's GIL while waiting), which is exactly the case threads
+  help with.
+
+**Real numbers, not estimates** — measured live against an isolated
+throwaway database on a real install (never the production DB; deleted
+after), simulating a steady-state, heavily-loaded scenario (100 clients,
+~4,880 flow rows/hour each, 7-day retention → ~4.88M rows):
+
+| Operation | Time |
+|---|---|
+| Insert one ingestion tick's worth of new rows (1,355) into the full 4.88M-row table | 0.042s |
+| Read query the Traffic tab actually runs (`ORDER BY ts DESC LIMIT 300`) | 0.024s |
+| Prune a large catch-up batch (360,000 rows crossing the 7-day boundary at once) | 7.1s |
+| Database file size at 4.88M rows | 1,019 MB (219 bytes/row, measured) |
+
+The prune number needs a caveat: that's a big one-time catch-up delete,
+not the steady-state case — in normal operation, pruning runs every tick
+and only removes whatever just crossed the 7-day mark *that tick*
+(comparable in size to one tick's insert, so it should be fast like the
+insert number above, not the catch-up number). The catch-up case only
+shows up after real downtime (ingestion stopped for a while, then resumes
+and has a backlog to prune).
+
+Also checked live, while that same test was bulk-loading data (real CPU/
+memory/disk-wait numbers, not assumptions): CPU-wait-on-disk (`wa` in
+`top`) stayed at 0.0% throughout — for this workload, disk I/O was never
+the bottleneck; the test script's own CPU-bound Python row generation was.
+Real ingestion does far less per-row Python work than that synthetic
+generator, so actual production load should sit comfortably below it.
+
+**Disk space, not database performance, is the real scaling question.**
+At the same ~4.88M-rows/10-hours scenario sustained daily with 7-day
+retention: ~34M rows × 219 bytes/row ≈ **~7.5GB**. Check free disk before
+assuming this is fine at your real client count and usage pattern — this
+isn't something the app can safely assume for you.
+
 ## CD: deploying code changes to a running server
 
 This repo is public and its `Deploy` workflow runs on a **self-hosted**
