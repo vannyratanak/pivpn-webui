@@ -12,14 +12,25 @@
 // screen.
 function fitTableScrollHeights() {
   document.querySelectorAll('.table-scroll').forEach((el) => {
-    // Clear first so getBoundingClientRect().top reflects natural position
-    // — otherwise a previous run's own max-height would shrink-then-measure
-    // against itself, ratcheting smaller on every resize instead of
-    // re-measuring fresh each time.
+    // Clear first so getBoundingClientRect() reflects natural position/
+    // size — otherwise a previous run's own max-height would shrink-then-
+    // measure against itself, ratcheting smaller on every resize instead
+    // of re-measuring fresh each time.
     el.style.maxHeight = '';
-    const top = el.getBoundingClientRect().top;
-    const bottomBuffer = 24; // card's own bottom padding/border, roughly
-    const available = window.innerHeight - top - bottomBuffer;
+    const rect = el.getBoundingClientRect();
+    // Whatever sits after this element but still inside the same card
+    // (pagination's Prev/Next row, the card's own bottom padding/border)
+    // has to stay on screen too — a flat guessed number here previously
+    // ignored pagination's real height entirely, letting the table claim
+    // space that pagination actually needed, so the page overflowed by
+    // roughly however tall that row was. Measuring the card's own natural
+    // bottom edge against this element's natural bottom edge gets the
+    // exact figure regardless of what a given page's card has after its
+    // table (or doesn't).
+    const card = el.closest('.card');
+    const spaceBelowWithinCard = card ? card.getBoundingClientRect().bottom - rect.bottom : 0;
+    const pageBottomMargin = 24; // .content's own bottom padding, roughly
+    const available = window.innerHeight - rect.top - spaceBelowWithinCard - pageBottomMargin;
     // A page whose own fixed chrome (title, hint text, dialogs' triggers,
     // etc.) already eats most of a short viewport can push `available`
     // to near zero or negative — clamp to a small floor so the table
