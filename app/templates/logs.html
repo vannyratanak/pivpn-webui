@@ -5,13 +5,17 @@
 {# Shared by the five DB-backed, server-paginated tabs (VPN Sessions,
    Client Sessions, Traffic, Activity, User Auth). search_box sits in the
    page-header-row up top (matching every other page's search box);
-   range_and_refresh/range_only stay in the tab's own card, above its
-   table. Split into separate forms/macros so each carries the others'
-   current value as a hidden field — moving the search box up shouldn't
-   mean losing the selected range (or vice versa) when any one of them
-   submits on its own. Not used by System, which stays on the older
-   client-side filter pattern (a raw journalctl text dump, not a table —
-   no separate DB-backed history to page into at all). #}
+   range_and_refresh stays in the tab's own card, above its table. Split
+   into separate forms/macros so each carries the others' current value
+   as a hidden field — moving the search box up shouldn't mean losing
+   the selected range (or vice versa) when any one of them submits on
+   its own. Activity/User Auth's own Refresh now is a bit of a fiction
+   (they read audit_log directly, no ingestion lag to actually catch up
+   on) but kept for visual consistency across all five tabs; it's still
+   a real reload, just one that was never stale. Not used by System,
+   which stays on the older client-side filter pattern (a raw journalctl
+   text dump, not a table — no separate DB-backed history to page into
+   at all). #}
 {% macro search_box(tab_name, label) %}
   <form method="get" action="{{ url_for('main.logs') }}" class="search-form">
     <input type="hidden" name="tab" value="{{ tab_name }}">
@@ -40,26 +44,6 @@
       <button type="submit" class="btn btn-icon" title="Refresh now" aria-label="Refresh now">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
       </button>
-    </form>
-  </div>
-{% endmacro %}
-
-{# Activity/User Auth read audit_log directly on every request (no
-   separate periodic-ingest step the way Sessions/Client Sessions/Traffic
-   do), so there's no ingestion lag for a "Refresh now" button to ever
-   catch up on — just the Range select, no refresh form. #}
-{% macro range_only(tab_name) %}
-  <div class="table-toolbar">
-    <form method="get" action="{{ url_for('main.logs') }}">
-      <input type="hidden" name="tab" value="{{ tab_name }}">
-      {% if q %}<input type="hidden" name="q" value="{{ q }}">{% endif %}
-      <span class="pagination-size log-range-filter">
-        <select name="range" onchange="this.form.submit()" aria-label="Time range">
-          {% for key, opt_label in log_range_options %}
-          <option value="{{ key }}" {{ 'selected' if log_range == key else '' }}>{{ opt_label }}</option>
-          {% endfor %}
-        </select>
-      </span>
     </form>
   </div>
 {% endmacro %}
@@ -276,7 +260,7 @@
 {% if tab == 'activity' %}
 <section class="card">
   <p class="hint">Every audited action — firewall changes, client management, user management — not just login/logout (see User Auth for that), most recent first.</p>
-  {{ range_only('activity') }}
+  {{ range_and_refresh('activity') }}
   <div class="table-scroll">
   <table id="activity-table">
     <thead>
@@ -313,7 +297,7 @@
 {% if tab == 'auth' %}
 <section class="card">
   <p class="hint">Login and logout events for every account, most recent first.</p>
-  {{ range_only('auth') }}
+  {{ range_and_refresh('auth') }}
   <div class="table-scroll">
   <table id="auth-table">
     <thead>
