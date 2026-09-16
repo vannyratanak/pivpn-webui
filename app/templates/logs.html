@@ -16,13 +16,13 @@
       <input type="hidden" name="tab" value="{{ tab_name }}">
       <input type="text" name="q" value="{{ q or '' }}" class="log-filter-input"
              placeholder="Search…" aria-label="Search {{ label }}">
-      <label class="pagination-size log-range-filter">Range
+      <span class="pagination-size log-range-filter">
         <select name="range" onchange="this.form.submit()" aria-label="Time range">
           {% for key, opt_label in log_range_options %}
           <option value="{{ key }}" {{ 'selected' if log_range == key else '' }}>{{ opt_label }}</option>
           {% endfor %}
         </select>
-      </label>
+      </span>
     </form>
     <form method="post" action="{{ url_for('main.logs_refresh') }}" class="btn-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
