@@ -466,9 +466,28 @@
   </table>
   </div>
   {% if rules %}
+  <div class="pagination" id="rules-pagination">
+    <label class="pagination-size">Show
+      <select id="rules-page-size">
+        <option value="10" selected>10</option>
+        <option value="25">25</option>
+        <option value="50">50</option>
+        <option value="100">100</option>
+      </select>
+    </label>
+    <div class="pagination-nav">
+      <button type="button" class="btn btn-sm" data-page-prev>Prev</button>
+      <span data-page-status class="hint"></span>
+      <button type="button" class="btn btn-sm" data-page-next>Next</button>
+    </div>
+  </div>
   <script>
-    const rulesClientFilter = attachSelectFilter('rules-client-filter', '#rules-tbody', 'tr');
-    attachLogFilter('rules-filter', '#rules-tbody', 'tr', '#rules-table thead th:not(:first-child):not(:last-child)', () => rulesClientFilter && rulesClientFilter.refresh());
+    const rulesPager = attachPagination('#rules-tbody', 'tr', 'rules-page-size', 'rules-pagination');
+    const rulesClientFilter = attachSelectFilter('rules-client-filter', '#rules-tbody', 'tr', () => rulesPager && rulesPager.refresh());
+    attachLogFilter('rules-filter', '#rules-tbody', 'tr', '#rules-table thead th:not(:first-child):not(:last-child)', () => {
+      rulesClientFilter && rulesClientFilter.refresh();
+      rulesPager && rulesPager.refresh();
+    });
     attachFirewallReorder('#rules-tbody');
 
     (function() {

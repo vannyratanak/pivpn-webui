@@ -17,6 +17,18 @@ function attachFirewallReorder(tbodySelector) {
   const csrfToken = csrfMeta ? csrfMeta.content : '';
   let draggingRow = null;
 
+  // Pagination (pagination.js) hides off-page rows via style.display
+  // rather than removing them, so plain previousElementSibling/
+  // nextElementSibling would walk straight through a hidden row into
+  // whatever's beyond it — silently reordering a rule relative to one the
+  // admin can't currently see. Skip anything hidden so "next/previous row"
+  // always means the next/previous *visible* one.
+  function visibleSibling(row, prop) {
+    let el = row[prop];
+    while (el && el.style.display === 'none') el = el[prop];
+    return el;
+  }
+
   // The drop/drag path already gives a sighted user the moved row to look
   // at; a screen reader user gets nothing unless something announces the
   // result. Created once and reused (persistent live regions are announced
@@ -100,8 +112,8 @@ function attachFirewallReorder(tbodySelector) {
     e.preventDefault();
     const row = draggingRow;
     const ruleId = row.dataset.ruleId;
-    const prevRow = row.previousElementSibling;
-    const nextRow = row.nextElementSibling;
+    const prevRow = visibleSibling(row, 'previousElementSibling');
+    const nextRow = visibleSibling(row, 'nextElementSibling');
     const body = prevRow
       ? { target_id: prevRow.dataset.ruleId, place: 'after' }
       : nextRow
@@ -123,7 +135,9 @@ function attachFirewallReorder(tbodySelector) {
     const row = handle.closest('tr[draggable="true"]');
     if (!row) return;
 
-    const neighbor = e.key === 'ArrowUp' ? row.previousElementSibling : row.nextElementSibling;
+    const neighbor = e.key === 'ArrowUp'
+      ? visibleSibling(row, 'previousElementSibling')
+      : visibleSibling(row, 'nextElementSibling');
     if (!neighbor || neighbor.getAttribute('draggable') !== 'true') return; // already at that end
     e.preventDefault();
 

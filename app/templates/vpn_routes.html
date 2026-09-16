@@ -74,7 +74,25 @@
   </table>
   </div>
   {% if vpn_routes %}
-  <script>attachLogFilter('routes-filter', '#routes-tbody', 'tr', '#routes-table thead th:not(:last-child)');</script>
+  <div class="pagination" id="routes-pagination">
+    <label class="pagination-size">Show
+      <select id="routes-page-size">
+        <option value="10" selected>10</option>
+        <option value="25">25</option>
+        <option value="50">50</option>
+        <option value="100">100</option>
+      </select>
+    </label>
+    <div class="pagination-nav">
+      <button type="button" class="btn btn-sm" data-page-prev>Prev</button>
+      <span data-page-status class="hint"></span>
+      <button type="button" class="btn btn-sm" data-page-next>Next</button>
+    </div>
+  </div>
+  <script>
+    const routesPager = attachPagination('#routes-tbody', 'tr', 'routes-page-size', 'routes-pagination');
+    attachLogFilter('routes-filter', '#routes-tbody', 'tr', '#routes-table thead th:not(:last-child)', () => routesPager && routesPager.refresh());
+  </script>
   {% endif %}
 </section>
 {% endblock %}
