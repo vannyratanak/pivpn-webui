@@ -80,7 +80,7 @@
     </thead>
     <tbody id="users-tbody">
       {% if not users %}
-      <tr><td colspan="{{ 4 if current_user.is_admin else 3 }}" class="empty">No users found.</td></tr>
+      <tr class="empty-row"><td colspan="{{ 4 if current_user.is_admin else 3 }}" class="empty">No users found.</td></tr>
       {% endif %}
       {% for u in users %}
       <tr>
@@ -123,7 +123,6 @@
     </tbody>
   </table>
   </div>
-  {% if users %}
   <div class="pagination" id="users-pagination">
     <label class="pagination-size">Show
       <select id="users-page-size">
@@ -140,9 +139,8 @@
     </div>
   </div>
   <script>
-    const usersPager = attachPagination('#users-tbody', 'tr', 'users-page-size', 'users-pagination');
-    attachLogFilter('users-filter', '#users-tbody', 'tr', '#users-table thead th:not(:last-child)', () => usersPager && usersPager.refresh());
+    const usersPager = attachPagination('#users-tbody', 'tr:not(.empty-row)', 'users-page-size', 'users-pagination');
+    attachLogFilter('users-filter', '#users-tbody', 'tr:not(.empty-row)', '#users-table thead th:not(:last-child)', () => usersPager && usersPager.refresh());
   </script>
-  {% endif %}
 </section>
 {% endblock %}

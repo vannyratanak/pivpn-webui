@@ -121,7 +121,7 @@
     </thead>
     <tbody id="client-rules-tbody">
       {% if not rules %}
-      <tr><td colspan="6" class="empty">No rules scoped to this client yet.</td></tr>
+      <tr class="empty-row"><td colspan="6" class="empty">No rules scoped to this client yet.</td></tr>
       {% endif %}
       {% for r in rules %}
       <tr class="{{ '' if r.enabled else 'disabled-row' }}">
@@ -148,7 +148,6 @@
     </tbody>
   </table>
   </div>
-  {% if rules %}
   <div class="pagination" id="client-rules-pagination">
     <label class="pagination-size">Show
       <select id="client-rules-page-size">
@@ -165,8 +164,7 @@
     </div>
   </div>
   <script>
-    attachPagination('#client-rules-tbody', 'tr', 'client-rules-page-size', 'client-rules-pagination');
+    attachPagination('#client-rules-tbody', 'tr:not(.empty-row)', 'client-rules-page-size', 'client-rules-pagination');
   </script>
-  {% endif %}
 </section>
 {% endblock %}

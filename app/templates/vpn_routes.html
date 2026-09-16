@@ -45,7 +45,7 @@
     </thead>
     <tbody id="routes-tbody">
       {% if not vpn_routes %}
-      <tr><td colspan="4" class="empty">No extra routes pushed yet (VPN clients only reach the VPN's own subnet).</td></tr>
+      <tr class="empty-row"><td colspan="4" class="empty">No extra routes pushed yet (VPN clients only reach the VPN's own subnet).</td></tr>
       {% endif %}
       {% for r in vpn_routes %}
       <tr>
@@ -73,7 +73,6 @@
     </tbody>
   </table>
   </div>
-  {% if vpn_routes %}
   <div class="pagination" id="routes-pagination">
     <label class="pagination-size">Show
       <select id="routes-page-size">
@@ -90,9 +89,8 @@
     </div>
   </div>
   <script>
-    const routesPager = attachPagination('#routes-tbody', 'tr', 'routes-page-size', 'routes-pagination');
-    attachLogFilter('routes-filter', '#routes-tbody', 'tr', '#routes-table thead th:not(:last-child)', () => routesPager && routesPager.refresh());
+    const routesPager = attachPagination('#routes-tbody', 'tr:not(.empty-row)', 'routes-page-size', 'routes-pagination');
+    attachLogFilter('routes-filter', '#routes-tbody', 'tr:not(.empty-row)', '#routes-table thead th:not(:last-child)', () => routesPager && routesPager.refresh());
   </script>
-  {% endif %}
 </section>
 {% endblock %}

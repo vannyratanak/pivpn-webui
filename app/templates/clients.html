@@ -79,7 +79,7 @@
     </thead>
     <tbody id="clients-tbody">
       {% if not clients %}
-      <tr><td colspan="7" class="empty">No clients found (or `pivpn list` returned nothing parseable — check the server logs).</td></tr>
+      <tr class="empty-row"><td colspan="7" class="empty">No clients found (or `pivpn list` returned nothing parseable — check the server logs).</td></tr>
       {% endif %}
       {% for c in clients %}
       <tr class="{{ 'blocked-row' if c.blocked }}">
@@ -127,7 +127,6 @@
     </tbody>
   </table>
   </div>
-  {% if clients %}
   <div class="pagination" id="clients-pagination">
     <label class="pagination-size">Show
       <select id="clients-page-size">
@@ -144,8 +143,8 @@
     </div>
   </div>
   <script>
-    const clientsPager = attachPagination('#clients-tbody', 'tr', 'clients-page-size', 'clients-pagination');
-    attachLogFilter('clients-filter', '#clients-tbody', 'tr', '#clients-table thead th:not(:first-child):not(:last-child)', () => clientsPager && clientsPager.refresh());
+    const clientsPager = attachPagination('#clients-tbody', 'tr:not(.empty-row)', 'clients-page-size', 'clients-pagination');
+    attachLogFilter('clients-filter', '#clients-tbody', 'tr:not(.empty-row)', '#clients-table thead th:not(:first-child):not(:last-child)', () => clientsPager && clientsPager.refresh());
 
     (function() {
       const selectAll = document.getElementById('clients-select-all');
@@ -185,6 +184,5 @@
       });
     })();
   </script>
-  {% endif %}
 </section>
 {% endblock %}

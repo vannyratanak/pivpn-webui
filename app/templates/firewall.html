@@ -426,7 +426,7 @@
     </thead>
     <tbody id="rules-tbody">
       {% if not rules %}
-      <tr><td colspan="10" class="empty">No rules yet.</td></tr>
+      <tr class="empty-row"><td colspan="10" class="empty">No rules yet.</td></tr>
       {% endif %}
       {% for r in rules %}
       <tr class="{{ '' if r.enabled else 'disabled-row' }}"
@@ -465,7 +465,6 @@
     </tbody>
   </table>
   </div>
-  {% if rules %}
   <div class="pagination" id="rules-pagination">
     <label class="pagination-size">Show
       <select id="rules-page-size">
@@ -482,9 +481,9 @@
     </div>
   </div>
   <script>
-    const rulesPager = attachPagination('#rules-tbody', 'tr', 'rules-page-size', 'rules-pagination');
-    const rulesClientFilter = attachSelectFilter('rules-client-filter', '#rules-tbody', 'tr', () => rulesPager && rulesPager.refresh());
-    attachLogFilter('rules-filter', '#rules-tbody', 'tr', '#rules-table thead th:not(:first-child):not(:last-child)', () => {
+    const rulesPager = attachPagination('#rules-tbody', 'tr:not(.empty-row)', 'rules-page-size', 'rules-pagination');
+    const rulesClientFilter = attachSelectFilter('rules-client-filter', '#rules-tbody', 'tr:not(.empty-row)', () => rulesPager && rulesPager.refresh());
+    attachLogFilter('rules-filter', '#rules-tbody', 'tr:not(.empty-row)', '#rules-table thead th:not(:first-child):not(:last-child)', () => {
       rulesClientFilter && rulesClientFilter.refresh();
       rulesPager && rulesPager.refresh();
     });
@@ -554,6 +553,5 @@
       });
     })();
   </script>
-  {% endif %}
 </section>
 {% endblock %}
