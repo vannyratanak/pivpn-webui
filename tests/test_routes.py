@@ -447,6 +447,101 @@ def test_admin_still_has_full_firewall_access(client):
     assert client.get("/vpn-routes").status_code == 200
 
 
+def test_client_sessions_relabeled_ended_session_resorts_below_more_recent_ones(client, monkeypatch):
+    # Regression test: a session the log parser thinks is still "ongoing"
+    # (no matching disconnect ever logged — e.g. a killed process/unclean
+    # drop) gets correctly relabeled "Ended (exact time unknown)" once this
+    # route's live-connected-clients check confirms it's not actually
+    # connected — but it used to keep the top-pinned position it only ever
+    # earned by looking ongoing at sort time, even after being relabeled,
+    # burying a genuinely more recent (and fully closed) session below it.
+    import app.vpnlog as vpnlog_module
+    lines = [
+        "2026-09-15T09:46:39+0700 vpn ovpn-server[1]: "
+        "[staleclient] Peer Connection Initiated with [AF_INET]10.66.66.1:1",
+        "2026-09-15T13:30:30+0700 vpn ovpn-server[1]: "
+        "[recentclient] Peer Connection Initiated with [AF_INET]10.66.66.1:2",
+        "2026-09-15T13:30:48+0700 vpn ovpn-server[1]: "
+        "recentclient/10.66.66.1:2 SIGTERM[soft,remote-exit] received, client-instance exiting",
+    ]
+    monkeypatch.setattr(vpnlog_module, "run_root", lambda argv: "\n".join(lines))
+    # Neither client is actually connected right now — this is what makes
+    # "staleclient" (log-ongoing but not live-connected) get relabeled.
+    monkeypatch.setattr("app.routes.pivpn_ctl.list_connected_clients", lambda: {})
+
+    _login_admin(client)
+    resp = client.get("/logs?tab=client_sessions")
+    assert resp.status_code == 200
+    assert b"Ended (exact time unknown)" in resp.data
+
+    body = resp.data.decode()
+    # recentclient's session both started and ended later than staleclient's
+    # sole (stale) connect — it must render first now that staleclient has
+    # been correctly recognized as not actually ongoing anymore.
+    assert body.index("recentclient") < body.index("staleclient")
+
+
+def test_traffic_orgs_requires_login(client):
+    resp = client.post("/logs/traffic/orgs", json={"ips": ["9.9.9.9"]})
+    assert resp.status_code == 302
+    assert "/login" in resp.headers["Location"]
+
+
+def test_traffic_orgs_requires_admin(client):
+    _add_moderator()
+    _login_moderator(client)
+    resp = client.post("/logs/traffic/orgs", json={"ips": ["9.9.9.9"]})
+    assert resp.status_code == 403
+
+
+def test_traffic_orgs_returns_org_mapping(client, monkeypatch):
+    import app.routes as routes_module
+
+    calls = []
+
+    def fake_get_ip_orgs_bulk(ips):
+        calls.append(ips)
+        return {ip: f"Org for {ip}" for ip in ips}
+
+    monkeypatch.setattr(routes_module.iplookup, "get_ip_orgs_bulk", fake_get_ip_orgs_bulk)
+    _login_admin(client)
+    resp = client.post("/logs/traffic/orgs", json={"ips": ["9.9.9.9", "8.8.8.8"]})
+
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["ok"] is True
+    assert data["orgs"] == {"9.9.9.9": "Org for 9.9.9.9", "8.8.8.8": "Org for 8.8.8.8"}
+    assert calls == [["9.9.9.9", "8.8.8.8"]]
+
+
+def test_traffic_orgs_bounds_an_oversized_list(client, monkeypatch):
+    # A hand-crafted request shouldn't be able to make this endpoint fire
+    # off an unbounded number of WHOIS queries — a real page render is
+    # already capped at 300 rows, so 300 is a generous, not arbitrary, cap.
+    import app.routes as routes_module
+
+    monkeypatch.setattr(routes_module.iplookup, "get_ip_orgs_bulk", lambda ips: {ip: None for ip in ips})
+    _login_admin(client)
+    resp = client.post("/logs/traffic/orgs", json={"ips": [f"1.2.3.{i}" for i in range(400)]})
+
+    assert resp.status_code == 200
+    assert len(resp.get_json()["orgs"]) == 300
+
+
+def test_traffic_orgs_rejects_non_list_body(client):
+    _login_admin(client)
+    resp = client.post("/logs/traffic/orgs", json={"ips": "9.9.9.9"})
+    assert resp.status_code == 400
+    assert resp.get_json()["ok"] is False
+
+
+def test_traffic_orgs_rejects_non_string_entries(client):
+    _login_admin(client)
+    resp = client.post("/logs/traffic/orgs", json={"ips": ["9.9.9.9", 123]})
+    assert resp.status_code == 400
+    assert resp.get_json()["ok"] is False
+
+
 def test_reorder_route_degrades_cleanly_on_privileged_command_error(client, monkeypatch):
     # Regression test: firewall.reorder_rule's chain rebuild happens after
     # its own DB write already committed — a PrivilegedCommandError from

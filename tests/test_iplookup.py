@@ -242,3 +242,28 @@ def test_get_ip_orgs_bulk_runs_misses_concurrently_not_serially(tmp_path, monkey
     result = iplookup.get_ip_orgs_bulk(["9.9.9.9", "8.8.8.8"])
 
     assert result == {"9.9.9.9": "Quad9", "8.8.8.8": "Quad9"}
+
+
+def test_get_cached_ip_orgs_never_calls_whois(tmp_path, monkeypatch):
+    _use_temp_db(tmp_path, monkeypatch)
+    db.cache_ip_org("9.9.9.9", "Quad9")
+
+    def fail_if_called(*a, **k):
+        raise AssertionError("get_cached_ip_orgs must never shell out to whois")
+
+    monkeypatch.setattr(subprocess, "run", fail_if_called)
+
+    result = iplookup.get_cached_ip_orgs(
+        ["192.168.100.10", "9.9.9.9", "not-an-ip", "17.0.0.1"]
+    )
+
+    assert result == {
+        "192.168.100.10": "Private network",
+        "9.9.9.9": "Quad9",
+        "not-an-ip": None,
+    }
+    # "17.0.0.1" was never looked up (private/cache miss, no live query
+    # allowed here) — it must be absent from the result entirely, not
+    # present with a None value, so a caller can tell "pending" apart from
+    # "resolved, nothing found".
+    assert "17.0.0.1" not in result

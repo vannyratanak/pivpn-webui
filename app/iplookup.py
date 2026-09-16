@@ -80,6 +80,46 @@ def get_ip_org(ip: str) -> str | None:
     return org
 
 
+def _resolve_from_cache_or_private(ips: list[str]) -> tuple[dict[str, str | None], list[str]]:
+    """Splits de-duped `ips` into what's already knowable with zero network
+    calls (a private/reserved address, or a previous cache hit) versus what
+    would need a live WHOIS query. Shared by get_cached_ip_orgs (which never
+    queries the remainder) and get_ip_orgs_bulk (which queries it
+    concurrently)."""
+    known: dict[str, str | None] = {}
+    misses: list[str] = []
+    for ip in dict.fromkeys(ips):
+        try:
+            if ipaddress.ip_address(ip).is_private:
+                known[ip] = "Private network"
+                continue
+        except ValueError:
+            known[ip] = None
+            continue
+        found, cached = db.get_cached_ip_org(ip)
+        if found:
+            known[ip] = cached
+        else:
+            misses.append(ip)
+    return known, misses
+
+
+def get_cached_ip_orgs(ips: list[str]) -> dict[str, str | None]:
+    """Same resolution rules as get_ip_orgs_bulk, but never shells out to
+    WHOIS — an IP that isn't already knowable (no cache row, not a private
+    address) is simply left out of the returned dict entirely, rather than
+    represented with some placeholder value, so a caller can tell "resolved,
+    nothing found" (key present, value None) apart from "not looked up yet"
+    (key absent).
+
+    Used for the Traffic tab's initial page render, so a cold cache doesn't
+    make the whole page wait on WHOIS — see the `/logs/traffic/orgs` route,
+    which resolves whatever this leaves out via a follow-up AJAX call to
+    get_ip_orgs_bulk once the page is already visible."""
+    known, _misses = _resolve_from_cache_or_private(ips)
+    return known
+
+
 def get_ip_orgs_bulk(ips: list[str]) -> dict[str, str | None]:
     """Same lookup/caching rules as get_ip_org, one call per unique IP in
     `ips`, but resolves every not-yet-cached address's WHOIS query
@@ -95,21 +135,7 @@ def get_ip_orgs_bulk(ips: list[str]) -> dict[str, str | None]:
     render as much as the per-destination repeat rate might suggest.
     Running the misses through a bounded thread pool instead means the
     whole batch takes roughly as long as its single slowest lookup."""
-    result: dict[str, str | None] = {}
-    to_query: list[str] = []
-    for ip in dict.fromkeys(ips):
-        try:
-            if ipaddress.ip_address(ip).is_private:
-                result[ip] = "Private network"
-                continue
-        except ValueError:
-            result[ip] = None
-            continue
-        found, cached = db.get_cached_ip_org(ip)
-        if found:
-            result[ip] = cached
-        else:
-            to_query.append(ip)
+    result, to_query = _resolve_from_cache_or_private(ips)
 
     if to_query:
         with concurrent.futures.ThreadPoolExecutor(

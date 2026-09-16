@@ -152,6 +152,28 @@ def resolve_real_address(address: str) -> str | None:
     return out if result.returncode == 0 and out else None
 
 
+def sort_client_sessions(sessions: list[dict]) -> None:
+    """In place. Most-recent-first within each group, then ongoing sessions
+    pulled to the very top regardless of when they started — otherwise a
+    client that reconnects often (each reconnect being its own short,
+    already-ended session) keeps burying anyone who's actually connected
+    right now further down the list. list.sort() is stable, so the second
+    pass preserves the recency order the first pass already established
+    within both the ongoing and ended groups.
+
+    A free function, not folded into list_client_sessions below, because
+    routes.py's live-connected-status cross-check can flip a session's
+    `ongoing` flag *after* list_client_sessions has already returned and
+    sorted (a session the log parser thought was still open, relabeled
+    "Ended (exact time unknown)" once it's confirmed not actually
+    connected — see that cross-check's own comment). That correction has
+    to re-run this same sort, or the relabeled session keeps the top-
+    pinned position it only ever earned by looking ongoing in the first
+    place, instead of falling back into its real chronological spot."""
+    sessions.sort(key=lambda s: s["start"] or "", reverse=True)
+    sessions.sort(key=lambda s: not s["ongoing"])
+
+
 def list_client_sessions(limit: int = 300) -> list[dict]:
     """Per-client login sessions — each a paired connect+disconnect (or
     still-open connect with no disconnect yet), most recent first. Answers
@@ -197,15 +219,7 @@ def list_client_sessions(limit: int = 300) -> list[dict]:
             "client": client, "start": pending["start"], "end": None,
             "address": pending["address"], "duration": None, "ongoing": True,
         })
-    # Most-recent-first within each group, then ongoing sessions pulled to
-    # the very top regardless of when they started — otherwise a client
-    # that reconnects often (each reconnect being its own short, already-
-    # ended session) keeps burying anyone who's actually connected right
-    # now further down the list. list.sort() is stable, so this second
-    # pass preserves the recency order the first pass already established
-    # within both the ongoing and ended groups.
-    sessions.sort(key=lambda s: s["start"] or "", reverse=True)
-    sessions.sort(key=lambda s: not s["ongoing"])
+    sort_client_sessions(sessions)
     sessions = sessions[:limit]
 
     # Only bother resolving still-open sessions — a relay's conntrack
@@ -266,13 +280,19 @@ def list_traffic_flows(limit: int = 300) -> list[dict]:
 
     # One org lookup per unique destination in this batch, not per row —
     # the same handful of destinations (a DNS server, a CDN edge) repeats
-    # across most rows, and iplookup.get_ip_org already caches in the DB
-    # across requests too, but there's no reason to pay even a dict/DB
-    # lookup twice for the same IP within a single page render. Resolved
-    # via get_ip_orgs_bulk so any not-yet-cached destinations (common with
-    # CDN-heavy traffic, e.g. after enabling full-tunnel) are looked up
-    # concurrently instead of serially timing out one at a time.
-    org_by_dst = iplookup.get_ip_orgs_bulk([m.group("dst") for _, m in parsed])
+    # across most rows, and the cache already covers repeat requests too,
+    # but there's no reason to pay even a dict/DB lookup twice for the same
+    # IP within a single page render.
+    #
+    # Cache-only on purpose (get_cached_ip_orgs, not get_ip_orgs_bulk) — a
+    # never-before-seen destination (common with CDN-heavy traffic, e.g.
+    # after enabling full-tunnel) would otherwise make this whole render
+    # wait on a live WHOIS query. Instead, a miss is left "pending" here
+    # (dst_org_known False) for the page's own JS to resolve via a
+    # follow-up call to /logs/traffic/orgs (see routes.py), which does use
+    # get_ip_orgs_bulk — same concurrent WHOIS resolution as before, just
+    # off the initial page-render's critical path.
+    org_by_dst = iplookup.get_cached_ip_orgs([m.group("dst") for _, m in parsed])
     flows = []
     for ts, m in parsed:
         src = m.group("src")
@@ -282,7 +302,8 @@ def list_traffic_flows(limit: int = 300) -> list[dict]:
             "client": ip_to_name.get(src, src),
             "src": src,
             "dst": dst,
-            "dst_org": org_by_dst[dst],
+            "dst_org": org_by_dst.get(dst),
+            "dst_org_known": dst in org_by_dst,
             "proto": m.group("proto"),
             "sport": m.group("sport") or "",
             "dport": m.group("dport") or "",

@@ -160,6 +160,22 @@ def test_reconnect_without_matching_disconnect_does_not_lose_the_earlier_session
     assert orphaned["status_note"] == "Ended (exact time unknown)"
 
 
+def test_sort_client_sessions_resorts_a_session_relabeled_from_ongoing_to_ended():
+    # Regression test for routes.py's live-connected-status cross-check:
+    # once a session that list_client_sessions sorted as ongoing (pinned to
+    # the top) gets relabeled to ended (see routes.py's client_sessions
+    # branch), re-running this same sort must drop it back into its real
+    # chronological spot, not leave it sitting in the top-pinned position
+    # it only ever earned by looking ongoing in the first place.
+    sessions = [
+        {"client": "stale", "start": "2026-09-15 09:46:39", "ongoing": False,
+         "status_note": "Ended (exact time unknown)"},
+        {"client": "recent", "start": "2026-09-15 13:30:30", "ongoing": False},
+    ]
+    vpnlog.sort_client_sessions(sessions)
+    assert [s["client"] for s in sessions] == ["recent", "stale"]
+
+
 # --- resolve_real_address: the relay real-IP lookup. Every branch here
 # must fail closed to "show the fallback address" (return None), never
 # raise — a disabled/unreachable relay should never break the Logs page.
@@ -291,8 +307,12 @@ def test_list_traffic_flows_resolves_known_client_and_falls_back_to_ip(monkeypat
     )
     unknown_src_line = TCP_FLOW_LINE.replace("10.202.226.2", "10.202.226.77")
     monkeypatch.setattr(vpnlog, "run_root", lambda argv: "\n".join([TCP_FLOW_LINE, unknown_src_line]))
+    # list_traffic_flows only ever resolves orgs from what's already
+    # cache-known (see its "Cache-only on purpose" comment) — a live/
+    # not-yet-cached destination is left pending for the /logs/traffic/orgs
+    # follow-up call (see test_routes.py), not looked up here.
     monkeypatch.setattr(
-        vpnlog.iplookup, "get_ip_orgs_bulk",
+        vpnlog.iplookup, "get_cached_ip_orgs",
         lambda ips: {ip: "Meta Platforms Ireland Limited" for ip in ips},
     )
 
@@ -303,25 +323,27 @@ def test_list_traffic_flows_resolves_known_client_and_falls_back_to_ip(monkeypat
     assert flows[0]["client"] == "10.202.226.77"  # no known mapping -> bare IP
     assert flows[0]["dst"] == "149.112.112.112"
     assert flows[0]["dst_org"] == "Meta Platforms Ireland Limited"
+    assert flows[0]["dst_org_known"] is True
     assert flows[1]["client"] == "mobile"
     assert flows[1]["dport"] == "443"
 
 
 def test_list_traffic_flows_looks_up_org_once_per_unique_destination(monkeypatch):
-    # Two rows, same destination — the bulk org lookup should only be
-    # called once for the whole batch (dedup now lives inside
-    # get_ip_orgs_bulk itself, see test_iplookup.py for that guarantee),
-    # and both rows should pick up its result.
+    # Two rows, same destination — the cache lookup should only be called
+    # once for the whole batch (dedup now lives inside
+    # get_cached_ip_orgs/get_ip_orgs_bulk's shared helper, see
+    # test_iplookup.py for that guarantee), and both rows should pick up
+    # its result.
     monkeypatch.setattr(pivpn_ctl, "list_client_ips", lambda: {})
     monkeypatch.setattr(pivpn_ctl, "list_connected_clients", lambda: {})
     monkeypatch.setattr(vpnlog, "run_root", lambda argv: "\n".join([TCP_FLOW_LINE, TCP_FLOW_LINE]))
     calls = []
 
-    def fake_get_ip_orgs_bulk(ips):
+    def fake_get_cached_ip_orgs(ips):
         calls.append(ips)
         return {ip: "Meta Platforms Ireland Limited" for ip in ips}
 
-    monkeypatch.setattr(vpnlog.iplookup, "get_ip_orgs_bulk", fake_get_ip_orgs_bulk)
+    monkeypatch.setattr(vpnlog.iplookup, "get_cached_ip_orgs", fake_get_cached_ip_orgs)
 
     flows = list_traffic_flows()
 
@@ -329,3 +351,20 @@ def test_list_traffic_flows_looks_up_org_once_per_unique_destination(monkeypatch
     assert len(calls) == 1
     assert flows[0]["dst_org"] == "Meta Platforms Ireland Limited"
     assert flows[1]["dst_org"] == "Meta Platforms Ireland Limited"
+
+
+def test_list_traffic_flows_leaves_uncached_destination_pending(monkeypatch):
+    # The other half of the contract above: a destination get_cached_ip_orgs
+    # doesn't return at all (never queried, never cached) must render as
+    # "pending" (dst_org_known False), not silently as "known, blank" — the
+    # Traffic tab's JS only fills in exactly the rows marked pending.
+    monkeypatch.setattr(pivpn_ctl, "list_client_ips", lambda: {})
+    monkeypatch.setattr(pivpn_ctl, "list_connected_clients", lambda: {})
+    monkeypatch.setattr(vpnlog, "run_root", lambda argv: "\n".join([TCP_FLOW_LINE]))
+    monkeypatch.setattr(vpnlog.iplookup, "get_cached_ip_orgs", lambda ips: {})
+
+    flows = list_traffic_flows()
+
+    assert len(flows) == 1
+    assert flows[0]["dst_org"] is None
+    assert flows[0]["dst_org_known"] is False

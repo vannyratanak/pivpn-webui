@@ -156,7 +156,7 @@
         <td>{{ f.client }}</td>
         <td>{{ f.src }}{% if f.sport %}:{{ f.sport }}{% endif %}</td>
         <td>{{ f.dst }}{% if f.dport %}:{{ f.dport }}{% endif %}</td>
-        <td>{{ f.dst_org or '—' }}</td>
+        <td>{% if f.dst_org_known %}{{ f.dst_org or '—' }}{% else %}<span class="cell-note org-pending" data-dst="{{ f.dst }}">Looking up…</span>{% endif %}</td>
         <td>{{ f.proto }}</td>
         <td>{{ f.dport or '—' }}</td>
       </tr>
@@ -182,6 +182,7 @@
   <script>
     const trafficPager = attachPagination('#traffic-tbody', 'tr', 'traffic-page-size', 'traffic-pagination');
     attachLogFilter('traffic-filter', '#traffic-tbody', 'tr', '#traffic-table thead th', () => trafficPager && trafficPager.refresh());
+    attachTrafficOrgFill('#traffic-tbody');
   </script>
   {% endif %}
 </section>
