@@ -65,6 +65,12 @@
   <dialog id="add-client-rule-dialog" class="modal" onclick="closeDialogIfClickedOutside(event, this)">
     <button type="button" class="modal-close-btn" onclick="document.getElementById('add-client-rule-dialog').close()" aria-label="Close">&times;</button>
     <h2>Add rule for {{ client.name }}</h2>
+
+    <div class="tabs" role="tablist" aria-label="Rule type">
+      <button type="button" class="active" role="tab" aria-selected="true">Forward / Drop</button>
+    </div>
+
+    <p class="hint">Controls what's allowed through the FORWARD chain for {{ client.name }} — e.g. drop a destination, or explicitly accept traffic to a range. For INPUT/port-forward/SNAT rules, use the full <a href="{{ url_for('main.firewall_rules') }}">Firewall Rules</a> page instead.</p>
     <form method="post" action="{{ url_for('main.client_add_rule', name=client.name) }}" class="inline-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <label>Source
