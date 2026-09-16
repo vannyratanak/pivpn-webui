@@ -58,11 +58,28 @@
 
 * { box-sizing: border-box; }
 
+/* Fixed-height app shell: topbar + page-header-row + everything in a
+   card before its table stay their natural size; the one card holding
+   a table (.card:has(.table-scroll), below) is the sole flex-grow
+   item, so its .table-scroll absorbs exactly whatever vertical space
+   is left after the rest of the page's chrome — the table fills the
+   remaining screen on any page/viewport without knowing anyone else's
+   exact height, and only *it* scrolls internally when its rows overflow
+   that space. height (not min-height) is what makes "leftover space to
+   distribute" exist at all; overflow-y is a fallback, not the intended
+   path — it only ever engages if some page's fixed chrome (e.g. a
+   wrapped topbar nav on a narrow phone) alone exceeds the viewport. */
+html { height: 100%; }
 body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
   font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh; /* accounts for mobile browser chrome (URL bar) that 100vh doesn't; ignored where dvh isn't supported, falling back to the line above */
+  overflow-y: auto;
 }
 
 #nav-loading-bar {
@@ -84,9 +101,13 @@ body {
   padding: 14px 24px;
   background: var(--panel);
   border-bottom: 1px solid var(--border);
+  /* Body no longer scrolls in the common case (see body's own comment),
+     so sticky rarely engages — kept anyway as a harmless safety net for
+     the narrow-viewport fallback where body's own overflow-y does. */
   position: sticky;
   top: 0;
   z-index: 100;
+  flex: 0 0 auto;
 }
 
 .topbar .brand { font-weight: 600; }
@@ -225,8 +246,13 @@ body {
 
 .content {
   max-width: 1020px;
+  width: 100%;
   margin: 0 auto;
   padding: 24px;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 h1 { font-size: 22px; margin: 0 0 16px; }
@@ -238,6 +264,29 @@ h2 { font-size: 16px; margin: 0 0 12px; color: var(--text); }
   border-radius: 10px;
   padding: 20px;
   margin-bottom: 20px;
+  flex: 0 0 auto;
+}
+
+/* The one card per page that holds a table grows to fill whatever
+   vertical space .content has left after its page-header-row and any
+   other (flex: 0 0 auto, natural-height) card — see body's own comment
+   for the full mechanism. Scoped to :has(.table-scroll) rather than
+   :last-of-type so a page with no table (or a table-less card sitting
+   after a table-holding one, if that ever happens) is never stretched
+   for no reason. */
+.content > .page-header-row {
+  flex: 0 0 auto;
+}
+.card:has(.table-scroll) {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.card:has(.table-scroll) > .table-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .card-header-row {
