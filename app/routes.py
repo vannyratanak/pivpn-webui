@@ -821,10 +821,11 @@ ALL_LOG_TABS = ("sessions", "client_sessions", "traffic", "system", "activity", 
 MODERATOR_LOG_TABS = ("client_sessions", "auth")
 
 # Time-range filter for the three DB-backed tabs (Sessions/Client Sessions/
-# Traffic) — "" means no cutoff (the full retained history, up to 7 days).
-# Ordered for the <select>; keys double as the ?range= query value.
+# Traffic). Ordered for the <select> — 1h first/default, since selecting
+# any option re-queries immediately (no separate Search button) and a
+# smaller default window is the cheaper first load. Keys double as the
+# ?range= query value.
 LOG_RANGE_OPTIONS = [
-    ("", "All (7 days)"),
     ("1h", "Last 1 hour"),
     ("6h", "Last 6 hours"),
     ("12h", "Last 12 hours"),
@@ -832,6 +833,7 @@ LOG_RANGE_OPTIONS = [
     ("7d", "Last 7 days"),
 ]
 LOG_RANGE_HOURS = {"1h": 1, "6h": 6, "12h": 12, "1d": 24, "7d": 24 * 7}
+LOG_RANGE_DEFAULT = "1h"
 
 
 @bp.route("/logs")
@@ -858,12 +860,10 @@ def logs():
     # traffic volume, even a few hundred rows can be just the last few
     # minutes.
     q = (request.args.get("q") or "").strip() or None
-    log_range = request.args.get("range") or ""
+    log_range = request.args.get("range") or LOG_RANGE_DEFAULT
     if log_range not in LOG_RANGE_HOURS:
-        log_range = ""
-    since = None
-    if log_range:
-        since = (datetime.now() - timedelta(hours=LOG_RANGE_HOURS[log_range])).strftime("%Y-%m-%d %H:%M:%S")
+        log_range = LOG_RANGE_DEFAULT
+    since = (datetime.now() - timedelta(hours=LOG_RANGE_HOURS[log_range])).strftime("%Y-%m-%d %H:%M:%S")
     try:
         page = max(1, int(request.args.get("page", 1)))
     except ValueError:

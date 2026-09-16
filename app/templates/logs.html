@@ -23,7 +23,6 @@
           {% endfor %}
         </select>
       </label>
-      <button type="submit" class="btn btn-sm">Search</button>
     </form>
     <form method="post" action="{{ url_for('main.logs_refresh') }}" class="btn-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -40,7 +39,7 @@
     <form method="get" action="{{ url_for('main.logs') }}">
       <input type="hidden" name="tab" value="{{ tab_name }}">
       {% if q %}<input type="hidden" name="q" value="{{ q }}">{% endif %}
-      {% if log_range %}<input type="hidden" name="range" value="{{ log_range }}">{% endif %}
+      <input type="hidden" name="range" value="{{ log_range }}">
       <label class="pagination-size">Show
         <select name="page_size" onchange="this.form.submit()" aria-label="Rows per page">
           {% for n in (10, 25, 50, 100) %}

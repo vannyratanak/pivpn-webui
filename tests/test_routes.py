@@ -469,7 +469,7 @@ def test_client_sessions_relabeled_ended_session_resorts_below_more_recent_ones(
     monkeypatch.setattr("app.routes.pivpn_ctl.list_connected_clients", lambda: {})
 
     _login_admin(client)
-    resp = client.get("/logs?tab=client_sessions")
+    resp = client.get("/logs?tab=client_sessions&range=7d")
     assert resp.status_code == 200
     assert b"Ended (exact time unknown)" in resp.data
 
@@ -488,7 +488,7 @@ def test_traffic_tab_search_matches_across_full_history(client, monkeypatch):
          "TCP", "1235", "443", "tun0", "ens18"),
     ])
     _login_admin(client)
-    resp = client.get("/logs?tab=traffic&q=laptop")
+    resp = client.get("/logs?tab=traffic&q=laptop&range=7d")
     assert resp.status_code == 200
     assert b"laptop" in resp.data
     assert b"mobile" not in resp.data
@@ -508,7 +508,7 @@ def test_traffic_tab_pagination_reaches_rows_past_the_old_300_cap(client, monkey
         for i in range(21)
     ])
     _login_admin(client)
-    resp = client.get("/logs?tab=traffic&page=3&page_size=10")
+    resp = client.get("/logs?tab=traffic&page=3&page_size=10&range=7d")
     assert resp.status_code == 200
     body = resp.data.decode()
     assert "client0" in body  # most recent first -> last (partial) page has the oldest
@@ -560,14 +560,28 @@ def test_logs_range_filters_out_events_older_than_the_window(client, monkeypatch
     assert b"old-client" not in resp.data
 
 
-def test_logs_invalid_range_value_falls_back_to_no_cutoff(client, monkeypatch):
+def test_logs_invalid_range_value_falls_back_to_default(client, monkeypatch):
     db.insert_vpn_events([
         ("2020-01-01 00:00:00", "connected", "ancient-client", "10.66.66.1:1", "", None),
     ])
     _login_admin(client)
     resp = client.get("/logs?tab=sessions&range=bogus")
     assert resp.status_code == 200
-    assert b"ancient-client" in resp.data
+    # An unrecognized ?range= falls back to the same default (1h) as no
+    # range at all — not "no cutoff" — so a 2020 event stays filtered out.
+    assert b"ancient-client" not in resp.data
+    assert b'value="1h" selected' in resp.data
+
+
+def test_logs_no_range_param_defaults_to_1h(client, monkeypatch):
+    db.insert_vpn_events([
+        ("2020-01-01 00:00:00", "connected", "ancient-client", "10.66.66.1:1", "", None),
+    ])
+    _login_admin(client)
+    resp = client.get("/logs?tab=sessions")
+    assert resp.status_code == 200
+    assert b"ancient-client" not in resp.data
+    assert b'value="1h" selected' in resp.data
 
 
 def test_logs_refresh_requires_login(client):
