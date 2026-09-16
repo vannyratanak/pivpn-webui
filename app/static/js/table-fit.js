@@ -6,11 +6,10 @@
 // per screen size. Measuring the real rendered position (getBoundingClientRect)
 // sidesteps that entirely; it's already correct for whatever's actually there.
 //
-// Only ever a cap: .table-scroll's own CSS min-height (style.css) is what
-// keeps a near-empty table from collapsing to a sliver, and always wins over
-// this if the two conflict (CSS spec: min-height beats max-height) — so a
-// short viewport still shows the floor amount, letting the page scroll to
-// reach the rest, rather than crushing the table down to fit.
+// Only ever a cap, never a floor — a table with just 2-3 rows stays that
+// short (no CSS min-height forcing it taller), this only ever kicks in
+// once a table's real content would exceed the space actually left on
+// screen.
 function fitTableScrollHeights() {
   document.querySelectorAll('.table-scroll').forEach((el) => {
     // Clear first so getBoundingClientRect().top reflects natural position
@@ -21,7 +20,12 @@ function fitTableScrollHeights() {
     const top = el.getBoundingClientRect().top;
     const bottomBuffer = 24; // card's own bottom padding/border, roughly
     const available = window.innerHeight - top - bottomBuffer;
-    el.style.maxHeight = `${available}px`;
+    // A page whose own fixed chrome (title, hint text, dialogs' triggers,
+    // etc.) already eats most of a short viewport can push `available`
+    // to near zero or negative — clamp to a small floor so the table
+    // never fully collapses; the page itself still scrolls to reach the
+    // rest, same fallback as everywhere else in this layout.
+    el.style.maxHeight = `${Math.max(available, 120)}px`;
   });
 }
 

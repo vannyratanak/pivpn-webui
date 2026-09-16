@@ -749,20 +749,19 @@ button:disabled:hover, .btn:disabled:hover { filter: none; }
   width: 100%;
 }
 
-/* Sized to its own content (a handful of rows shouldn't force this box —
-   and the "Prev/Next" pagination right after it — to stretch down to
-   fill the screen with blank space in between), between a floor and a
-   cap: min-height keeps a near-empty table from looking like a broken
-   sliver of a box; max-height (set dynamically per element by
+/* Sized to its own content — a table with just 2-3 rows shows exactly
+   that much height, no padding, no forced stretch (and its "Prev/Next"
+   pagination sits right after those rows, not shoved down by blank
+   space). Only capped when it would actually overflow the browser's
+   remaining screen space: max-height is set dynamically per element by
    table-fit.js, not here — pure CSS can't express "cap at whatever
    vertical space is actually left on THIS page" against siblings whose
-   own height varies per page) keeps a long one from pushing the
-   header/title off past a full-page scroll, scrolling internally
-   instead once its rows exceed that. overflow-x stays, for the
-   horizontal scroll a table's own fixed min-width (see #clients-table
-   etc.) still needs on narrow viewports. */
+   own height varies per page. Past that cap, it scrolls internally
+   instead of pushing the header/title off in a full-page scroll.
+   overflow-x stays, for the horizontal scroll a table's own fixed
+   min-width (see #clients-table etc.) still needs on narrow
+   viewports. */
 .table-scroll {
-  min-height: 50vh;
   overflow-x: auto;
   overflow-y: auto;
   scrollbar-width: thin;                    /* Firefox */
