@@ -408,9 +408,6 @@
     </form>
   </dialog>
 
-  {% if not rules %}
-    <p class="empty">No rules yet.</p>
-  {% else %}
   <div class="table-scroll">
   <table id="rules-table">
     <thead>
@@ -428,6 +425,9 @@
       </tr>
     </thead>
     <tbody id="rules-tbody">
+      {% if not rules %}
+      <tr><td colspan="10" class="empty">No rules yet.</td></tr>
+      {% endif %}
       {% for r in rules %}
       <tr class="{{ '' if r.enabled else 'disabled-row' }}"
           {% if r.kind != 'client_block' %}draggable="true" data-rule-id="{{ r.id }}"{% endif %}>
@@ -465,6 +465,7 @@
     </tbody>
   </table>
   </div>
+  {% if rules %}
   <script>
     const rulesClientFilter = attachSelectFilter('rules-client-filter', '#rules-tbody', 'tr');
     attachLogFilter('rules-filter', '#rules-tbody', 'tr', '#rules-table thead th:not(:first-child):not(:last-child)', () => rulesClientFilter && rulesClientFilter.refresh());

@@ -94,9 +94,6 @@
     {% endif %}
   </details>
 
-  {% if not rules %}
-    <p class="empty">No rules scoped to this client yet.</p>
-  {% else %}
   <div class="table-scroll">
   <table>
     <thead>
@@ -110,6 +107,9 @@
       </tr>
     </thead>
     <tbody>
+      {% if not rules %}
+      <tr><td colspan="6" class="empty">No rules scoped to this client yet.</td></tr>
+      {% endif %}
       {% for r in rules %}
       <tr class="{{ '' if r.enabled else 'disabled-row' }}">
         <td>{{ r.kind }}</td>
@@ -135,6 +135,5 @@
     </tbody>
   </table>
   </div>
-  {% endif %}
 </section>
 {% endblock %}

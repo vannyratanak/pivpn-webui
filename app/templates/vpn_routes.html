@@ -29,9 +29,6 @@
   <h2>Routes pushed to clients</h2>
   <p class="hint">Controls what destinations VPN clients send into the tunnel at all. Without a route here, a client never attempts to reach that network through the VPN &mdash; see the <a href="{{ url_for('main.firewall_rules') }}">Firewall</a> page's NAT/SNAT rules, which handle the return path once traffic arrives.</p>
 
-  {% if not vpn_routes %}
-    <p class="empty">No extra routes pushed yet (VPN clients only reach the VPN's own subnet).</p>
-  {% else %}
   <div class="table-scroll">
   <table id="routes-table">
     <thead>
@@ -43,6 +40,9 @@
       </tr>
     </thead>
     <tbody id="routes-tbody">
+      {% if not vpn_routes %}
+      <tr><td colspan="4" class="empty">No extra routes pushed yet (VPN clients only reach the VPN's own subnet).</td></tr>
+      {% endif %}
       {% for r in vpn_routes %}
       <tr>
         <td>{{ r.network }}</td>
@@ -69,6 +69,7 @@
     </tbody>
   </table>
   </div>
+  {% if vpn_routes %}
   <script>attachLogFilter('routes-filter', '#routes-tbody', 'tr', '#routes-table thead th:not(:last-child)');</script>
   {% endif %}
 </section>

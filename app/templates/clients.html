@@ -62,9 +62,6 @@
       </div>
     </form>
   </dialog>
-  {% if not clients %}
-    <p class="empty">No clients found (or `pivpn list` returned nothing parseable — check the server logs).</p>
-  {% else %}
   <div class="table-scroll">
   <table id="clients-table">
     <thead>
@@ -79,6 +76,9 @@
       </tr>
     </thead>
     <tbody id="clients-tbody">
+      {% if not clients %}
+      <tr><td colspan="7" class="empty">No clients found (or `pivpn list` returned nothing parseable — check the server logs).</td></tr>
+      {% endif %}
       {% for c in clients %}
       <tr class="{{ 'blocked-row' if c.blocked }}">
         <td><input type="checkbox" name="client_names" value="{{ c.name }}" form="bulk-remove-form" class="client-select-checkbox" aria-label="Select client {{ c.name }}"></td>
@@ -125,6 +125,7 @@
     </tbody>
   </table>
   </div>
+  {% if clients %}
   <div class="pagination" id="clients-pagination">
     <label class="pagination-size">Show
       <select id="clients-page-size">
