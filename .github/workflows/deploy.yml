@@ -19,5 +19,3 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
       - name: Deploy to target 1
         run: ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no ${{ secrets.DEPLOY_TARGET_1 }} "ignored, server runs a forced command"
-      - name: Deploy to target 2
-        run: ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no ${{ secrets.DEPLOY_TARGET_2 }} "ignored, server runs a forced command"

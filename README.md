@@ -446,9 +446,10 @@ workflows are also disabled repo-wide as a second, independent layer
 (Settings → Actions → General → "Run workflows from fork pull requests"),
 so even a future workflow added with a `pull_request` trigger by mistake
 wouldn't run from a fork without that box being checked first. Deploy
-targets and the SSH username live in GitHub secrets
-(`DEPLOY_TARGET_1`/`_2`/...), not hardcoded in the workflow file, so
-nothing about the network layout is visible to a public reader either.
+targets and the SSH username live in GitHub secrets (`DEPLOY_TARGET_1`,
+`DEPLOY_TARGET_2`, ... — one per server, sequentially numbered), not
+hardcoded in the workflow file, so nothing about the network layout is
+visible to a public reader either.
 
 `.github/workflows/deploy.yml` is a **manual-trigger only** workflow
 (`workflow_dispatch` — nothing runs automatically on push, only `CI`/tests
@@ -491,12 +492,12 @@ reinstall steps exist.
    the old `authorized_keys` line by hand first if the command itself
    needs to change on an already-configured server.
 3. Add a new GitHub Actions secret for this server (`gh secret set
-   DEPLOY_TARGET_3 --body "vpn@<its IP>"` — same `user@host` format as
-   the existing `DEPLOY_TARGET_1`/`_2`, keeps real IPs and usernames out
+   DEPLOY_TARGET_2 --body "vpn@<its IP>"` — same `user@host` format as
+   the existing `DEPLOY_TARGET_1`, keeps real IPs and usernames out
    of the workflow file itself, so `deploy.yml` stays safe to read in a
-   public repo). Then add a matching `- name: Deploy to target 3` step to
-   `.github/workflows/deploy.yml`, copying an existing step's pattern
-   (same deploy key, `${{ secrets.DEPLOY_TARGET_3 }}` for the host).
+   public repo). Then add a matching `- name: Deploy to target 2` step to
+   `.github/workflows/deploy.yml`, copying the existing step's pattern
+   (same deploy key, `${{ secrets.DEPLOY_TARGET_2 }}` for the host).
 4. Before trusting the button: manually run the exact forced-command
    sequence over SSH once (steps 1-2 above, pasted directly) — this is
    the one thing worth verifying by hand rather than assuming, since a
