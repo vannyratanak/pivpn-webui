@@ -718,9 +718,13 @@ button:disabled:hover, .btn:disabled:hover { filter: none; }
   width: 100%;
 }
 
+/* No vertical cap — every table shows its full height and scrolls with
+   the page, not inside its own nested scroll box (which used to clip
+   tall tables, e.g. Firewall Rules, to 60vh with a hard-to-discover
+   internal scrollbar). overflow-x stays, for the horizontal scroll a
+   table's own fixed min-width (see #clients-table etc.) still needs on
+   narrow viewports. */
 .table-scroll {
-  max-height: 60vh;
-  overflow-y: auto;
   overflow-x: auto;
   scrollbar-width: thin;                    /* Firefox */
   scrollbar-color: var(--border) transparent;
