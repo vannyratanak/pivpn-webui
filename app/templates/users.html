@@ -81,7 +81,7 @@
         <td>
           <div class="actions">
           <button type="button" class="btn btn-sm btn-secondary" onclick="document.getElementById('reset-pw-{{ u.id }}').showModal()">Reset password</button>
-          <dialog id="reset-pw-{{ u.id }}" class="modal" onclick="if (event.target === this) this.close()">
+          <dialog id="reset-pw-{{ u.id }}" class="modal" onclick="closeDialogIfClickedOutside(event, this)">
             <button type="button" class="modal-close-btn" onclick="document.getElementById('reset-pw-{{ u.id }}').close()" aria-label="Close">&times;</button>
             <h2>Reset password for {{ u.username }}</h2>
             <form method="post" action="{{ url_for('main.reset_user_password', user_id=u.id) }}" class="inline-form">

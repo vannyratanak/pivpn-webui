@@ -1,3 +1,25 @@
+// Shared by every <dialog class="modal">'s backdrop-click-to-close
+// onclick (see base.html's confirm-modal, and every Import/Add-rule/Reset-
+// password dialog) — a plain top-level function so it's reachable from
+// those inline onclick="..." attributes, unlike everything below wrapped
+// in DOMContentLoaded's closure.
+//
+// event.target === dialog alone isn't "clicked the backdrop": a click in
+// any empty gap between the dialog's own children (e.g. the margin below
+// a modal's <h2>, before its first real control) also targets the dialog
+// element itself, since that gap isn't covered by any child — so relying
+// on target alone closed the modal on clicks that were visually still
+// inside it. Comparing the click's actual coordinates against the
+// dialog's rendered box is what actually distinguishes "clicked the real
+// backdrop outside the box" from "clicked empty space inside it".
+function closeDialogIfClickedOutside(event, dialog) {
+  if (event.target !== dialog) return;
+  const rect = dialog.getBoundingClientRect();
+  const outside = event.clientX < rect.left || event.clientX > rect.right
+    || event.clientY < rect.top || event.clientY > rect.bottom;
+  if (outside) dialog.close();
+}
+
 // Thin top-of-page progress bar shown while navigating to a new page or
 // submitting a form. This app is server-rendered (no AJAX page loads), so
 // there's no "data fetched" event to hook — the only meaningful loading

@@ -51,7 +51,7 @@
     </div>
   </div>
 
-  <dialog id="add-rule-dialog" class="modal" onclick="if (event.target === this) this.close()">
+  <dialog id="add-rule-dialog" class="modal" onclick="closeDialogIfClickedOutside(event, this)">
     <button type="button" class="modal-close-btn" onclick="document.getElementById('add-rule-dialog').close()" aria-label="Close">&times;</button>
     <h2>Add rule</h2>
 
@@ -350,7 +350,7 @@
     </script>
   </dialog>
 
-  <dialog id="import-rules-dialog" class="modal" onclick="if (event.target === this) this.close()">
+  <dialog id="import-rules-dialog" class="modal" onclick="closeDialogIfClickedOutside(event, this)">
     <button type="button" class="modal-close-btn" onclick="document.getElementById('import-rules-dialog').close()" aria-label="Close">&times;</button>
     <h2>Import rules from file</h2>
     <p class="hint">Upload a plain text file to add several firewall rules at once — one rule per line.</p>

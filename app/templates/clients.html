@@ -37,7 +37,7 @@
     </div>
   </div>
 
-  <dialog id="import-clients-dialog" class="modal" onclick="if (event.target === this) this.close()">
+  <dialog id="import-clients-dialog" class="modal" onclick="closeDialogIfClickedOutside(event, this)">
     <button type="button" class="modal-close-btn" onclick="document.getElementById('import-clients-dialog').close()" aria-label="Close">&times;</button>
     <h2>Import clients from file</h2>
     <p class="hint">Upload a plain text file to add several clients at once — one client per line.</p>
