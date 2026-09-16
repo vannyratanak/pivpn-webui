@@ -64,7 +64,11 @@
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="next" value="{{ url_for('main.client_detail', name=client.name) }}">
       <input type="hidden" name="src" value="{{ client.ip }}">
-      <label>Source <span class="hint">({{ client.name }}, {{ client.ip }})</span></label>
+      <label>Source
+        <select disabled aria-label="Source (fixed to this client)">
+          <option>{{ client.name }} ({{ client.ip }})</option>
+        </select>
+      </label>
       <label>Action
         <select name="action">
           <option value="ACCEPT">Forward (ACCEPT)</option>
