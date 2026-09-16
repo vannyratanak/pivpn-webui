@@ -108,7 +108,7 @@
   {% endif %}
 
   <div class="table-scroll">
-  <table>
+  <table id="client-rules-table">
     <thead>
       <tr>
         <th scope="col">Kind</th>
@@ -119,7 +119,7 @@
         <th scope="col">Actions</th>
       </tr>
     </thead>
-    <tbody>
+    <tbody id="client-rules-tbody">
       {% if not rules %}
       <tr><td colspan="6" class="empty">No rules scoped to this client yet.</td></tr>
       {% endif %}
@@ -148,5 +148,25 @@
     </tbody>
   </table>
   </div>
+  {% if rules %}
+  <div class="pagination" id="client-rules-pagination">
+    <label class="pagination-size">Show
+      <select id="client-rules-page-size">
+        <option value="10" selected>10</option>
+        <option value="25">25</option>
+        <option value="50">50</option>
+        <option value="100">100</option>
+      </select>
+    </label>
+    <div class="pagination-nav">
+      <button type="button" class="btn btn-sm" data-page-prev>Prev</button>
+      <span data-page-status class="hint"></span>
+      <button type="button" class="btn btn-sm" data-page-next>Next</button>
+    </div>
+  </div>
+  <script>
+    attachPagination('#client-rules-tbody', 'tr', 'client-rules-page-size', 'client-rules-pagination');
+  </script>
+  {% endif %}
 </section>
 {% endblock %}
