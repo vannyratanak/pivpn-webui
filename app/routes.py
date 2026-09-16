@@ -1,5 +1,6 @@
 import math
 import sqlite3
+from datetime import datetime, timedelta
 
 from flask import Blueprint, abort, flash, jsonify, redirect, render_template, request, send_file, session, url_for
 from flask_login import current_user, login_required, login_user, logout_user
@@ -819,6 +820,19 @@ AUTH_ACTIONS = ("login", "logout")
 ALL_LOG_TABS = ("sessions", "client_sessions", "traffic", "system", "activity", "auth")
 MODERATOR_LOG_TABS = ("client_sessions", "auth")
 
+# Time-range filter for the three DB-backed tabs (Sessions/Client Sessions/
+# Traffic) — "" means no cutoff (the full retained history, up to 7 days).
+# Ordered for the <select>; keys double as the ?range= query value.
+LOG_RANGE_OPTIONS = [
+    ("", "All (7 days)"),
+    ("1h", "Last 1 hour"),
+    ("6h", "Last 6 hours"),
+    ("12h", "Last 12 hours"),
+    ("1d", "Last 1 day"),
+    ("7d", "Last 7 days"),
+]
+LOG_RANGE_HOURS = {"1h": 1, "6h": 6, "12h": 12, "1d": 24, "7d": 24 * 7}
+
 
 @bp.route("/logs")
 @login_required
@@ -844,6 +858,12 @@ def logs():
     # traffic volume, even a few hundred rows can be just the last few
     # minutes.
     q = (request.args.get("q") or "").strip() or None
+    log_range = request.args.get("range") or ""
+    if log_range not in LOG_RANGE_HOURS:
+        log_range = ""
+    since = None
+    if log_range:
+        since = (datetime.now() - timedelta(hours=LOG_RANGE_HOURS[log_range])).strftime("%Y-%m-%d %H:%M:%S")
     try:
         page = max(1, int(request.args.get("page", 1)))
     except ValueError:
@@ -858,13 +878,13 @@ def logs():
 
     if tab == "sessions":
         try:
-            sessions, total = vpnlog.list_sessions(q=q, page=page, page_size=page_size)
+            sessions, total = vpnlog.list_sessions(q=q, page=page, page_size=page_size, since=since)
         except PrivilegedCommandError as exc:
             sessions = []
             flash(str(exc), "error")
     elif tab == "client_sessions":
         try:
-            client_sessions, total = vpnlog.list_client_sessions(q=q, page=page, page_size=page_size)
+            client_sessions, total = vpnlog.list_client_sessions(q=q, page=page, page_size=page_size, since=since)
             # "ongoing" only means "no disconnect event matched our known log
             # patterns" (see DISCONNECT_RE's SIGTERM-only match in vpnlog.py)
             # — a session that ended via timeout/ping-restart/unclean drop
@@ -891,7 +911,7 @@ def logs():
             flash(str(exc), "error")
     elif tab == "traffic":
         try:
-            traffic_flows, total = vpnlog.list_traffic_flows(q=q, page=page, page_size=page_size)
+            traffic_flows, total = vpnlog.list_traffic_flows(q=q, page=page, page_size=page_size, since=since)
         except PrivilegedCommandError as exc:
             traffic_flows = []
             flash(str(exc), "error")
@@ -923,6 +943,7 @@ def logs():
         traffic_flows=traffic_flows, webui_log=webui_log, system_log=system_log,
         auth_entries=auth_entries, activity_entries=activity_entries,
         q=q, page=page, page_size=page_size, total=total, total_pages=total_pages,
+        log_range=log_range, log_range_options=LOG_RANGE_OPTIONS,
     )
 
 

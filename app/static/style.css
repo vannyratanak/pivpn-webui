@@ -768,6 +768,11 @@ button:disabled:hover, .btn:disabled:hover { filter: none; }
    names + IPs don't fit in that. */
 .rule-client-filter .custom-select-wrapper { width: 240px; min-width: 240px; }
 
+/* Logs page's Range filter (search_toolbar in logs.html) — same reuse,
+   sized for "Last 12 hours"-length option text instead of the page-size
+   dropdown's short numbers. */
+.log-range-filter .custom-select-wrapper { width: 150px; min-width: 150px; }
+
 .pagination-nav {
   display: flex;
   align-items: center;
@@ -1096,11 +1101,13 @@ dialog.modal code {
   margin: 10px 0;
 }
 
-/* Logs page tabs (Sessions/Client Sessions/Traffic): the search form and
-   the Refresh now icon button share one row, button pushed to the far
-   right — sits directly above the table it refreshes. Both are real
-   server-submitted <form>s now (search reloads with ?q=..., Refresh now
-   POSTs) — search_and_pagination() in logs.html, not client-side JS. */
+/* Logs page tabs (Sessions/Client Sessions/Traffic): the search form (with
+   its Range select) and the Refresh now icon button share one row, button
+   pushed to the far right — sits directly above the table it refreshes.
+   Both are real server-submitted <form>s (search/range reload with
+   ?q=...&range=..., Refresh now POSTs) — search_toolbar() in logs.html,
+   not client-side JS. Pagination itself (pagination_nav()) sits below the
+   table instead, same as every other paginated table in this app. */
 .table-toolbar {
   display: flex;
   align-items: center;

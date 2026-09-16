@@ -592,7 +592,7 @@ def _escape_like(s: str) -> str:
 
 
 def list_vpn_events_page(
-    q: str | None = None, page: int = 1, page_size: int = 50
+    q: str | None = None, page: int = 1, page_size: int = 50, since: str | None = None
 ) -> tuple[list[dict], int]:
     """Most recent first, server-side paginated and searched — for the
     flat VPN Sessions tab (app/vpnlog.py's list_sessions). Returns (rows,
@@ -601,18 +601,28 @@ def list_vpn_events_page(
 
     `q`, if given, matches as a case-insensitive substring against any of
     the columns actually shown in that tab (event/client/address/detail)
-    — same "any column" search the old client-side filter used to do."""
+    — same "any column" search the old client-side filter used to do.
+
+    `since`, if given, is a 'YYYY-MM-DD HH:MM:SS' cutoff (same format `ts`
+    is stored in — see vpnlog._format_ts) — only rows at or after it are
+    returned. A plain string comparison works because every `ts` in this
+    table shares that one zero-padded format and the server's own local
+    timezone."""
     conn = get_conn()
     try:
-        where_sql = ""
+        clauses = []
         params: list = []
         if q:
             like = f"%{_escape_like(q)}%"
-            where_sql = (
-                "WHERE (event LIKE ? ESCAPE '\\' OR client LIKE ? ESCAPE '\\' "
+            clauses.append(
+                "(event LIKE ? ESCAPE '\\' OR client LIKE ? ESCAPE '\\' "
                 "OR address LIKE ? ESCAPE '\\' OR detail LIKE ? ESCAPE '\\')"
             )
-            params = [like, like, like, like]
+            params += [like, like, like, like]
+        if since:
+            clauses.append("ts >= ?")
+            params.append(since)
+        where_sql = ("WHERE " + " AND ".join(clauses)) if clauses else ""
         total = conn.execute(f"SELECT COUNT(*) FROM vpn_events {where_sql}", params).fetchone()[0]
         rows = conn.execute(
             f"SELECT ts, event, client, address, detail, real_address FROM vpn_events "
@@ -664,23 +674,30 @@ def insert_traffic_flows(rows: list[tuple]):
         conn.close()
 
 
-def list_traffic_flows(q: str | None = None, page: int = 1, page_size: int = 50) -> tuple[list[dict], int]:
+def list_traffic_flows(
+    q: str | None = None, page: int = 1, page_size: int = 50, since: str | None = None
+) -> tuple[list[dict], int]:
     """Most recent first, server-side paginated and searched — this is a
     display list, unlike list_vpn_events above (which feeds a pairing
     algorithm that wants chronological order). Returns (rows,
-    total_matching_count); see list_vpn_events_page's docstring for why."""
+    total_matching_count); see list_vpn_events_page's docstring for why,
+    and for what `since` expects."""
     conn = get_conn()
     try:
-        where_sql = ""
+        clauses = []
         params: list = []
         if q:
             like = f"%{_escape_like(q)}%"
-            where_sql = (
-                "WHERE (client LIKE ? ESCAPE '\\' OR src LIKE ? ESCAPE '\\' "
+            clauses.append(
+                "(client LIKE ? ESCAPE '\\' OR src LIKE ? ESCAPE '\\' "
                 "OR dst LIKE ? ESCAPE '\\' OR dst_org LIKE ? ESCAPE '\\' "
                 "OR proto LIKE ? ESCAPE '\\' OR dport LIKE ? ESCAPE '\\')"
             )
-            params = [like, like, like, like, like, like]
+            params += [like, like, like, like, like, like]
+        if since:
+            clauses.append("ts >= ?")
+            params.append(since)
+        where_sql = ("WHERE " + " AND ".join(clauses)) if clauses else ""
         total = conn.execute(f"SELECT COUNT(*) FROM traffic_flows {where_sql}", params).fetchone()[0]
         rows = conn.execute(
             f"SELECT ts, src, dst, dst_org, client, proto, sport, dport, in_if, out_if "

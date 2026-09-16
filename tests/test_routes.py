@@ -544,6 +544,32 @@ def test_client_sessions_tab_search(client, monkeypatch):
     assert b"mobile" not in resp.data
 
 
+def test_logs_range_filters_out_events_older_than_the_window(client, monkeypatch):
+    from datetime import datetime, timedelta
+    now = datetime.now()
+    recent_ts = now.strftime("%Y-%m-%d %H:%M:%S")
+    old_ts = (now - timedelta(days=2)).strftime("%Y-%m-%d %H:%M:%S")
+    db.insert_vpn_events([
+        (old_ts, "connected", "old-client", "10.66.66.1:1", "", None),
+        (recent_ts, "connected", "recent-client", "10.66.66.1:2", "", None),
+    ])
+    _login_admin(client)
+    resp = client.get("/logs?tab=sessions&range=1h")
+    assert resp.status_code == 200
+    assert b"recent-client" in resp.data
+    assert b"old-client" not in resp.data
+
+
+def test_logs_invalid_range_value_falls_back_to_no_cutoff(client, monkeypatch):
+    db.insert_vpn_events([
+        ("2020-01-01 00:00:00", "connected", "ancient-client", "10.66.66.1:1", "", None),
+    ])
+    _login_admin(client)
+    resp = client.get("/logs?tab=sessions&range=bogus")
+    assert resp.status_code == 200
+    assert b"ancient-client" in resp.data
+
+
 def test_logs_refresh_requires_login(client):
     resp = client.post("/logs/refresh", data={"tab": "client_sessions"})
     assert resp.status_code == 302

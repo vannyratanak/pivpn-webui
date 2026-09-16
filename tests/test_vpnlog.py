@@ -191,6 +191,17 @@ def test_real_address_carries_through_from_the_connected_event(temp_db):
     assert ongoing["real_address"] == "9.9.9.9:7"
 
 
+def test_list_client_sessions_since_filters_to_sessions_starting_at_or_after_cutoff(temp_db):
+    db.insert_vpn_events([
+        _connected("2026-08-21 09:00:00", "old-session", "10.66.66.1:1"),
+        _disconnected("2026-08-21 09:05:00", "old-session", "10.66.66.1:1"),
+        _connected("2026-08-21 15:00:00", "recent-session", "10.66.66.1:2"),
+    ])
+    sessions, total = list_client_sessions(since="2026-08-21 12:00:00")
+    assert total == 1
+    assert sessions[0]["client"] == "recent-session"
+
+
 def test_sort_client_sessions_resorts_a_session_relabeled_from_ongoing_to_ended():
     # Regression test for routes.py's live-connected-status cross-check:
     # once a session that list_client_sessions sorted as ongoing (pinned to
@@ -418,6 +429,16 @@ def test_list_traffic_flows_search_matches_across_full_history_not_just_one_page
     flows, total = list_traffic_flows(q="laptop")
     assert total == 1
     assert flows[0]["client"] == "laptop"
+
+
+def test_list_traffic_flows_since_filters_to_flows_at_or_after_cutoff(temp_db):
+    db.insert_traffic_flows([
+        _flow_row("2026-09-16 08:00:00", "10.202.226.2", "1.1.1.1", client="old-flow"),
+        _flow_row("2026-09-16 16:00:00", "10.202.226.2", "1.1.1.1", client="recent-flow"),
+    ])
+    flows, total = list_traffic_flows(since="2026-09-16 12:00:00")
+    assert total == 1
+    assert flows[0]["client"] == "recent-flow"
 
 
 def test_client_ip_map_prefers_live_over_static(monkeypatch):

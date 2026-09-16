@@ -95,7 +95,7 @@ def _parse_openvpn_events() -> list[dict]:
 
 
 def list_sessions(
-    q: str | None = None, page: int = 1, page_size: int = 50
+    q: str | None = None, page: int = 1, page_size: int = 50, since: str | None = None
 ) -> tuple[list[dict], int]:
     """Best-effort connect/disconnect events parsed from the OpenVPN
     service journal, most recent first, server-side paginated and
@@ -103,7 +103,7 @@ def list_sessions(
     total_matching_count). Flat event log, no pairing involved (unlike
     list_client_sessions below), so this can go straight to a paginated
     SQL query instead of reading everything into Python first."""
-    return db.list_vpn_events_page(q=q, page=page, page_size=page_size)
+    return db.list_vpn_events_page(q=q, page=page, page_size=page_size, since=since)
 
 
 def _format_duration(start: str, end: str) -> str | None:
@@ -208,7 +208,7 @@ def sort_client_sessions(sessions: list[dict]) -> None:
 
 
 def list_client_sessions(
-    q: str | None = None, page: int = 1, page_size: int = 50
+    q: str | None = None, page: int = 1, page_size: int = 50, since: str | None = None
 ) -> tuple[list[dict], int]:
     """Per-client login sessions — each a paired connect+disconnect (or
     still-open connect with no disconnect yet), most recent first,
@@ -241,6 +241,11 @@ def list_client_sessions(
     disconnects — resolving it this early instead means an already-*ended*
     session can now show a real address too, wherever ingestion caught it
     in time.
+
+    `since` (a 'YYYY-MM-DD HH:MM:SS' cutoff, same format as `start`/`end`)
+    filters to sessions that *started* at or after it — applied here, in
+    Python, after pairing, for the same reason `q` is: pairing needs the
+    full event stream regardless of the window being displayed.
     """
     events = _parse_openvpn_events()
     open_sessions: dict[str, dict] = {}
@@ -282,6 +287,9 @@ def list_client_sessions(
         })
     sort_client_sessions(sessions)
 
+    if since:
+        sessions = [s for s in sessions if (s.get("start") or "") >= since]
+
     if q:
         needle = q.lower()
         sessions = [
@@ -317,7 +325,7 @@ def _client_ip_map() -> dict[str, str]:
 
 
 def list_traffic_flows(
-    q: str | None = None, page: int = 1, page_size: int = 50
+    q: str | None = None, page: int = 1, page_size: int = 50, since: str | None = None
 ) -> tuple[list[dict], int]:
     """Per-flow, client-initiated connections (src client -> dst anywhere),
     most recent first, server-side paginated and searched over the full
@@ -340,7 +348,7 @@ def list_traffic_flows(
     mapping gone stale) is shown as a bare IP rather than dropped, and
     setup-traffic-log.sh never having been run at all just means an empty
     list, not an error."""
-    rows, total = db.list_traffic_flows(q=q, page=page, page_size=page_size)
+    rows, total = db.list_traffic_flows(q=q, page=page, page_size=page_size, since=since)
     flows = []
     for row in rows:
         flows.append({

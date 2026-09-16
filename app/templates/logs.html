@@ -10,12 +10,19 @@
    System/Activity/User Auth — those stay on the older client-side
    filter+paginate pattern (small, fixed-size lists, no separate DB-backed
    history to page into). #}
-{% macro search_and_pagination(tab_name, label) %}
+{% macro search_toolbar(tab_name, label) %}
   <div class="table-toolbar">
     <form method="get" action="{{ url_for('main.logs') }}" class="search-form">
       <input type="hidden" name="tab" value="{{ tab_name }}">
       <input type="text" name="q" value="{{ q or '' }}" class="log-filter-input"
              placeholder="Search…" aria-label="Search {{ label }}">
+      <label class="pagination-size log-range-filter">Range
+        <select name="range" onchange="this.form.submit()" aria-label="Time range">
+          {% for key, opt_label in log_range_options %}
+          <option value="{{ key }}" {{ 'selected' if log_range == key else '' }}>{{ opt_label }}</option>
+          {% endfor %}
+        </select>
+      </label>
       <button type="submit" class="btn btn-sm">Search</button>
     </form>
     <form method="post" action="{{ url_for('main.logs_refresh') }}" class="btn-form">
@@ -26,10 +33,14 @@
       </button>
     </form>
   </div>
+{% endmacro %}
+
+{% macro pagination_nav(tab_name) %}
   <div class="pagination">
     <form method="get" action="{{ url_for('main.logs') }}">
       <input type="hidden" name="tab" value="{{ tab_name }}">
       {% if q %}<input type="hidden" name="q" value="{{ q }}">{% endif %}
+      {% if log_range %}<input type="hidden" name="range" value="{{ log_range }}">{% endif %}
       <label class="pagination-size">Show
         <select name="page_size" onchange="this.form.submit()" aria-label="Rows per page">
           {% for n in (10, 25, 50, 100) %}
@@ -40,13 +51,13 @@
     </form>
     <div class="pagination-nav">
       {% if page > 1 %}
-      <a class="btn btn-sm" href="{{ url_for('main.logs', tab=tab_name, q=q, page=page-1, page_size=page_size) }}">Prev</a>
+      <a class="btn btn-sm" href="{{ url_for('main.logs', tab=tab_name, q=q, range=log_range, page=page-1, page_size=page_size) }}">Prev</a>
       {% else %}
       <button type="button" class="btn btn-sm" disabled>Prev</button>
       {% endif %}
       <span class="hint" aria-live="polite">Page {{ page }} of {{ total_pages }} ({{ total }} total)</span>
       {% if page < total_pages %}
-      <a class="btn btn-sm" href="{{ url_for('main.logs', tab=tab_name, q=q, page=page+1, page_size=page_size) }}">Next</a>
+      <a class="btn btn-sm" href="{{ url_for('main.logs', tab=tab_name, q=q, range=log_range, page=page+1, page_size=page_size) }}">Next</a>
       {% else %}
       <button type="button" class="btn btn-sm" disabled>Next</button>
       {% endif %}
@@ -72,7 +83,7 @@
 {% if tab == 'sessions' %}
 <section class="card">
   <p class="hint">Client connect/disconnect events parsed from the OpenVPN service journal, most recent first (last 7 days). Parsing is best-effort — lines that don't match a known OpenVPN log format show up with event "other" and the raw message in Detail.</p>
-  {{ search_and_pagination('sessions', 'VPN sessions') }}
+  {{ search_toolbar('sessions', 'VPN sessions') }}
   {% if not sessions %}
     <p class="empty">{{ 'No sessions match that search.' if q else 'No session events found — run deploy/setup-log-ingest.sh on this server if you haven\'t yet (see README), then allow a minute or two for the first backfill.' }}</p>
   {% else %}
@@ -108,6 +119,7 @@
     </tbody>
   </table>
   </div>
+  {{ pagination_nav('sessions') }}
   {% endif %}
 </section>
 {% endif %}
@@ -115,7 +127,7 @@
 {% if tab == 'client_sessions' %}
 <section class="card">
   <p class="hint">Each client's login sessions — when, how long, and how many — paired from the same connect/disconnect journal events as VPN Sessions. A session still in progress shows as "ongoing" with no end time or duration yet.</p>
-  {{ search_and_pagination('client_sessions', 'client sessions') }}
+  {{ search_toolbar('client_sessions', 'client sessions') }}
   {% if not client_sessions %}
     <p class="empty">{{ 'No sessions match that search.' if q else 'No session events found — run deploy/setup-log-ingest.sh on this server if you haven\'t yet (see README), then allow a minute or two for the first backfill.' }}</p>
   {% else %}
@@ -158,6 +170,7 @@
     </tbody>
   </table>
   </div>
+  {{ pagination_nav('client_sessions') }}
   {% endif %}
 </section>
 {% endif %}
@@ -165,7 +178,7 @@
 {% if tab == 'traffic' %}
 <section class="card">
   <p class="hint">Which client talked to which destination and when — one row per new connection (not every packet), parsed from the kernel's netfilter log (last 7 days, searchable and paginated below). Requires deploy/setup-traffic-log.sh to have been run on this server; new flows can take up to ~10 seconds to appear (ingested periodically in the background, not fetched live on page load) — or use Refresh for less than that.</p>
-  {{ search_and_pagination('traffic', 'traffic flows') }}
+  {{ search_toolbar('traffic', 'traffic flows') }}
   {% if not traffic_flows %}
     <p class="empty">{{ 'No flows match that search.' if q else "No traffic flow events found — either deploy/setup-traffic-log.sh hasn't been run on this server yet, or deploy/setup-log-ingest.sh hasn't (see README); allow a minute or two after both for the first backfill." }}</p>
   {% else %}
@@ -197,6 +210,7 @@
     </tbody>
   </table>
   </div>
+  {{ pagination_nav('traffic') }}
   {% endif %}
 </section>
 {% endif %}
