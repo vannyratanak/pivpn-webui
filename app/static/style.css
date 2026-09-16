@@ -1067,7 +1067,7 @@ dialog.modal code {
   margin-bottom: 20px;
 }
 
-.tabs a {
+.tabs a, .tabs button {
   color: var(--muted);
   text-decoration: none;
   padding: 8px 14px;
@@ -1075,7 +1075,20 @@ dialog.modal code {
   font-size: 14px;
 }
 
-.tabs a.active, .tabs a:hover {
+/* .tabs button — the Add-rule modal's rule-type selector (forward/INPUT/
+   port-forward/SNAT) reuses this same look, but toggles panels via JS
+   instead of navigating — needs the native <button> chrome reset since
+   .tabs a's rules alone don't touch background/border/cursor. */
+.tabs button {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.tabs a.active, .tabs a:hover,
+.tabs button.active, .tabs button:hover {
   color: var(--text);
   border-bottom-color: var(--accent);
 }
