@@ -584,6 +584,42 @@ def test_logs_no_range_param_defaults_to_1h(client, monkeypatch):
     assert b'value="1h" selected' in resp.data
 
 
+def test_activity_tab_range_and_search_filter_via_the_route(client, monkeypatch):
+    # Activity/User Auth read audit_log directly (no separate ingestion
+    # table), but go through the exact same q/range/page parsing in
+    # logs() as Sessions/Client Sessions/Traffic — this locks that in.
+    from datetime import datetime, timedelta
+    conn = db.get_conn()
+    old_ts = (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%d %H:%M:%S")
+    conn.execute(
+        "INSERT INTO audit_log (ts, actor, action, target, result) VALUES (?, ?, ?, ?, ?)",
+        (old_ts, "admin", "client_add", "old-client", "ok"),
+    )
+    conn.commit()
+    conn.close()
+    _login_admin(client)
+    db.add_audit("admin", "client_add", target="fresh-client", result="ok")
+
+    resp = client.get("/logs?tab=activity")
+    assert resp.status_code == 200
+    assert b"fresh-client" in resp.data
+    assert b"old-client" not in resp.data  # default 1h range excludes a 3-day-old entry
+
+    resp = client.get("/logs?tab=activity&range=7d&q=old")
+    assert resp.status_code == 200
+    assert b"old-client" in resp.data
+    assert b"fresh-client" not in resp.data
+
+
+def test_auth_tab_only_shows_login_logout_actions(client, monkeypatch):
+    _login_admin(client)
+    db.add_audit("admin", "client_add", target="laptop-anna", result="ok")
+    resp = client.get("/logs?tab=auth&range=7d")
+    assert resp.status_code == 200
+    assert b"login" in resp.data  # this test's own _login_admin call
+    assert b"laptop-anna" not in resp.data
+
+
 def test_logs_refresh_requires_login(client):
     resp = client.post("/logs/refresh", data={"tab": "client_sessions"})
     assert resp.status_code == 302

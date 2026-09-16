@@ -539,6 +539,46 @@ def list_audit_by_actions(actions: tuple[str, ...], limit: int = 200) -> list[di
         conn.close()
 
 
+def list_audit_page(
+    q: str | None = None, page: int = 1, page_size: int = 50, since: str | None = None,
+    actions: tuple[str, ...] | None = None,
+) -> tuple[list[dict], int]:
+    """Most recent first, server-side paginated and searched — backs the
+    Logs page's Activity and User Auth tabs (Activity: actions=None, no
+    restriction; User Auth: actions=AUTH_ACTIONS). Returns (rows,
+    total_matching_count); see list_vpn_events_page's docstring for `q`
+    and `since`'s exact contract (same conventions, same 'YYYY-MM-DD
+    HH:MM:SS' cutoff format for `since`, since add_audit stores `ts` the
+    same way)."""
+    conn = get_conn()
+    try:
+        clauses = []
+        params: list = []
+        if actions:
+            placeholders = ",".join("?" for _ in actions)
+            clauses.append(f"action IN ({placeholders})")
+            params += list(actions)
+        if q:
+            like = f"%{_escape_like(q)}%"
+            clauses.append(
+                "(actor LIKE ? ESCAPE '\\' OR action LIKE ? ESCAPE '\\' OR target LIKE ? ESCAPE '\\' "
+                "OR result LIKE ? ESCAPE '\\' OR detail LIKE ? ESCAPE '\\')"
+            )
+            params += [like, like, like, like, like]
+        if since:
+            clauses.append("ts >= ?")
+            params.append(since)
+        where_sql = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        total = conn.execute(f"SELECT COUNT(*) FROM audit_log {where_sql}", params).fetchone()[0]
+        rows = conn.execute(
+            f"SELECT * FROM audit_log {where_sql} ORDER BY id DESC LIMIT ? OFFSET ?",
+            [*params, page_size, (page - 1) * page_size],
+        ).fetchall()
+        return [dict(r) for r in rows], total
+    finally:
+        conn.close()
+
+
 def get_cached_ip_org(ip: str) -> tuple[bool, str | None]:
     """(found, org) — found=False means this IP has never been looked up
     at all (org=None alone can't distinguish that from "looked up, found

@@ -2,16 +2,16 @@
 {% block title %}Logs — PiVPN Web UI{% endblock %}
 {% block content %}
 
-{# Shared by the three DB-backed, server-paginated tabs (VPN Sessions,
-   Client Sessions, Traffic). search_box sits in the page-header-row up
-   top (matching every other page's search box); range_and_refresh stays
-   in the tab's own card, above its table. Split into two forms/macros
-   so each carries the other's current value as a hidden field — moving
-   the search box up shouldn't mean losing the selected range (or vice
-   versa) when either one submits on its own. Not used by System/
-   Activity/User Auth — those stay on the older client-side filter+
-   paginate pattern (small, fixed-size lists, no separate DB-backed
-   history to page into). #}
+{# Shared by the five DB-backed, server-paginated tabs (VPN Sessions,
+   Client Sessions, Traffic, Activity, User Auth). search_box sits in the
+   page-header-row up top (matching every other page's search box);
+   range_and_refresh/range_only stay in the tab's own card, above its
+   table. Split into separate forms/macros so each carries the others'
+   current value as a hidden field — moving the search box up shouldn't
+   mean losing the selected range (or vice versa) when any one of them
+   submits on its own. Not used by System, which stays on the older
+   client-side filter pattern (a raw journalctl text dump, not a table —
+   no separate DB-backed history to page into at all). #}
 {% macro search_box(tab_name, label) %}
   <form method="get" action="{{ url_for('main.logs') }}" class="search-form">
     <input type="hidden" name="tab" value="{{ tab_name }}">
@@ -40,6 +40,26 @@
       <button type="submit" class="btn btn-icon" title="Refresh now" aria-label="Refresh now">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
       </button>
+    </form>
+  </div>
+{% endmacro %}
+
+{# Activity/User Auth read audit_log directly on every request (no
+   separate periodic-ingest step the way Sessions/Client Sessions/Traffic
+   do), so there's no ingestion lag for a "Refresh now" button to ever
+   catch up on — just the Range select, no refresh form. #}
+{% macro range_only(tab_name) %}
+  <div class="table-toolbar">
+    <form method="get" action="{{ url_for('main.logs') }}">
+      <input type="hidden" name="tab" value="{{ tab_name }}">
+      {% if q %}<input type="hidden" name="q" value="{{ q }}">{% endif %}
+      <span class="pagination-size log-range-filter">
+        <select name="range" onchange="this.form.submit()" aria-label="Time range">
+          {% for key, opt_label in log_range_options %}
+          <option value="{{ key }}" {{ 'selected' if log_range == key else '' }}>{{ opt_label }}</option>
+          {% endfor %}
+        </select>
+      </span>
     </form>
   </div>
 {% endmacro %}
@@ -74,7 +94,7 @@
   </div>
 {% endmacro %}
 
-{% set log_search_labels = {'sessions': 'VPN sessions', 'client_sessions': 'client sessions', 'traffic': 'traffic flows'} %}
+{% set log_search_labels = {'sessions': 'VPN sessions', 'client_sessions': 'client sessions', 'traffic': 'traffic flows', 'activity': 'activity log', 'auth': 'user auth log'} %}
 <div class="page-header-row">
   <h1>Logs</h1>
   {% if tab in log_search_labels %}
@@ -88,7 +108,7 @@
   {% endif %}
   <a href="{{ url_for('main.logs', tab='client_sessions') }}" class="{{ 'active' if tab == 'client_sessions' }}" {% if tab == 'client_sessions' %}aria-current="page"{% endif %}>Client Sessions</a>
   {% if current_user.is_admin %}
-  <a href="{{ url_for('main.logs', tab='traffic') }}" class="{{ 'active' if tab == 'traffic' }}" {% if tab == 'traffic' %}aria-current="page"{% endif %}>Traffic</a>
+  <a href="{{ url_for('main.logs', tab='traffic') }}" class="{{ 'active' if tab == 'traffic' }}" {% if tab == 'traffic' %}aria-current="page"{% endif %}>Traffics</a>
   <a href="{{ url_for('main.logs', tab='system') }}" class="{{ 'active' if tab == 'system' }}" {% if tab == 'system' %}aria-current="page"{% endif %}>System</a>
   <a href="{{ url_for('main.logs', tab='activity') }}" class="{{ 'active' if tab == 'activity' }}" {% if tab == 'activity' %}aria-current="page"{% endif %}>Activity</a>
   {% endif %}
@@ -255,10 +275,8 @@
 
 {% if tab == 'activity' %}
 <section class="card">
-  <p class="hint">Every audited action — firewall changes, client management, user management — not just login/logout (see User Auth for that), most recent first (last 300).</p>
-  {% if activity_entries %}
-  <input type="text" id="activity-filter" class="log-filter-input" placeholder="Search…" aria-label="Search activity log">
-  {% endif %}
+  <p class="hint">Every audited action — firewall changes, client management, user management — not just login/logout (see User Auth for that), most recent first.</p>
+  {{ range_only('activity') }}
   <div class="table-scroll">
   <table id="activity-table">
     <thead>
@@ -273,7 +291,7 @@
     </thead>
     <tbody id="activity-tbody">
       {% if not activity_entries %}
-      <tr><td colspan="6" class="empty">No activity yet.</td></tr>
+      <tr><td colspan="6" class="empty">{{ 'No activity matches that search.' if q else 'No activity yet.' }}</td></tr>
       {% endif %}
       {% for e in activity_entries %}
       <tr class="{{ 'blocked-row' if e.result == 'error' }}">
@@ -288,36 +306,14 @@
     </tbody>
   </table>
   </div>
-  {% if activity_entries %}
-  <div class="pagination" id="activity-pagination">
-    <label class="pagination-size">Show
-      <select id="activity-page-size">
-        <option value="10" selected>10</option>
-        <option value="25">25</option>
-        <option value="50">50</option>
-        <option value="100">100</option>
-      </select>
-    </label>
-    <div class="pagination-nav">
-      <button type="button" class="btn btn-sm" data-page-prev>Prev</button>
-      <span data-page-status class="hint"></span>
-      <button type="button" class="btn btn-sm" data-page-next>Next</button>
-    </div>
-  </div>
-  <script>
-    const activityPager = attachPagination('#activity-tbody', 'tr', 'activity-page-size', 'activity-pagination');
-    attachLogFilter('activity-filter', '#activity-tbody', 'tr', '#activity-table thead th', () => activityPager && activityPager.refresh());
-  </script>
-  {% endif %}
+  {{ pagination_nav('activity') }}
 </section>
 {% endif %}
 
 {% if tab == 'auth' %}
 <section class="card">
-  <p class="hint">Login and logout events for every account, most recent first (last 200).</p>
-  {% if auth_entries %}
-  <input type="text" id="auth-filter" class="log-filter-input" placeholder="Search…" aria-label="Search user auth log">
-  {% endif %}
+  <p class="hint">Login and logout events for every account, most recent first.</p>
+  {{ range_only('auth') }}
   <div class="table-scroll">
   <table id="auth-table">
     <thead>
@@ -331,7 +327,7 @@
     </thead>
     <tbody id="auth-tbody">
       {% if not auth_entries %}
-      <tr><td colspan="5" class="empty">No auth activity yet.</td></tr>
+      <tr><td colspan="5" class="empty">{{ 'No auth activity matches that search.' if q else 'No auth activity yet.' }}</td></tr>
       {% endif %}
       {% for e in auth_entries %}
       <tr class="{{ 'blocked-row' if e.result == 'error' }}">
@@ -345,9 +341,7 @@
     </tbody>
   </table>
   </div>
-  {% if auth_entries %}
-  <script>attachLogFilter('auth-filter', '#auth-tbody', 'tr', '#auth-table thead th');</script>
-  {% endif %}
+  {{ pagination_nav('auth') }}
 </section>
 {% endif %}
 {% endblock %}

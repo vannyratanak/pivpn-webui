@@ -81,6 +81,52 @@ def test_add_audit_keeps_rows_within_retention(tmp_path, monkeypatch):
     assert len(db.list_audit(limit=100)) == 2  # both survive
 
 
+def test_list_audit_page_paginates_most_recent_first(tmp_path, monkeypatch):
+    _use_temp_db(tmp_path, monkeypatch)
+    for i in range(5):
+        db.add_audit("admin", f"action{i}", result="ok")
+    rows, total = db.list_audit_page(page=1, page_size=2)
+    assert total == 5
+    assert len(rows) == 2
+    assert rows[0]["action"] == "action4"  # most recent first
+
+
+def test_list_audit_page_search_matches_across_fields(tmp_path, monkeypatch):
+    _use_temp_db(tmp_path, monkeypatch)
+    db.add_audit("admin", "client_add", target="laptop-anna", result="ok")
+    db.add_audit("admin", "client_add", target="phone-bob", result="ok")
+    rows, total = db.list_audit_page(q="anna")
+    assert total == 1
+    assert rows[0]["target"] == "laptop-anna"
+
+
+def test_list_audit_page_since_filters_by_cutoff(tmp_path, monkeypatch):
+    _use_temp_db(tmp_path, monkeypatch)
+    conn = db.get_conn()
+    old_ts = (datetime.now() - timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S")
+    conn.execute(
+        "INSERT INTO audit_log (ts, actor, action, result) VALUES (?, ?, ?, ?)",
+        (old_ts, "admin", "old-action", "ok"),
+    )
+    conn.commit()
+    conn.close()
+    db.add_audit("admin", "recent-action", result="ok")
+    cutoff = (datetime.now() - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
+    rows, total = db.list_audit_page(since=cutoff)
+    assert total == 1
+    assert rows[0]["action"] == "recent-action"
+
+
+def test_list_audit_page_actions_restricts_to_given_set(tmp_path, monkeypatch):
+    _use_temp_db(tmp_path, monkeypatch)
+    db.add_audit("admin", "login", result="ok")
+    db.add_audit("admin", "logout", result="ok")
+    db.add_audit("admin", "client_add", target="laptop-anna", result="ok")
+    rows, total = db.list_audit_page(actions=("login", "logout"))
+    assert total == 2
+    assert {r["action"] for r in rows} == {"login", "logout"}
+
+
 def test_login_failures_count_per_ip(tmp_path, monkeypatch):
     _use_temp_db(tmp_path, monkeypatch)
     db.record_login_failure("203.0.113.9")

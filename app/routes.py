@@ -918,13 +918,14 @@ def logs():
 
     sessions = client_sessions = webui_log = system_log = auth_entries = activity_entries = None
     traffic_flows = None
-    # Shared by the three DB-backed tabs below (Sessions/Client Sessions/
-    # Traffic) — real server-side search + pagination over the *full*
-    # retained history (up to 7 days), not just a fixed-size recent slice.
-    # See vpnlog.py's list_sessions/list_client_sessions/list_traffic_flows
-    # for why "just raise the old limit=300" wasn't the right fix: at real
-    # traffic volume, even a few hundred rows can be just the last few
-    # minutes.
+    # Shared by the five DB-backed tabs below (Sessions/Client Sessions/
+    # Traffic/Activity/User Auth) — real server-side search + pagination
+    # over the *full* retained history (up to 7 days for the VPN-log
+    # tabs; AUDIT_LOG_RETENTION_DAYS for Activity/User Auth), not just a
+    # fixed-size recent slice. See vpnlog.py's list_sessions/
+    # list_client_sessions/list_traffic_flows for why "just raise the old
+    # limit=300" wasn't the right fix: at real traffic volume, even a few
+    # hundred rows can be just the last few minutes.
     q = (request.args.get("q") or "").strip() or None
     log_range = request.args.get("range") or LOG_RANGE_DEFAULT
     if log_range not in LOG_RANGE_HOURS:
@@ -997,9 +998,11 @@ def logs():
         # AUTH_ACTIONS below). This is the only place any of that ever
         # surfaces in the UI; before this it was write-only, inspectable
         # only by querying the database directly.
-        activity_entries = db.list_audit(limit=300)
+        activity_entries, total = db.list_audit_page(q=q, page=page, page_size=page_size, since=since)
     else:
-        auth_entries = db.list_audit_by_actions(AUTH_ACTIONS)
+        auth_entries, total = db.list_audit_page(
+            q=q, page=page, page_size=page_size, since=since, actions=AUTH_ACTIONS
+        )
 
     total_pages = max(1, math.ceil(total / page_size))
     page = min(page, total_pages)
