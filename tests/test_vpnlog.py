@@ -1,7 +1,7 @@
 import subprocess
 
 import config
-from app import pivpn_ctl, vpnlog
+from app import db, pivpn_ctl, vpnlog
 from app.vpnlog import (
     CONNECT_RE,
     DISCONNECT_RE,
@@ -101,55 +101,59 @@ def test_format_duration_none_start_returns_none():
 # often (each reconnect its own short, already-ended session) shouldn't
 # be able to bury someone who's actually connected right now further down
 # the list just by having more recent (but finished) activity.
+#
+# Seeds app/db.py's vpn_events table directly (via the temp_db fixture)
+# rather than faking raw journal text — list_client_sessions reads from
+# that table now (populated by deploy/ingest_logs.py in production, not on
+# any request path), not a live journalctl fetch. The CONNECT_RE/
+# DISCONNECT_RE parsing this used to also exercise is covered separately
+# in tests/test_ingest_logs.py, where that parsing now actually lives.
 
-def _connect_line(ts, name, addr):
-    return f"{ts}+0700 vpn ovpn-server[1]: [{name}] Peer Connection Initiated with [AF_INET]{addr}"
+def _connected(ts, name, addr):
+    return (ts, "connected", name, addr, "")
 
 
-def _disconnect_line(ts, name, addr):
-    return f"{ts}+0700 vpn ovpn-server[1]: {name}/{addr} SIGTERM[soft,remote-exit] received, client-instance exiting"
+def _disconnected(ts, name, addr):
+    return (ts, "disconnected", name, addr, "")
 
 
-def test_ongoing_session_sorts_above_more_recent_ended_ones(monkeypatch):
-    lines = [
+def test_ongoing_session_sorts_above_more_recent_ended_ones(temp_db):
+    db.insert_vpn_events([
         # "old" started much earlier and never disconnected — still ongoing
-        _connect_line("2026-08-21T13:00:00", "old", "10.66.66.1:1"),
+        _connected("2026-08-21 13:00:00", "old", "10.66.66.1:1"),
         # "test" connected and disconnected much more recently, but it's over
-        _connect_line("2026-08-21T15:50:00", "test", "10.66.66.1:2"),
-        _disconnect_line("2026-08-21T15:50:10", "test", "10.66.66.1:2"),
-    ]
-    monkeypatch.setattr(vpnlog, "run_root", lambda argv: "\n".join(lines))
+        _connected("2026-08-21 15:50:00", "test", "10.66.66.1:2"),
+        _disconnected("2026-08-21 15:50:10", "test", "10.66.66.1:2"),
+    ])
     sessions = list_client_sessions()
     assert [s["client"] for s in sessions] == ["old", "test"]
     assert sessions[0]["ongoing"] is True
     assert sessions[1]["ongoing"] is False
 
 
-def test_multiple_ongoing_still_sorted_by_recency_among_themselves(monkeypatch):
-    lines = [
-        _connect_line("2026-08-21T10:00:00", "early-bird", "10.66.66.1:1"),
-        _connect_line("2026-08-21T14:00:00", "late-riser", "10.66.66.1:2"),
-    ]
-    monkeypatch.setattr(vpnlog, "run_root", lambda argv: "\n".join(lines))
+def test_multiple_ongoing_still_sorted_by_recency_among_themselves(temp_db):
+    db.insert_vpn_events([
+        _connected("2026-08-21 10:00:00", "early-bird", "10.66.66.1:1"),
+        _connected("2026-08-21 14:00:00", "late-riser", "10.66.66.1:2"),
+    ])
     sessions = list_client_sessions()
     assert [s["client"] for s in sessions] == ["late-riser", "early-bird"]
     assert all(s["ongoing"] for s in sessions)
 
 
-def test_reconnect_without_matching_disconnect_does_not_lose_the_earlier_session(monkeypatch):
+def test_reconnect_without_matching_disconnect_does_not_lose_the_earlier_session(temp_db):
     # Regression test for a real bug: a second "connected" event for the
     # same client name (e.g. a ping-timeout/unclean drop that never logs
     # DISCONNECT_RE's SIGTERM pattern, followed by a reconnect) used to
     # silently overwrite the still-open first session in open_sessions —
     # that entire earlier session vanished from the list, never shown as
     # ended or ongoing, just gone.
-    lines = [
-        _connect_line("2026-08-21T09:00:00", "nurak", "10.66.66.1:1"),
+    db.insert_vpn_events([
+        _connected("2026-08-21 09:00:00", "nurak", "10.66.66.1:1"),
         # no disconnect for the first connection — tunnel just died
-        _connect_line("2026-08-21T09:30:00", "nurak", "10.66.66.1:2"),
-        _disconnect_line("2026-08-21T10:00:00", "nurak", "10.66.66.1:2"),
-    ]
-    monkeypatch.setattr(vpnlog, "run_root", lambda argv: "\n".join(lines))
+        _connected("2026-08-21 09:30:00", "nurak", "10.66.66.1:2"),
+        _disconnected("2026-08-21 10:00:00", "nurak", "10.66.66.1:2"),
+    ])
     sessions = list_client_sessions()
     assert len(sessions) == 2  # both the orphaned first session and the paired second one
     starts = {s["start"] for s in sessions}
@@ -287,6 +291,43 @@ def test_flow_re_matches_icmp_line_without_ports():
     assert m.group("dport") is None
 
 
+# --- list_traffic_flows: reads pre-resolved rows from app/db.py's
+# traffic_flows table (populated by deploy/ingest_logs.py, which resolves
+# client name + destination org at ingest time — see that script and
+# tests/test_ingest_logs.py, where those concerns now actually live). No
+# WHOIS calls, no journalctl fetch, no regex parsing happen on this
+# request-time read path anymore.
+
+def _flow_row(ts, src, dst, dst_org=None, client=None, proto="TCP", sport="1234", dport="443"):
+    return (ts, src, dst, dst_org, client, proto, sport, dport, "tun0", "ens18")
+
+
+def test_list_traffic_flows_reads_most_recent_first(temp_db):
+    db.insert_traffic_flows([
+        _flow_row("2026-09-16 10:00:00", "10.202.226.2", "1.1.1.1", client="mobile"),
+        _flow_row("2026-09-16 10:00:05", "10.202.226.77", "149.112.112.112",
+                   dst_org="Meta Platforms Ireland Limited"),
+    ])
+
+    flows = list_traffic_flows()
+
+    assert len(flows) == 2
+    # most recent first
+    assert flows[0]["dst"] == "149.112.112.112"
+    assert flows[0]["dst_org"] == "Meta Platforms Ireland Limited"
+    assert flows[0]["client"] == "10.202.226.77"  # no client resolved at ingest -> bare IP
+    assert flows[1]["client"] == "mobile"
+    assert flows[1]["dport"] == "443"
+
+
+def test_list_traffic_flows_respects_limit(temp_db):
+    db.insert_traffic_flows([
+        _flow_row(f"2026-09-16 10:00:{i:02d}", "10.202.226.2", "1.1.1.1")
+        for i in range(5)
+    ])
+    assert len(list_traffic_flows(limit=2)) == 2
+
+
 def test_client_ip_map_prefers_live_over_static(monkeypatch):
     # "nurak" has moved off its static ccd IP onto a dynamically-assigned
     # one for this session — the live status should win, not the stale
@@ -299,88 +340,3 @@ def test_client_ip_map_prefers_live_over_static(monkeypatch):
     assert _client_ip_map() == {"10.202.226.2": "nurak", "10.202.226.9": "nurak"}
 
 
-def test_list_traffic_flows_resolves_known_client_and_falls_back_to_ip(monkeypatch):
-    monkeypatch.setattr(pivpn_ctl, "list_client_ips", lambda: {})
-    monkeypatch.setattr(
-        pivpn_ctl, "list_connected_clients",
-        lambda: {"mobile": {"virtual_address": "10.202.226.2"}},
-    )
-    unknown_src_line = TCP_FLOW_LINE.replace("10.202.226.2", "10.202.226.77")
-    monkeypatch.setattr(vpnlog, "run_root", lambda argv: "\n".join([TCP_FLOW_LINE, unknown_src_line]))
-    # list_traffic_flows only ever resolves orgs from what's already
-    # cache-known (see its "Cache-only on purpose" comment) — a live/
-    # not-yet-cached destination is left pending for the /logs/traffic/orgs
-    # follow-up call (see test_routes.py), not looked up here.
-    monkeypatch.setattr(
-        vpnlog.iplookup, "get_cached_ip_orgs",
-        lambda ips: {ip: "Meta Platforms Ireland Limited" for ip in ips},
-    )
-
-    flows = list_traffic_flows()
-
-    assert len(flows) == 2
-    # most recent first
-    assert flows[0]["client"] == "10.202.226.77"  # no known mapping -> bare IP
-    assert flows[0]["dst"] == "149.112.112.112"
-    assert flows[0]["dst_org"] == "Meta Platforms Ireland Limited"
-    assert flows[0]["dst_org_known"] is True
-    assert flows[1]["client"] == "mobile"
-    assert flows[1]["dport"] == "443"
-
-
-def test_list_traffic_flows_looks_up_org_once_per_unique_destination(monkeypatch):
-    # Two rows, same destination — the cache lookup should only be called
-    # once for the whole batch (dedup now lives inside
-    # get_cached_ip_orgs/get_ip_orgs_bulk's shared helper, see
-    # test_iplookup.py for that guarantee), and both rows should pick up
-    # its result.
-    monkeypatch.setattr(pivpn_ctl, "list_client_ips", lambda: {})
-    monkeypatch.setattr(pivpn_ctl, "list_connected_clients", lambda: {})
-    monkeypatch.setattr(vpnlog, "run_root", lambda argv: "\n".join([TCP_FLOW_LINE, TCP_FLOW_LINE]))
-    calls = []
-
-    def fake_get_cached_ip_orgs(ips):
-        calls.append(ips)
-        return {ip: "Meta Platforms Ireland Limited" for ip in ips}
-
-    monkeypatch.setattr(vpnlog.iplookup, "get_cached_ip_orgs", fake_get_cached_ip_orgs)
-
-    flows = list_traffic_flows()
-
-    assert len(flows) == 2
-    assert len(calls) == 1
-    assert flows[0]["dst_org"] == "Meta Platforms Ireland Limited"
-    assert flows[1]["dst_org"] == "Meta Platforms Ireland Limited"
-
-
-def test_list_traffic_flows_handles_journalctl_no_entries_output(monkeypatch):
-    # Regression test: journalctl -g/--grep (used only by the "flow" log
-    # helper action) exits 1 — not 0 — when its pattern matches nothing,
-    # printing "-- No entries --" to stdout. deploy/pivpn-webui-log-helper.sh
-    # now tolerates that specific exit code (see its own comment) rather
-    # than letting `set -e` turn "no traffic in this window" into a raised
-    # PrivilegedCommandError — this is the Python-side half of that fix:
-    # run_root's returned text in that case is just this literal line, and
-    # it must parse as "no flows", not raise or produce a bogus row.
-    monkeypatch.setattr(pivpn_ctl, "list_client_ips", lambda: {})
-    monkeypatch.setattr(pivpn_ctl, "list_connected_clients", lambda: {})
-    monkeypatch.setattr(vpnlog, "run_root", lambda argv: "-- No entries --")
-
-    assert list_traffic_flows() == []
-
-
-def test_list_traffic_flows_leaves_uncached_destination_pending(monkeypatch):
-    # The other half of the contract above: a destination get_cached_ip_orgs
-    # doesn't return at all (never queried, never cached) must render as
-    # "pending" (dst_org_known False), not silently as "known, blank" — the
-    # Traffic tab's JS only fills in exactly the rows marked pending.
-    monkeypatch.setattr(pivpn_ctl, "list_client_ips", lambda: {})
-    monkeypatch.setattr(pivpn_ctl, "list_connected_clients", lambda: {})
-    monkeypatch.setattr(vpnlog, "run_root", lambda argv: "\n".join([TCP_FLOW_LINE]))
-    monkeypatch.setattr(vpnlog.iplookup, "get_cached_ip_orgs", lambda ips: {})
-
-    flows = list_traffic_flows()
-
-    assert len(flows) == 1
-    assert flows[0]["dst_org"] is None
-    assert flows[0]["dst_org_known"] is False

@@ -1,7 +1,7 @@
 #!/bin/bash
 # Installed to /usr/local/sbin/pivpn-webui-log-helper.sh, owned by root,
 # invoked via a narrow NOPASSWD sudoers entry (see sudoers-pivpn-webui.template).
-# Read-only journal access for the web UI's log views. Only the three fixed
+# Read-only journal access for the web UI's log views. Only the fixed
 # journalctl invocations below are exposed — no caller-supplied unit names,
 # line counts, or other arguments ever reach journalctl. Like ccd-helper.sh,
 # sudoers argument globbing is not trusted as the security boundary; this
@@ -53,8 +53,27 @@ LINES_FLOW=5000
 # The prefix setup-traffic-log.sh's LOG rule tags every flow line with.
 FLOW_LOG_PREFIX="VPNFLOW"
 
+# deploy/ingest_logs.py's incremental fetch — used by the *-tail actions
+# below, not by openvpn/flow/webui/system above (those stay fixed-window,
+# kept around as manual/diagnostic commands; the live web app no longer
+# reads through them once vpn_events/traffic_flows are DB-backed). Cursor
+# files are root-owned (this script always runs as root) and journalctl
+# creates/updates them itself via --cursor-file — never touched directly by
+# the unprivileged ingest_logs.py process.
+STATE_DIR="/var/lib/pivpn-webui"
+OPENVPN_CURSOR="$STATE_DIR/openvpn.cursor"
+FLOW_CURSOR="$STATE_DIR/flow.cursor"
+# Only takes effect on each cursor file's very first-ever use (no cursor
+# yet to resume from) — a real backfill of history that already exists in
+# the journal, not an ongoing limit. Once a cursor exists, it's always more
+# recent than this, so --since is normally a no-op safety floor; the one
+# case it actually matters again is the ingest timer having been down for
+# longer than this, in which case it correctly caps the backfill at this
+# window rather than however long the gap actually was.
+BACKFILL_SINCE="7 days ago"
+
 usage() {
-  echo "usage: $0 openvpn | webui | system | flow" >&2
+  echo "usage: $0 openvpn | webui | system | flow | openvpn-tail | flow-tail" >&2
   exit 1
 }
 
@@ -84,6 +103,21 @@ case "$action" in
     # anything else nonzero is a real problem and should still fail loudly.
     set +e
     journalctl -k --since "$SINCE_FLOW" -n "$LINES_FLOW" --no-pager -o short-iso -g "$FLOW_LOG_PREFIX"
+    rc=$?
+    set -e
+    [[ $rc -eq 0 || $rc -eq 1 ]] || exit "$rc"
+    ;;
+  openvpn-tail)
+    mkdir -p "$STATE_DIR"
+    journalctl -u "$OPENVPN_UNIT" --cursor-file="$OPENVPN_CURSOR" --since "$BACKFILL_SINCE" --no-pager -o short-iso
+    ;;
+  flow-tail)
+    # Same benign-exit-1 handling as `flow` above — an incremental fetch
+    # with nothing new since the last run is the normal, expected case for
+    # most ticks, not an error.
+    mkdir -p "$STATE_DIR"
+    set +e
+    journalctl -k --cursor-file="$FLOW_CURSOR" --since "$BACKFILL_SINCE" --no-pager -o short-iso -g "$FLOW_LOG_PREFIX"
     rc=$?
     set -e
     [[ $rc -eq 0 || $rc -eq 1 ]] || exit "$rc"

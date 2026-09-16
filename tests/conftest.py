@@ -2,8 +2,19 @@ import pytest
 from werkzeug.security import generate_password_hash
 
 import config
+from app import db
 
 TEST_PASSWORD = "testpass123"
+
+
+@pytest.fixture
+def temp_db(tmp_path, monkeypatch):
+    """A throwaway, already-initialized sqlite DB for tests that call
+    app/db.py functions directly (not through the Flask `client` fixture
+    above) — e.g. iplookup's cache or vpnlog's DB-backed Sessions/Traffic
+    reads."""
+    monkeypatch.setattr(config, "DB_PATH", str(tmp_path / "test.db"))
+    db.init_db()
 
 
 @pytest.fixture

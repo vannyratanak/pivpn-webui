@@ -1,8 +1,19 @@
-"""Read-only journal access for the Logs page (Sessions + System tabs).
+"""Read access for the Logs page's tabs.
 
-Goes through the pivpn-webui-log-helper.sh root helper (see deploy/ and
-app/privileged.py) — three fixed journalctl invocations, no user input
-reaches the shell.
+System/WebUI service logs go straight through the pivpn-webui-log-helper.sh
+root helper (see deploy/ and app/privileged.py) on every request — fixed
+journalctl invocations, no user input reaches the shell, and never
+regex-parsed (just displayed as raw text), so a live fetch stays cheap even
+over a 7-day window.
+
+VPN Sessions/Client Sessions/Traffic instead read from the database
+(db.list_vpn_events / db.list_traffic_flows) — deploy/ingest_logs.py
+populates those tables periodically via the same root helper's
+openvpn-tail/flow-tail actions, off any request path. That split exists
+because those three *are* regex-parsed/paired/WHOIS-resolved, and doing
+that per page load stopped being cheap once a week of history (not the
+original 3-day/6-hour windows) was wanted — see ingest_logs.py's own
+docstring for the real numbers.
 
 IMPORTANT — verify before relying on this in production: OpenVPN's log
 line format isn't strictly standardized across versions/configs. The
@@ -17,7 +28,7 @@ import subprocess
 from datetime import datetime
 
 import config
-from app import iplookup, pivpn_ctl
+from app import db, pivpn_ctl
 from app.privileged import run_root
 
 CONNECT_RE = re.compile(
@@ -61,34 +72,18 @@ def _split_journal_line(raw_line: str) -> tuple[str, str]:
 
 
 def _parse_openvpn_events() -> list[dict]:
-    """Every connect/disconnect/other event from the OpenVPN service
-    journal, oldest first (the order they actually happened in) — shared by
-    list_sessions (raw event log) and list_client_sessions (paired into
-    per-client sessions with a duration), so pairing always sees the full,
-    correctly-ordered event stream rather than an already-reversed/truncated
-    view."""
-    out = run_root([config.LOG_HELPER, "openvpn"])
-    events = []
-    for raw_line in out.splitlines():
-        ts, msg = _split_journal_line(raw_line.strip())
-        if not msg:
-            continue
-        m = CONNECT_RE.search(msg)
-        if m:
-            events.append({
-                "ts": ts, "event": "connected", "client": m.group("name"),
-                "address": f"{m.group('addr')}:{m.group('port')}", "detail": "",
-            })
-            continue
-        m = DISCONNECT_RE.search(msg)
-        if m:
-            events.append({
-                "ts": ts, "event": "disconnected", "client": m.group("name"),
-                "address": f"{m.group('addr')}:{m.group('port')}", "detail": "",
-            })
-            continue
-        events.append({"ts": ts, "event": "other", "client": "", "address": "", "detail": msg})
-    return events
+    """Every connect/disconnect/other event, oldest first (the order they
+    actually happened in) — shared by list_sessions (raw event log) and
+    list_client_sessions (paired into per-client sessions with a
+    duration), so pairing always sees the full, correctly-ordered event
+    stream rather than an already-reversed/truncated view.
+
+    Reads from the vpn_events table (populated periodically by
+    deploy/ingest_logs.py, not on any request path) rather than a live
+    journalctl fetch+regex-parse — see that script's docstring for why:
+    doing this parse on every single page load was measured at ~1.5s for a
+    real 7-day/13k-line volume on a live server."""
+    return db.list_vpn_events()
 
 
 def list_sessions(limit: int = 300) -> list[dict]:
@@ -253,62 +248,36 @@ def _client_ip_map() -> dict[str, str]:
 
 def list_traffic_flows(limit: int = 300) -> list[dict]:
     """Per-flow, client-initiated connections (src client -> dst anywhere),
-    parsed from the kernel LOG lines deploy/setup-traffic-log.sh's
-    mangle-table FORWARD rule produces — one line per NEW connection from
-    the VPN client subnet, not every packet, most recent first.
+    most recent first.
 
-    Genuinely different volume profile than the other Logs tabs (a single
-    browsing session can open hundreds of connections in minutes), so the
-    log helper uses a much shorter time window for this action specifically
-    — see SINCE_FLOW in deploy/pivpn-webui-log-helper.sh.
+    Reads from the traffic_flows table (populated periodically by
+    deploy/ingest_logs.py, not on any request path) — client name and
+    destination org are already resolved at ingest time (that script's own
+    call to _client_ip_map()/iplookup.get_ip_orgs_bulk), not here, so this
+    is a plain read with no WHOIS calls or regex parsing on the request
+    path at all. See ingest_logs.py's docstring for why: doing this same
+    work per page load was measured at ~4s+ at this app's real traffic
+    volume once a week of history (not just the original 6-hour window)
+    was wanted.
 
-    Best-effort, same as the rest of this module: a source IP that doesn't
-    resolve to a known client (already disconnected, mapping gone stale) is
-    shown as a bare IP rather than dropped, and setup-traffic-log.sh never
-    having been run at all just means an empty list, not an error."""
-    ip_to_name = _client_ip_map()
-    out = run_root([config.LOG_HELPER, "flow"])
-    parsed = []
-    for raw_line in out.splitlines():
-        ts, msg = _split_journal_line(raw_line.strip())
-        m = FLOW_RE.search(msg)
-        if not m:
-            continue
-        parsed.append((ts, m))
-    parsed.reverse()
-    parsed = parsed[:limit]
-
-    # One org lookup per unique destination in this batch, not per row —
-    # the same handful of destinations (a DNS server, a CDN edge) repeats
-    # across most rows, and the cache already covers repeat requests too,
-    # but there's no reason to pay even a dict/DB lookup twice for the same
-    # IP within a single page render.
-    #
-    # Cache-only on purpose (get_cached_ip_orgs, not get_ip_orgs_bulk) — a
-    # never-before-seen destination (common with CDN-heavy traffic, e.g.
-    # after enabling full-tunnel) would otherwise make this whole render
-    # wait on a live WHOIS query. Instead, a miss is left "pending" here
-    # (dst_org_known False) for the page's own JS to resolve via a
-    # follow-up call to /logs/traffic/orgs (see routes.py), which does use
-    # get_ip_orgs_bulk — same concurrent WHOIS resolution as before, just
-    # off the initial page-render's critical path.
-    org_by_dst = iplookup.get_cached_ip_orgs([m.group("dst") for _, m in parsed])
+    Best-effort, same as the rest of this module: a source IP that never
+    resolved to a known client at ingest time (already disconnected,
+    mapping gone stale) is shown as a bare IP rather than dropped, and
+    setup-traffic-log.sh never having been run at all just means an empty
+    list, not an error."""
     flows = []
-    for ts, m in parsed:
-        src = m.group("src")
-        dst = m.group("dst")
+    for row in db.list_traffic_flows(limit):
         flows.append({
-            "ts": ts,
-            "client": ip_to_name.get(src, src),
-            "src": src,
-            "dst": dst,
-            "dst_org": org_by_dst.get(dst),
-            "dst_org_known": dst in org_by_dst,
-            "proto": m.group("proto"),
-            "sport": m.group("sport") or "",
-            "dport": m.group("dport") or "",
-            "in_if": m.group("in_if"),
-            "out_if": m.group("out_if"),
+            "ts": row["ts"],
+            "client": row["client"] or row["src"],
+            "src": row["src"],
+            "dst": row["dst"],
+            "dst_org": row["dst_org"],
+            "proto": row["proto"],
+            "sport": row["sport"] or "",
+            "dport": row["dport"] or "",
+            "in_if": row["in_if"],
+            "out_if": row["out_if"],
         })
     return flows
 

@@ -4,7 +4,7 @@ from flask import Blueprint, abort, flash, jsonify, redirect, render_template, r
 from flask_login import current_user, login_required, login_user, logout_user
 
 import config
-from app import db, firewall, iplookup, pivpn_ctl, vpn_routes, vpnlog
+from app import db, firewall, pivpn_ctl, vpn_routes, vpnlog
 from app.auth import admin_required, hash_password, verify_credentials
 from app.privileged import PrivilegedCommandError
 
@@ -837,24 +837,3 @@ def logs():
         traffic_flows=traffic_flows, webui_log=webui_log, system_log=system_log,
         auth_entries=auth_entries, activity_entries=activity_entries,
     )
-
-
-@bp.route("/logs/traffic/orgs", methods=["POST"])
-@login_required
-@admin_required
-def traffic_orgs():
-    """AJAX endpoint the Traffic tab's JS calls right after the page
-    renders, to fill in the Organization column for whatever
-    list_traffic_flows() left as "pending" (dst_org_known False) — see that
-    function's docstring. Kept as a POST + JSON body (not a GET with a huge
-    querystring) since a page can legitimately have close to 300 unique
-    destinations in one batch."""
-    body = request.get_json(silent=True) or {}
-    ips = body.get("ips")
-    if not isinstance(ips, list) or not all(isinstance(ip, str) for ip in ips):
-        return jsonify(ok=False, error="Invalid request."), 400
-    # A page render is capped at 300 rows, so this is already a generous
-    # bound — just here to stop a hand-crafted request from asking this
-    # endpoint to fire off an unbounded number of WHOIS queries.
-    orgs = iplookup.get_ip_orgs_bulk(ips[:300])
-    return jsonify(ok=True, orgs=orgs)

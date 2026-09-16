@@ -1,0 +1,10 @@
+[Unit]
+Description=Run PiVPN Web UI log ingestion every minute
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+Unit=pivpn-webui-log-ingest.service
+
+[Install]
+WantedBy=timers.target

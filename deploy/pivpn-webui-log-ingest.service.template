@@ -1,0 +1,15 @@
+[Unit]
+Description=PiVPN Web UI log ingestion (Sessions/Traffic -> database)
+After=network.target
+
+[Service]
+Type=oneshot
+User=__USER__
+WorkingDirectory=__APP_DIR__
+ExecStart=__APP_DIR__/venv/bin/python3 __APP_DIR__/deploy/ingest_logs.py
+# Same reasoning as pivpn-webui.service.template: this calls `sudo` (via
+# app/privileged.py's run_root, for the log helper's openvpn-tail/flow-tail
+# actions), and sudo's setuid needs NoNewPrivileges off to work under
+# systemd. The privilege boundary is the narrow sudoers allowlist, not
+# this setting.
+NoNewPrivileges=false

@@ -280,6 +280,16 @@ Optional, separate from the above: if you want the `git push` → auto-deploy
 CD pipeline too (not required for the app to work), see
 [CD: deploying code changes to a running server](#cd-deploying-code-changes-to-a-running-server).
 
+**Required for the Sessions / Client Sessions / Traffic tabs specifically**
+(System/WebUI service log don't need this — they still read the journal
+live, and that stays cheap even over a week): those three tabs read
+pre-parsed rows from the database, populated by a background job, not a
+live journalctl fetch — see
+[Background log ingestion](#background-log-ingestion-sessionstraffic-history)
+below. Until `./setup-log-ingest.sh` has been run at least once, those
+three tabs show "no events found," same as any other not-yet-configured
+feature in this app — nothing breaks, they're just empty.
+
 ## Accessing it remotely
 
 It's bound to localhost on purpose — this panel can revoke certs and edit
@@ -432,6 +442,51 @@ access from here.
    `conntrack` forgets the mapping the moment a client disconnects, so an
    already-ended session always falls back to showing the relayed
    address, same as before this feature existed.
+
+## Background log ingestion (Sessions/Traffic history)
+
+`./setup-log-ingest.sh` (run once, after `setup.sh`) installs a systemd
+timer that runs `deploy/ingest_logs.py` once a minute. That script pulls
+whatever's new since its last run (via `journalctl --cursor-file`, so each
+run only ever sees new lines, never re-scans the whole window) and stores
+it as structured rows in the app's own database — `vpn_events` (OpenVPN
+connect/disconnect/other lines) and `traffic_flows` (per-connection
+Traffic-tab rows, with destination org + client name already resolved).
+The Sessions, Client Sessions, and Traffic tabs then just read those
+tables directly.
+
+**Why this exists, not just a wider `--since` window**: journald itself
+already keeps well over a week of history by default (confirmed live: a
+month+ on one real install, only ~128MB) — the original 3-day/6-hour
+windows in `pivpn-webui-log-helper.sh` were never a real data limit, just
+an arbitrary choice. But `app/vpnlog.py` regex-parses every raw line of
+Sessions/Traffic on each page load (pairing connect/disconnect events,
+matching the kernel's flow-log format, resolving WHOIS) — measured live at
+~1.5s (Sessions, ~13k lines/week) to ~4s+ (Traffic, thousands of
+lines/day) once the window's widened to a week. Moving that parsing out
+of the request path and into a once-a-minute background job removes that
+cost entirely from every page load, at the price of up to ~1 minute of
+lag before a brand-new session/flow shows up.
+
+**Retention**: both tables are pruned to the last 7 days on every ingest
+run (`db.prune_old_logs`). Change `RETENTION_DAYS` in
+`deploy/ingest_logs.py` for a different window — there's no separate
+config flag for it.
+
+**Duplicate-safety**: confirmed live that `journalctl --cursor-file` can
+re-emit the same last-seen line on the very next invocation. Both tables
+have a `UNIQUE` constraint over their real-world identifying columns and
+ingestion uses `INSERT OR IGNORE`, so reprocessing the same line twice is
+a silent no-op, not a duplicate row.
+
+**Updating it later**: `ingest_logs.py` runs straight from the git
+checkout (not copied elsewhere), so a normal `git pull`/CD deploy picks up
+changes to it automatically on the next scheduled run — no separate
+reinstall step, unlike the 4 helper scripts below. The systemd unit files
+themselves (`pivpn-webui-log-ingest.service`/`.timer`) are static and
+aren't part of the CD forced command; reinstall them by hand
+(`sudo install ...` + `sudo systemctl daemon-reload`) if you ever change
+those specifically.
 
 ## CD: deploying code changes to a running server
 

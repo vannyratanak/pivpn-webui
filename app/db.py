@@ -114,6 +114,59 @@ CREATE TABLE IF NOT EXISTS ip_org_cache (
     org TEXT,
     looked_up_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Structured OpenVPN journal lines, ingested periodically by
+-- deploy/ingest_logs.py (see that script and
+-- pivpn-webui-log-helper.sh's openvpn-tail action) instead of vpnlog.py
+-- regex-parsing raw journal text on every single page load — measured at
+-- ~1.5s for a real 7-day/13k-line volume on a live server, once someone
+-- actually wants a week of history rather than the original 3-day window.
+-- Stores every line, not just matched connect/disconnect ones — the VPN
+-- Sessions tab deliberately also shows unrecognized lines as event='other'
+-- with the raw text in `detail` (a diagnostic fallback for when this
+-- server's OpenVPN log format doesn't match CONNECT_RE/DISCONNECT_RE), and
+-- losing that by only storing matches would be a real feature regression,
+-- not just an implementation-detail change.
+-- The UNIQUE constraint is a deliberate belt-and-suspenders against
+-- ingest_logs.py ever reprocessing the same journal line twice (confirmed
+-- live: journalctl --cursor-file can re-emit the last-seen entry on the
+-- very next invocation) — INSERT OR IGNORE makes a duplicate ingest a
+-- no-op instead of a duplicate row.
+CREATE TABLE IF NOT EXISTS vpn_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT NOT NULL,                    -- 'YYYY-MM-DD HH:MM:SS', same format used everywhere else in this app
+    event TEXT NOT NULL,                 -- 'connected' | 'disconnected' | 'other'
+    client TEXT NOT NULL DEFAULT '',
+    address TEXT NOT NULL DEFAULT '',
+    detail TEXT NOT NULL DEFAULT '',     -- only populated for event='other'
+    UNIQUE (ts, event, client, address, detail)
+);
+CREATE INDEX IF NOT EXISTS idx_vpn_events_ts ON vpn_events(ts);
+
+-- Structured per-flow traffic rows, same ingestion story as vpn_events
+-- above but for the Traffic tab (see setup-traffic-log.sh's mangle-table
+-- LOG rule) — measured at ~4s+ for a real 7-day volume at this app's
+-- current traffic rate (thousands of flows/day), the clearest case for
+-- moving off live per-request parsing. dst_org/client are resolved once,
+-- at ingest time (via app/iplookup.py's same WHOIS+cache path, and
+-- app/vpnlog.py's _client_ip_map()) rather than per page view — ingestion
+-- isn't on any HTTP request's critical path, so there's no reason to defer
+-- that work the way the request-time code used to.
+CREATE TABLE IF NOT EXISTS traffic_flows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT NOT NULL,
+    src TEXT NOT NULL,
+    dst TEXT NOT NULL,
+    dst_org TEXT,           -- NULL = private/reserved address, or a WHOIS lookup that found nothing
+    client TEXT,            -- resolved client name at ingest time; NULL if src didn't map to a known client
+    proto TEXT NOT NULL,
+    sport TEXT,
+    dport TEXT,
+    in_if TEXT,
+    out_if TEXT,
+    UNIQUE (ts, src, dst, proto, sport, dport)
+);
+CREATE INDEX IF NOT EXISTS idx_traffic_flows_ts ON traffic_flows(ts);
 """
 
 
@@ -479,6 +532,94 @@ def cache_ip_org(ip: str, org: str | None):
             "ON CONFLICT(ip) DO UPDATE SET org = excluded.org, looked_up_at = CURRENT_TIMESTAMP",
             (ip, org),
         )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def insert_vpn_events(rows: list[tuple[str, str, str, str, str]]):
+    """Each row: (ts, event, client, address, detail). INSERT OR IGNORE so
+    a duplicate ingest of an already-seen line (see the table's own
+    comment) is silently a no-op rather than a duplicate row."""
+    if not rows:
+        return
+    conn = get_conn()
+    try:
+        conn.executemany(
+            "INSERT OR IGNORE INTO vpn_events (ts, event, client, address, detail) VALUES (?, ?, ?, ?, ?)",
+            rows,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def list_vpn_events(limit: int = 50000) -> list[dict]:
+    """Oldest first — matches what app/vpnlog.py's pairing logic expects
+    (it walks events in the order they actually happened), same contract
+    the old live-journalctl path had. Default limit is a generous safety
+    cap, not the real bound — prune_old_logs already keeps this table down
+    to roughly a week's worth (~13k rows/week observed live), and taking
+    the *oldest* N here (not the most recent) would be wrong once a cap
+    this low ever actually binds, so it's set well above any realistic
+    7-day row count instead of relying on that not mattering."""
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT ts, event, client, address, detail FROM vpn_events ORDER BY ts ASC, id ASC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def insert_traffic_flows(rows: list[tuple]):
+    """Each row: (ts, src, dst, dst_org, client, proto, sport, dport,
+    in_if, out_if). INSERT OR IGNORE for the same reprocessing-safety
+    reason as insert_vpn_events above."""
+    if not rows:
+        return
+    conn = get_conn()
+    try:
+        conn.executemany(
+            "INSERT OR IGNORE INTO traffic_flows "
+            "(ts, src, dst, dst_org, client, proto, sport, dport, in_if, out_if) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            rows,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def list_traffic_flows(limit: int = 300) -> list[dict]:
+    """Most recent first — this is a display list, unlike list_vpn_events
+    above (which feeds a pairing algorithm that wants chronological
+    order)."""
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT ts, src, dst, dst_org, client, proto, sport, dport, in_if, out_if "
+            "FROM traffic_flows ORDER BY ts DESC, id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def prune_old_logs(days: int):
+    """Deletes vpn_events/traffic_flows rows older than `days` — without
+    this, traffic_flows in particular grows without bound (thousands of
+    rows/day at this app's observed traffic rate), unlike journald's own
+    log rotation which did this for free under the old live-parsing
+    design. Called once per ingest_logs.py run, not on any request path."""
+    conn = get_conn()
+    try:
+        cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+        conn.execute("DELETE FROM vpn_events WHERE ts < ?", (cutoff,))
+        conn.execute("DELETE FROM traffic_flows WHERE ts < ?", (cutoff,))
         conn.commit()
     finally:
         conn.close()
