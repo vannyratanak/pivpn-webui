@@ -56,25 +56,6 @@ def _regenerate_script_for_ip(ip, client_ips=None):
             break
 
 
-def _redirect_after_rule_change():
-    """The rule-add/toggle/delete routes below are shared by two pages
-    now: the main Firewall Rules list, and a single client's detail page
-    (its own "add a rule for this client" form submits to the exact same
-    routes). Without this, every one of them would always bounce back to
-    the Firewall page regardless of where the request actually came from
-    — annoying specifically for the per-client flow, where the whole
-    point is staying on that client's page to see the rule appear in
-    context. Only ever trusts a same-site /clients/... path (never an
-    open redirect to arbitrary user input) and falls back to the
-    Firewall page's own URL when `next` isn't present at all — the
-    Firewall page's own forms never set it, so their behavior is
-    unchanged."""
-    next_url = request.form.get("next", "")
-    if next_url.startswith("/clients/"):
-        return redirect(next_url)
-    return redirect(url_for("main.firewall_rules"))
-
-
 # Failed attempts are tracked per source IP in sqlite (see db.py — a
 # plain in-process counter wouldn't be seen by both gunicorn workers).
 # 5 tries / 5 minutes: generous enough that a real admin mistyping their
@@ -382,6 +363,91 @@ def client_detail(name):
     return render_template("client_detail.html", client=client, rules=client_rules)
 
 
+@bp.route("/clients/<name>/rules/add", methods=["POST"])
+@login_required
+@admin_required
+def client_add_rule(name):
+    """The client detail page's own "add a rule for this client" form —
+    a separate route from the Firewall page's /firewall/forward
+    (deliberately not shared, even though both end up calling the same
+    firewall.add_forward_rule) so nothing here ever changes that page's
+    own behavior. Always redirects back to this same client's page.
+    `src` is looked up server-side from the client's own VPN IP rather
+    than trusted from the form, since this route's whole premise is
+    "this client's rule", not whatever IP happened to be submitted."""
+    try:
+        name = pivpn_ctl.validate_name(name)
+    except pivpn_ctl.PivpnError:
+        abort(404)
+    client_ip = pivpn_ctl.list_client_ips().get(name)
+    if not client_ip:
+        flash(f"{name} has no VPN IP yet — it needs to connect at least once first.", "error")
+        return redirect(url_for("main.client_detail", name=name))
+    try:
+        rule_id = firewall.add_forward_rule(
+            action=request.form.get("action"),
+            protocol=request.form.get("protocol"),
+            src=client_ip,
+            dst=request.form.get("dst"),
+            dport=request.form.get("dport"),
+            comment=request.form.get("comment", ""),
+        )
+        flash("Forward rule added.", "success")
+        _audit("firewall_forward_add", f"rule#{rule_id}")
+        _regenerate_script_for_ip(client_ip)
+    except firewall.FirewallError as exc:
+        flash(str(exc), "error")
+        _audit("firewall_forward_add", "", "error", str(exc))
+    return redirect(url_for("main.client_detail", name=name))
+
+
+@bp.route("/clients/<name>/rules/<int:rule_id>/toggle", methods=["POST"])
+@login_required
+@admin_required
+def client_toggle_rule(name, rule_id):
+    """Same as /firewall/<id>/toggle, kept as its own route (see
+    client_add_rule's docstring) purely so its redirect target can differ
+    without touching the Firewall page's own route."""
+    try:
+        name = pivpn_ctl.validate_name(name)
+    except pivpn_ctl.PivpnError:
+        abort(404)
+    try:
+        rule = db.get_rule(rule_id)
+        firewall.toggle_rule(rule_id, client_ip=_client_ip())
+        _audit("firewall_rule_toggle", f"rule#{rule_id}")
+        if rule and rule["kind"] == "forward":
+            _regenerate_script_for_ip(rule["src"])
+    except Exception as exc:
+        flash(str(exc), "error")
+        _audit("firewall_rule_toggle", f"rule#{rule_id}", "error", str(exc))
+    return redirect(url_for("main.client_detail", name=name))
+
+
+@bp.route("/clients/<name>/rules/<int:rule_id>/delete", methods=["POST"])
+@login_required
+@admin_required
+def client_delete_rule(name, rule_id):
+    """Same as /firewall/<id>/delete, kept as its own route (see
+    client_add_rule's docstring) purely so its redirect target can differ
+    without touching the Firewall page's own route."""
+    try:
+        name = pivpn_ctl.validate_name(name)
+    except pivpn_ctl.PivpnError:
+        abort(404)
+    rule = db.get_rule(rule_id)
+    try:
+        firewall.delete_rule(rule_id, client_ip=_client_ip())
+        flash("Rule deleted.", "success")
+        _audit("firewall_rule_delete", f"rule#{rule_id}")
+        if rule and rule["kind"] == "forward":
+            _regenerate_script_for_ip(rule["src"])
+    except firewall.FirewallError as exc:
+        flash(str(exc), "error")
+        _audit("firewall_rule_delete", f"rule#{rule_id}", "error", str(exc))
+    return redirect(url_for("main.client_detail", name=name))
+
+
 @bp.route("/clients/<name>/renew", methods=["POST"])
 @login_required
 def renew_client(name):
@@ -585,7 +651,7 @@ def add_forward():
     except firewall.FirewallError as exc:
         flash(str(exc), "error")
         _audit("firewall_forward_add", "", "error", str(exc))
-    return _redirect_after_rule_change()
+    return redirect(url_for("main.firewall_rules"))
 
 
 @bp.route("/firewall/input", methods=["POST"])
@@ -662,7 +728,7 @@ def toggle_rule(rule_id):
     except Exception as exc:
         flash(str(exc), "error")
         _audit("firewall_rule_toggle", f"rule#{rule_id}", "error", str(exc))
-    return _redirect_after_rule_change()
+    return redirect(url_for("main.firewall_rules"))
 
 
 @bp.route("/firewall/<int:rule_id>/reorder", methods=["POST"])
@@ -711,7 +777,7 @@ def delete_rule(rule_id):
     except firewall.FirewallError as exc:
         flash(str(exc), "error")
         _audit("firewall_rule_delete", f"rule#{rule_id}", "error", str(exc))
-    return _redirect_after_rule_change()
+    return redirect(url_for("main.firewall_rules"))
 
 
 @bp.route("/firewall/bulk-delete", methods=["POST"])

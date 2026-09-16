@@ -779,25 +779,13 @@ def test_client_detail_shows_only_this_clients_rules(client, monkeypatch):
     assert "bobs-rule" not in html
 
 
-# --- _redirect_after_rule_change: add_forward/toggle_rule/delete_rule all
-# default to the Firewall page (unchanged existing behavior) unless a
-# same-site /clients/... next is supplied, in which case they return there
-# instead — this is what lets the per-client page's own add-rule form (and
-# its toggle/delete buttons) keep the admin in context.
+# --- /firewall/forward, /firewall/<id>/toggle, /firewall/<id>/delete
+# always redirect to the Firewall page, unconditionally — the client
+# detail page's own add/toggle/delete actions use their own separate
+# /clients/<name>/rules/... routes below instead of sharing these, so nothing
+# here needs to (or should) vary its redirect target.
 
-def test_add_forward_redirects_back_to_client_page_when_next_provided(client):
-    _login_admin(client)
-    resp = client.post("/firewall/forward", data={
-        "action": "DROP", "protocol": "tcp", "src": "10.202.226.2", "dst": "", "dport": "",
-        "next": "/clients/laptop-anna",
-    })
-    assert resp.status_code == 302
-    assert resp.headers["Location"] == "/clients/laptop-anna"
-
-
-def test_add_forward_falls_back_to_firewall_page_without_next(client):
-    # Regression protection: the Firewall page's own "Add forward rule"
-    # form never sends `next` — this must keep landing back on /firewall.
+def test_add_forward_always_redirects_to_firewall_page(client):
     _login_admin(client)
     resp = client.post("/firewall/forward", data={
         "action": "DROP", "protocol": "tcp", "src": "10.202.226.2", "dst": "", "dport": "",
@@ -806,27 +794,7 @@ def test_add_forward_falls_back_to_firewall_page_without_next(client):
     assert resp.headers["Location"] == "/firewall"
 
 
-def test_add_forward_ignores_next_outside_clients_path(client):
-    # Open-redirect guard: _redirect_after_rule_change only trusts a
-    # same-site /clients/... path, never arbitrary next values.
-    _login_admin(client)
-    resp = client.post("/firewall/forward", data={
-        "action": "DROP", "protocol": "tcp", "src": "10.202.226.2", "dst": "", "dport": "",
-        "next": "http://evil.example.com/clients/laptop-anna",
-    })
-    assert resp.status_code == 302
-    assert resp.headers["Location"] == "/firewall"
-
-
-def test_toggle_rule_redirects_back_to_client_page_when_next_provided(client):
-    _login_admin(client)
-    rule_id = db.insert_rule({"kind": "forward", "action": "DROP", "protocol": "tcp", "src": "10.202.226.2"})
-    resp = client.post(f"/firewall/{rule_id}/toggle", data={"next": "/clients/laptop-anna"})
-    assert resp.status_code == 302
-    assert resp.headers["Location"] == "/clients/laptop-anna"
-
-
-def test_toggle_rule_falls_back_to_firewall_page_without_next(client):
+def test_toggle_rule_always_redirects_to_firewall_page(client):
     _login_admin(client)
     rule_id = db.insert_rule({"kind": "forward", "action": "DROP", "protocol": "tcp", "src": "10.202.226.2"})
     resp = client.post(f"/firewall/{rule_id}/toggle")
@@ -834,18 +802,62 @@ def test_toggle_rule_falls_back_to_firewall_page_without_next(client):
     assert resp.headers["Location"] == "/firewall"
 
 
-def test_delete_rule_redirects_back_to_client_page_when_next_provided(client):
-    _login_admin(client)
-    rule_id = db.insert_rule({"kind": "forward", "action": "DROP", "protocol": "tcp", "src": "10.202.226.2"})
-    resp = client.post(f"/firewall/{rule_id}/delete", data={"next": "/clients/laptop-anna"})
-    assert resp.status_code == 302
-    assert resp.headers["Location"] == "/clients/laptop-anna"
-
-
-def test_delete_rule_falls_back_to_firewall_page_without_next(client):
+def test_delete_rule_always_redirects_to_firewall_page(client):
     _login_admin(client)
     rule_id = db.insert_rule({"kind": "forward", "action": "DROP", "protocol": "tcp", "src": "10.202.226.2"})
     resp = client.post(f"/firewall/{rule_id}/delete")
     assert resp.status_code == 302
     assert resp.headers["Location"] == "/firewall"
+
+
+# --- /clients/<name>/rules/...: the client detail page's own add/toggle/
+# delete actions, kept separate from /firewall/... above so they can always
+# redirect back to that client's page without the Firewall page's own
+# routes ever needing to vary.
+
+def test_client_add_rule_requires_admin(client):
+    _add_moderator()
+    _login_moderator(client)
+    resp = client.post("/clients/laptop-anna/rules/add", data={"action": "DROP", "protocol": "tcp"})
+    assert resp.status_code == 403
+
+
+def test_client_add_rule_redirects_back_to_client_page(client, monkeypatch):
+    monkeypatch.setattr("app.routes.pivpn_ctl.list_client_ips", lambda: {"laptop-anna": "10.202.226.2"})
+    monkeypatch.setattr("app.firewall.run_root", lambda argv, **kwargs: "")
+    _login_admin(client)
+    resp = client.post("/clients/laptop-anna/rules/add", data={
+        "action": "DROP", "protocol": "tcp", "dst": "", "dport": "",
+    })
+    assert resp.status_code == 302
+    assert resp.headers["Location"] == "/clients/laptop-anna"
+    rules = db.list_rules()
+    assert len(rules) == 1
+    assert rules[0]["src"] == "10.202.226.2"  # taken from the client's own IP, not the form
+
+
+def test_client_add_rule_without_a_vpn_ip_flashes_and_does_not_create_a_rule(client, monkeypatch):
+    monkeypatch.setattr("app.routes.pivpn_ctl.list_client_ips", lambda: {})
+    _login_admin(client)
+    resp = client.post("/clients/laptop-anna/rules/add", data={"action": "DROP", "protocol": "tcp"})
+    assert resp.status_code == 302
+    assert resp.headers["Location"] == "/clients/laptop-anna"
+    assert db.list_rules() == []
+
+
+def test_client_toggle_rule_redirects_back_to_client_page(client):
+    _login_admin(client)
+    rule_id = db.insert_rule({"kind": "forward", "action": "DROP", "protocol": "tcp", "src": "10.202.226.2"})
+    resp = client.post(f"/clients/laptop-anna/rules/{rule_id}/toggle")
+    assert resp.status_code == 302
+    assert resp.headers["Location"] == "/clients/laptop-anna"
+
+
+def test_client_delete_rule_redirects_back_to_client_page(client):
+    _login_admin(client)
+    rule_id = db.insert_rule({"kind": "forward", "action": "DROP", "protocol": "tcp", "src": "10.202.226.2"})
+    resp = client.post(f"/clients/laptop-anna/rules/{rule_id}/delete")
+    assert resp.status_code == 302
+    assert resp.headers["Location"] == "/clients/laptop-anna"
+    assert db.list_rules() == []
 

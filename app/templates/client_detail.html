@@ -60,10 +60,8 @@
     {% if not client.ip %}
     <p class="empty">{{ client.name }} has no static VPN IP yet (only assigned once it connects at least once) — rules can't be scoped to it until then. Use the full <a href="{{ url_for('main.firewall_rules') }}">Firewall Rules</a> page in the meantime.</p>
     {% else %}
-    <form method="post" action="{{ url_for('main.add_forward') }}" class="inline-form">
+    <form method="post" action="{{ url_for('main.client_add_rule', name=client.name) }}" class="inline-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <input type="hidden" name="next" value="{{ url_for('main.client_detail', name=client.name) }}">
-      <input type="hidden" name="src" value="{{ client.ip }}">
       <label>Source
         <select disabled aria-label="Source (fixed to this client)">
           <option>{{ client.name }} ({{ client.ip }})</option>
@@ -121,15 +119,13 @@
         <td><span class="{{ 'saved-yes' if r.persisted else 'saved-no' }}">{{ 'Saved' if r.persisted else 'Unsaved' }}</span></td>
         <td>
           <div class="actions">
-          <form method="post" action="{{ url_for('main.toggle_rule', rule_id=r.id) }}" class="btn-form">
+          <form method="post" action="{{ url_for('main.client_toggle_rule', name=client.name, rule_id=r.id) }}" class="btn-form">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <input type="hidden" name="next" value="{{ url_for('main.client_detail', name=client.name) }}">
             <button type="submit" class="btn btn-sm {{ 'btn-warn' if r.enabled else 'btn-ok' }}">{{ 'Disable' if r.enabled else 'Enable' }}</button>
           </form>
-          <form method="post" action="{{ url_for('main.delete_rule', rule_id=r.id) }}" class="btn-form"
+          <form method="post" action="{{ url_for('main.client_delete_rule', name=client.name, rule_id=r.id) }}" class="btn-form"
                 data-confirm="Delete this rule?" data-confirm-label="Delete">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <input type="hidden" name="next" value="{{ url_for('main.client_detail', name=client.name) }}">
             <button type="submit" class="btn btn-sm btn-danger">Delete</button>
           </form>
           </div>
