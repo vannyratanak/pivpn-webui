@@ -41,6 +41,53 @@ def test_ingest_vpn_events_stores_connect_disconnect_and_other(temp_db, monkeypa
     assert "VERIFY OK" in other["detail"]
 
 
+def test_ingest_vpn_events_resolves_real_address_for_connects_only(temp_db, monkeypatch):
+    monkeypatch.setattr(
+        ingest_logs, "run_root",
+        lambda argv, timeout=None: "\n".join([CONNECT_LINE, DISCONNECT_LINE]),
+    )
+    calls = []
+
+    def fake_resolve_bulk(addresses):
+        calls.append(addresses)
+        return {addr: f"resolved:{addr}" for addr in addresses}
+
+    monkeypatch.setattr(ingest_logs, "resolve_real_addresses_bulk", fake_resolve_bulk)
+
+    ingest_logs.ingest_vpn_events()
+
+    events = db.list_vpn_events()
+    connected = next(e for e in events if e["event"] == "connected")
+    disconnected = next(e for e in events if e["event"] == "disconnected")
+    assert connected["real_address"] == "resolved:10.66.66.1:2642"
+    assert disconnected["real_address"] is None  # never resolved for disconnect/other rows
+    assert calls == [["10.66.66.1:2642"]]  # only the connect address was asked for
+
+
+def test_ingest_vpn_events_resolves_a_burst_of_connects_in_one_bulk_call(temp_db, monkeypatch):
+    # The actual regression this exists for: N clients reconnecting in the
+    # same tick must resolve as one batch, not N sequential SSH calls (see
+    # resolve_real_addresses_bulk's own docstring for the ~30-45s a naive
+    # loop would cost at real relay latency).
+    lines = [
+        "2026-08-21T13:20:{:02d}+0700 vpn ovpn-server[1]: "
+        "[client{n}] Peer Connection Initiated with [AF_INET]10.66.66.1:{port}".format(n, n=n, port=3000 + n)
+        for n in range(5)
+    ]
+    monkeypatch.setattr(ingest_logs, "run_root", lambda argv, timeout=None: "\n".join(lines))
+    calls = []
+    monkeypatch.setattr(
+        ingest_logs, "resolve_real_addresses_bulk",
+        lambda addresses: calls.append(addresses) or {a: None for a in addresses},
+    )
+
+    count = ingest_logs.ingest_vpn_events()
+
+    assert count == 5
+    assert len(calls) == 1
+    assert len(calls[0]) == 5
+
+
 def test_ingest_vpn_events_reprocessing_same_line_is_a_noop(temp_db, monkeypatch):
     # journalctl --cursor-file can re-emit the last-seen line on the very
     # next invocation (confirmed live) — the table's UNIQUE constraint +

@@ -669,6 +669,10 @@ button:disabled:hover, .btn:disabled:hover { filter: none; }
 }
 
 .btn-form { display: inline; }
+/* Icon-only button (the Logs tabs' Refresh now) — .btn-sm's own padding
+   (0 8px) is meant for text labels and would leave a 14px icon sitting
+   off-center in a too-wide box; this makes it a plain square instead. */
+.btn-icon { width: 26px; padding: 0; flex-shrink: 0; }
 .btn-group { display: flex; align-items: center; gap: 10px; }
 .btn-group-stack { display: flex; flex-direction: column; align-items: stretch; gap: 10px; }
 .header-col { display: flex; flex-direction: column; gap: 10px; }
@@ -1078,6 +1082,23 @@ dialog.modal code {
 .log-filter-input {
   width: 100%;
   margin: 10px 0;
+}
+
+/* Logs page tabs (Sessions/Client Sessions/Traffic): search input and the
+   Refresh now icon button share one row, button pushed to the far right —
+   sits directly above the table it refreshes. When there's no search
+   input yet (empty-state render, before any data exists), the button is
+   the only child and still lands top-right via justify-content. */
+.table-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: flex-end;
+  margin: 10px 0;
+}
+.table-toolbar .log-filter-input {
+  flex: 1;
+  margin: 0;
 }
 
 input[type="text"].filter-input-inline {

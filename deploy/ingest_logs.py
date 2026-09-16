@@ -40,7 +40,7 @@ from app.vpnlog import (
     FLOW_RE,
     _client_ip_map,
     _split_journal_line,
-    resolve_real_address,
+    resolve_real_addresses_bulk,
 )
 
 RETENTION_DAYS = 7
@@ -53,36 +53,48 @@ FETCH_TIMEOUT_SECONDS = 180
 
 def ingest_vpn_events() -> int:
     out = run_root([config.LOG_HELPER, "openvpn-tail"], timeout=FETCH_TIMEOUT_SECONDS)
-    rows = []
+    connect_events = []      # (ts, client, address)
+    disconnect_events = []   # (ts, client, address)
+    other_events = []        # (ts, detail)
     for raw_line in out.splitlines():
         ts, msg = _split_journal_line(raw_line.strip())
         if not msg:
             continue
         m = CONNECT_RE.search(msg)
         if m:
-            address = f"{m.group('addr')}:{m.group('port')}"
-            # Resolved here, once, rather than live on every Client
-            # Sessions page load (the old design) — this runs within
-            # ~10s of the connection actually starting (the ingest
-            # timer's own interval), while the relay's conntrack entry is
-            # essentially guaranteed to still exist, unlike a live lookup
-            # that might happen hours or days later. resolve_real_address
-            # already no-ops instantly (no SSH call at all) for any address
-            # that isn't behind the relay, so this is cheap for the common
-            # case and only pays a real SSH round-trip when it can actually
-            # produce a useful result.
-            rows.append((ts, "connected", m.group("name"), address, "", resolve_real_address(address)))
+            connect_events.append((ts, m.group("name"), f"{m.group('addr')}:{m.group('port')}"))
             continue
         m = DISCONNECT_RE.search(msg)
         if m:
-            rows.append((ts, "disconnected", m.group("name"), f"{m.group('addr')}:{m.group('port')}", "", None))
+            disconnect_events.append((ts, m.group("name"), f"{m.group('addr')}:{m.group('port')}"))
             continue
         # Stored too, not dropped — the VPN Sessions tab deliberately shows
         # unrecognized lines as event='other' with the raw text, a
         # diagnostic fallback for a server whose OpenVPN log format doesn't
         # match CONNECT_RE/DISCONNECT_RE (see this app's own module
         # docstring). Losing that here would be a real feature regression.
-        rows.append((ts, "other", "", "", msg, None))
+        other_events.append((ts, msg))
+
+    # Resolved here, once per unique address, concurrently — rather than
+    # live on every Client Sessions page load (the old design), and rather
+    # than one at a time in this loop (the first version of this design):
+    # a burst of simultaneous new connections (e.g. every client
+    # reconnecting after a server restart) would otherwise pay one
+    # sequential SSH round-trip to the relay per connection. This runs
+    # within ~10s of the connections actually starting (the ingest timer's
+    # own interval), while the relay's conntrack entries are essentially
+    # guaranteed to still exist, unlike a live lookup that might happen
+    # hours or days later. resolve_real_addresses_bulk already no-ops
+    # instantly (no SSH call at all) for any address that isn't behind the
+    # relay, so this is cheap for the common case.
+    real_addresses = resolve_real_addresses_bulk([addr for _, _, addr in connect_events])
+
+    rows = [
+        (ts, "connected", client, addr, "", real_addresses.get(addr))
+        for ts, client, addr in connect_events
+    ]
+    rows += [(ts, "disconnected", client, addr, "", None) for ts, client, addr in disconnect_events]
+    rows += [(ts, "other", "", "", detail, None) for ts, detail in other_events]
     db.insert_vpn_events(rows)
     return len(rows)
 

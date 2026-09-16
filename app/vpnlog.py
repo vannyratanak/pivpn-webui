@@ -23,6 +23,7 @@ messages, but if your server's `verb` level or log format differs, session
 parsing may fall back to raw/unparsed rows rather than raise an error —
 this is a "best effort" view, not something else depends on it.
 """
+import concurrent.futures
 import re
 import subprocess
 from datetime import datetime
@@ -30,6 +31,13 @@ from datetime import datetime
 import config
 from app import db, pivpn_ctl
 from app.privileged import run_root
+
+# Bounds how many resolve_real_address SSH calls a single ingest tick can
+# have in flight at once — same reasoning as iplookup._MAX_CONCURRENT_WHOIS:
+# high enough that a normal burst (a handful of clients reconnecting
+# together) finishes in roughly one round-trip instead of N, low enough not
+# to open dozens of SSH connections to the relay at once.
+_MAX_CONCURRENT_RESOLVES = 8
 
 CONNECT_RE = re.compile(
     r"\[(?P<name>[^\]]+)\] Peer Connection Initiated with \[AF_INET6?\](?P<addr>[0-9a-fA-F:.]+):(?P<port>\d+)"
@@ -145,6 +153,32 @@ def resolve_real_address(address: str) -> str | None:
         return None
     out = result.stdout.strip()
     return out if result.returncode == 0 and out else None
+
+
+def resolve_real_addresses_bulk(addresses: list[str]) -> dict[str, str | None]:
+    """Same resolution rules as resolve_real_address, one call per unique
+    address in `addresses`, but runs the underlying SSH calls concurrently
+    instead of one at a time.
+
+    Each call is a real SSH round-trip to the relay (~1-1.5s measured
+    live). deploy/ingest_logs.py calls this once per ingest tick for every
+    'connected' event it just saw — a burst of simultaneous new
+    connections (e.g. every client reconnecting after a server restart)
+    would otherwise pay that cost once per connection, sequentially, in a
+    loop: 30 clients reconnecting together would take ~30-45s for that one
+    tick. Running them through a bounded thread pool instead means the
+    whole batch takes roughly as long as its single slowest lookup."""
+    result: dict[str, str | None] = {}
+    to_resolve = list(dict.fromkeys(addresses))
+    if not to_resolve:
+        return result
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=min(_MAX_CONCURRENT_RESOLVES, len(to_resolve))
+    ) as pool:
+        future_to_addr = {pool.submit(resolve_real_address, addr): addr for addr in to_resolve}
+        for future in concurrent.futures.as_completed(future_to_addr):
+            result[future_to_addr[future]] = future.result()
+    return result
 
 
 def sort_client_sessions(sessions: list[dict]) -> None:

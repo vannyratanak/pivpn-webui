@@ -1,4 +1,5 @@
 import subprocess
+import threading
 
 import config
 from app import db, pivpn_ctl, vpnlog
@@ -12,6 +13,7 @@ from app.vpnlog import (
     list_client_sessions,
     list_traffic_flows,
     resolve_real_address,
+    resolve_real_addresses_bulk,
 )
 
 # Real lines captured live from a production install (macbook-phanne
@@ -269,6 +271,51 @@ def test_resolve_ssh_binary_missing_returns_none_not_raise(monkeypatch):
 
     monkeypatch.setattr(subprocess, "run", raise_oserror)
     assert resolve_real_address("10.66.66.1:36530") is None
+
+
+def test_resolve_real_addresses_bulk_dedups_and_resolves_each_once(monkeypatch):
+    monkeypatch.setattr(config, "RELAY_HOST", "157.245.207.122")
+    monkeypatch.setattr(config, "RELAY_TUNNEL_IP", "10.66.66.1")
+    calls = []
+    lock = threading.Lock()
+
+    def run(argv, capture_output, text, timeout):
+        port = argv[-1]
+        with lock:
+            calls.append(port)
+        return subprocess.CompletedProcess(args=argv, returncode=0, stdout=f"1.2.3.4:{port}\n", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", run)
+
+    result = resolve_real_addresses_bulk(["10.66.66.1:1", "10.66.66.1:2", "10.66.66.1:1"])
+
+    assert result == {"10.66.66.1:1": "1.2.3.4:1", "10.66.66.1:2": "1.2.3.4:2"}
+    assert sorted(calls) == ["1", "2"]  # each unique address queried exactly once
+
+
+def test_resolve_real_addresses_bulk_empty_input_returns_empty(monkeypatch):
+    assert resolve_real_addresses_bulk([]) == {}
+
+
+def test_resolve_real_addresses_bulk_runs_concurrently_not_serially(monkeypatch):
+    # Two addresses, each blocking until both lookups are in flight at
+    # once — proves a batch doesn't serialize N SSH round-trips in the
+    # ingest tick that calls this (the exact slowness a burst of
+    # simultaneous new connections would otherwise cause). Would
+    # deadlock/timeout under a one-at-a-time loop.
+    monkeypatch.setattr(config, "RELAY_HOST", "157.245.207.122")
+    monkeypatch.setattr(config, "RELAY_TUNNEL_IP", "10.66.66.1")
+    both_started = threading.Barrier(2, timeout=5)
+
+    def run(argv, capture_output, text, timeout):
+        both_started.wait()
+        return subprocess.CompletedProcess(args=argv, returncode=0, stdout="1.2.3.4:9\n", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", run)
+
+    result = resolve_real_addresses_bulk(["10.66.66.1:1", "10.66.66.1:2"])
+
+    assert result == {"10.66.66.1:1": "1.2.3.4:9", "10.66.66.1:2": "1.2.3.4:9"}
 
 
 # --- FLOW_RE / list_traffic_flows: the netfilter LOG target's own line

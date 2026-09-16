@@ -19,15 +19,21 @@
 {% if tab == 'sessions' %}
 <section class="card">
   <p class="hint">Client connect/disconnect events parsed from the OpenVPN service journal, most recent first (last 7 days). Parsing is best-effort — lines that don't match a known OpenVPN log format show up with event "other" and the raw message in Detail.</p>
-  <form method="post" action="{{ url_for('main.logs_refresh') }}" class="btn-form">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <input type="hidden" name="tab" value="sessions">
-    <button type="submit" class="btn btn-sm">Refresh now</button>
-  </form>
+  <div class="table-toolbar">
+    {% if sessions %}
+    <input type="text" id="sessions-filter" class="log-filter-input" placeholder="Search…" aria-label="Search VPN sessions">
+    {% endif %}
+    <form method="post" action="{{ url_for('main.logs_refresh') }}" class="btn-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="tab" value="sessions">
+      <button type="submit" class="btn btn-sm btn-icon" title="Refresh now" aria-label="Refresh now">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+      </button>
+    </form>
+  </div>
   {% if not sessions %}
     <p class="empty">No session events found — run deploy/setup-log-ingest.sh on this server if you haven't yet (see README), then allow a minute or two for the first backfill.</p>
   {% else %}
-  <input type="text" id="sessions-filter" class="log-filter-input" placeholder="Search…" aria-label="Search VPN sessions">
   <div class="table-scroll">
   <table id="sessions-table">
     <thead>
@@ -68,15 +74,21 @@
 {% if tab == 'client_sessions' %}
 <section class="card">
   <p class="hint">Each client's login sessions — when, how long, and how many — paired from the same connect/disconnect journal events as VPN Sessions. A session still in progress shows as "ongoing" with no end time or duration yet.</p>
-  <form method="post" action="{{ url_for('main.logs_refresh') }}" class="btn-form">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <input type="hidden" name="tab" value="client_sessions">
-    <button type="submit" class="btn btn-sm">Refresh now</button>
-  </form>
+  <div class="table-toolbar">
+    {% if client_sessions %}
+    <input type="text" id="client-sessions-filter" class="log-filter-input" placeholder="Search…" aria-label="Search client sessions">
+    {% endif %}
+    <form method="post" action="{{ url_for('main.logs_refresh') }}" class="btn-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="tab" value="client_sessions">
+      <button type="submit" class="btn btn-sm btn-icon" title="Refresh now" aria-label="Refresh now">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+      </button>
+    </form>
+  </div>
   {% if not client_sessions %}
     <p class="empty">No session events found — run deploy/setup-log-ingest.sh on this server if you haven't yet (see README), then allow a minute or two for the first backfill.</p>
   {% else %}
-  <input type="text" id="client-sessions-filter" class="log-filter-input" placeholder="Search…" aria-label="Search client sessions">
   <div class="table-scroll">
   <table id="client-sessions-table">
     <thead>
@@ -141,16 +153,22 @@
 
 {% if tab == 'traffic' %}
 <section class="card">
-  <p class="hint">Which client talked to which destination and when — one row per new connection (not every packet), parsed from the kernel's netfilter log (last 7 days, showing the most recent 300). Requires deploy/setup-traffic-log.sh to have been run on this server; new flows can take up to ~10 seconds to appear (ingested periodically in the background, not fetched live on page load) — or click Refresh now below for less than that.</p>
-  <form method="post" action="{{ url_for('main.logs_refresh') }}" class="btn-form">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <input type="hidden" name="tab" value="traffic">
-    <button type="submit" class="btn btn-sm">Refresh now</button>
-  </form>
+  <p class="hint">Which client talked to which destination and when — one row per new connection (not every packet), parsed from the kernel's netfilter log (last 7 days, showing the most recent 300). Requires deploy/setup-traffic-log.sh to have been run on this server; new flows can take up to ~10 seconds to appear (ingested periodically in the background, not fetched live on page load) — or use Refresh for less than that.</p>
+  <div class="table-toolbar">
+    {% if traffic_flows %}
+    <input type="text" id="traffic-filter" class="log-filter-input" placeholder="Search…" aria-label="Search traffic flows">
+    {% endif %}
+    <form method="post" action="{{ url_for('main.logs_refresh') }}" class="btn-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="tab" value="traffic">
+      <button type="submit" class="btn btn-sm btn-icon" title="Refresh now" aria-label="Refresh now">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+      </button>
+    </form>
+  </div>
   {% if not traffic_flows %}
     <p class="empty">No traffic flow events found — either deploy/setup-traffic-log.sh hasn't been run on this server yet, or deploy/setup-log-ingest.sh hasn't (see README); allow a minute or two after both for the first backfill.</p>
   {% else %}
-  <input type="text" id="traffic-filter" class="log-filter-input" placeholder="Search…" aria-label="Search traffic flows">
   <div class="table-scroll">
   <table id="traffic-table">
     <thead>
