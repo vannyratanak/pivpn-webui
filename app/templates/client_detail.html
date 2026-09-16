@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% block title %}{{ client.name }} — PiVPN Web UI{% endblock %}
+{% block content %}
+<p class="hint"><a href="{{ url_for('main.clients') }}">&larr; Back to Clients</a></p>
+
+<div class="page-header-row">
+  <h1>{{ client.name }}</h1>
+</div>
+
+<section class="card {{ 'blocked-row' if client.blocked }}">
+  <div class="card-header-row">
+    <h2>Status</h2>
+    {% if client.session %}
+      <span class="badge badge-connected">connected</span>
+    {% else %}
+      <span class="badge badge-inactive">inactive</span>
+    {% endif %}
+  </div>
+  <dl class="detail-grid">
+    <dt>Certificate status</dt><dd>{{ client.status }}{{ ' (blocked)' if client.blocked else '' }}</dd>
+    <dt>Expiration</dt><dd>{{ client.expiration or '—' }}</dd>
+    <dt>VPN IP</dt><dd>{{ client.ip or '—' }}</dd>
+    {% if client.session %}
+    <dt>Connected since</dt><dd>{{ client.session.since or '—' }}</dd>
+    <dt>Real address</dt><dd>{{ client.session.real_address or '—' }}</dd>
+    <dt>Data transferred</dt><dd>{{ client.session.bytes_recv or '0' }} in / {{ client.session.bytes_sent or '0' }} out</dd>
+    {% endif %}
+  </dl>
+
+  <div class="actions">
+    <a class="btn btn-sm" href="{{ url_for('main.download_client', name=client.name) }}">Download</a>
+    <form method="post" action="{{ url_for('main.renew_client', name=client.name) }}" class="btn-form"
+          data-confirm="Renew {{ client.name }}? This revokes the current cert and issues a new one — the old .ovpn will stop working immediately."
+          data-confirm-label="Renew">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-sm btn-secondary">Renew</button>
+    </form>
+    <form method="post" action="{{ url_for('main.block_client', name=client.name) }}" class="btn-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="blocked" value="{{ '0' if client.blocked else '1' }}">
+      <button type="submit" class="btn btn-sm {{ 'btn-ok' if client.blocked else 'btn-warn' }}">
+        {{ 'Unblock' if client.blocked else 'Block' }}
+      </button>
+    </form>
+    <form method="post" action="{{ url_for('main.remove_client', name=client.name) }}" class="btn-form"
+          data-confirm="Permanently remove {{ client.name }}? This cannot be undone."
+          data-confirm-label="Remove">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-sm btn-danger">Remove</button>
+    </form>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Firewall rules for {{ client.name }}</h2>
+  <p class="hint">Only rules whose source or destination matches this client's VPN IP — for everything else (INPUT/SNAT/port-forward rules, or rules for other clients), see the full <a href="{{ url_for('main.firewall_rules') }}">Firewall Rules</a> page.</p>
+
+  <details class="collapsible">
+    <summary><h2>Add rule for {{ client.name }}</h2></summary>
+    {% if not client.ip %}
+    <p class="empty">{{ client.name }} has no static VPN IP yet (only assigned once it connects at least once) — rules can't be scoped to it until then. Use the full <a href="{{ url_for('main.firewall_rules') }}">Firewall Rules</a> page in the meantime.</p>
+    {% else %}
+    <form method="post" action="{{ url_for('main.add_forward') }}" class="inline-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="next" value="{{ url_for('main.client_detail', name=client.name) }}">
+      <input type="hidden" name="src" value="{{ client.ip }}">
+      <label>Source <span class="hint">({{ client.name }}, {{ client.ip }})</span></label>
+      <label>Action
+        <select name="action">
+          <option value="ACCEPT">Forward (ACCEPT)</option>
+          <option value="DROP">Drop</option>
+        </select>
+      </label>
+      <label>Protocol
+        <select name="protocol">
+          <option value="all">Any</option>
+          <option value="tcp">tcp</option>
+          <option value="udp">udp</option>
+        </select>
+      </label>
+      <label>Destination <span class="hint">(IP/CIDR, blank = any)</span>
+        <input type="text" name="dst" placeholder="192.168.1.0/24">
+      </label>
+      <label>Dest. port <span class="hint">(blank = any)</span>
+        <input type="text" name="dport" placeholder="443">
+      </label>
+      <label>Comment
+        <input type="text" name="comment" placeholder="optional note">
+      </label>
+      <button type="submit">Add rule</button>
+    </form>
+    {% endif %}
+  </details>
+
+  {% if not rules %}
+    <p class="empty">No rules scoped to this client yet.</p>
+  {% else %}
+  <div class="table-scroll">
+  <table>
+    <thead>
+      <tr>
+        <th scope="col">Kind</th>
+        <th scope="col">Action</th>
+        <th scope="col">Details</th>
+        <th scope="col">Comment</th>
+        <th scope="col">Saved</th>
+        <th scope="col">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rules %}
+      <tr class="{{ '' if r.enabled else 'disabled-row' }}">
+        <td>{{ r.kind }}</td>
+        <td>{{ r.action }}</td>
+        <td>{{ r.detail }}</td>
+        <td>{{ r.comment or '' }}</td>
+        <td><span class="{{ 'saved-yes' if r.persisted else 'saved-no' }}">{{ 'Saved' if r.persisted else 'Unsaved' }}</span></td>
+        <td>
+          <div class="actions">
+          <form method="post" action="{{ url_for('main.toggle_rule', rule_id=r.id) }}" class="btn-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="next" value="{{ url_for('main.client_detail', name=client.name) }}">
+            <button type="submit" class="btn btn-sm {{ 'btn-warn' if r.enabled else 'btn-ok' }}">{{ 'Disable' if r.enabled else 'Enable' }}</button>
+          </form>
+          <form method="post" action="{{ url_for('main.delete_rule', rule_id=r.id) }}" class="btn-form"
+                data-confirm="Delete this rule?" data-confirm-label="Delete">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="next" value="{{ url_for('main.client_detail', name=client.name) }}">
+            <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+          </form>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

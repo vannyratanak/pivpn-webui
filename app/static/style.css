@@ -1041,6 +1041,18 @@ dialog.modal code {
 
 .empty { color: var(--muted); }
 
+/* Client detail page's read-only key/value status list — the one place in
+   the app showing a single record's fields instead of a table of rows. */
+.detail-grid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 8px 16px;
+  margin: 0 0 16px;
+}
+
+.detail-grid dt { color: var(--muted); }
+.detail-grid dd { margin: 0; }
+
 .tabs {
   display: flex;
   flex-wrap: wrap;

@@ -82,7 +82,7 @@
       {% for c in clients %}
       <tr class="{{ 'blocked-row' if c.blocked }}">
         <td><input type="checkbox" name="client_names" value="{{ c.name }}" form="bulk-remove-form" class="client-select-checkbox" aria-label="Select client {{ c.name }}"></td>
-        <td>{{ c.name }}</td>
+        <td><a href="{{ url_for('main.client_detail', name=c.name) }}">{{ c.name }}</a></td>
         <td>{{ c.status }}</td>
         <td>{{ c.expiration }}</td>
         <td>{{ c.ip or '—' }}</td>
