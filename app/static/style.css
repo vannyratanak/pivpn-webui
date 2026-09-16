@@ -1077,12 +1077,20 @@ dialog.modal code {
 
 /* .tabs button — the Add-rule modal's rule-type selector (forward/INPUT/
    port-forward/SNAT) reuses this same look, but toggles panels via JS
-   instead of navigating — needs the native <button> chrome reset since
-   .tabs a's rules alone don't touch background/border/cursor. */
+   instead of navigating. Needs a full reset of the generic `button, .btn`
+   rule's own chrome (border-radius/box-shadow/height/font-weight/inline-
+   flex sizing) — .tabs a's rules alone only touch color/padding/border-
+   bottom, so without this every tab rendered as a small rounded, shadowed
+   pill button instead of a flat underline tab. */
 .tabs button {
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
+  border-radius: 0;
+  box-shadow: none;
+  height: auto;
+  display: inline;
+  font-weight: 400;
   cursor: pointer;
   font-family: inherit;
 }
@@ -1091,6 +1099,11 @@ dialog.modal code {
 .tabs button.active, .tabs button:hover {
   color: var(--text);
   border-bottom-color: var(--accent);
+}
+
+.tabs button:hover {
+  filter: none;
+  box-shadow: none;
 }
 
 .log-pre {
