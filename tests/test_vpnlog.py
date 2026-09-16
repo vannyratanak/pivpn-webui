@@ -109,12 +109,12 @@ def test_format_duration_none_start_returns_none():
 # DISCONNECT_RE parsing this used to also exercise is covered separately
 # in tests/test_ingest_logs.py, where that parsing now actually lives.
 
-def _connected(ts, name, addr):
-    return (ts, "connected", name, addr, "")
+def _connected(ts, name, addr, real_address=None):
+    return (ts, "connected", name, addr, "", real_address)
 
 
 def _disconnected(ts, name, addr):
-    return (ts, "disconnected", name, addr, "")
+    return (ts, "disconnected", name, addr, "", None)
 
 
 def test_ongoing_session_sorts_above_more_recent_ended_ones(temp_db):
@@ -162,6 +162,31 @@ def test_reconnect_without_matching_disconnect_does_not_lose_the_earlier_session
     assert orphaned["ongoing"] is False
     assert orphaned["end"] is None
     assert orphaned["status_note"] == "Ended (exact time unknown)"
+
+
+def test_real_address_carries_through_from_the_connected_event(temp_db):
+    # real_address is resolved once by deploy/ingest_logs.py, at ingest
+    # time (see that script) — not looked up live here anymore. Confirms
+    # it survives into all three session shapes list_client_sessions
+    # produces: still-ongoing, cleanly disconnected, and stale-closed
+    # (reconnected without a matching disconnect ever logged).
+    db.insert_vpn_events([
+        _connected("2026-08-21 09:00:00", "nurak", "10.66.66.1:1", real_address="1.2.3.4:5"),
+        _connected("2026-08-21 09:30:00", "nurak", "10.66.66.1:2", real_address="1.2.3.4:6"),
+        _disconnected("2026-08-21 10:00:00", "nurak", "10.66.66.1:2"),
+        _connected("2026-08-21 11:00:00", "mobile", "10.66.66.1:3", real_address="9.9.9.9:7"),
+    ])
+    sessions = list_client_sessions()
+
+    stale = next(s for s in sessions if s.get("status_note") == "Ended (exact time unknown)")
+    assert stale["real_address"] == "1.2.3.4:5"
+
+    closed = next(s for s in sessions if s["client"] == "nurak" and s["end"] is not None)
+    assert closed["real_address"] == "1.2.3.4:6"
+
+    ongoing = next(s for s in sessions if s["client"] == "mobile")
+    assert ongoing["ongoing"] is True
+    assert ongoing["real_address"] == "9.9.9.9:7"
 
 
 def test_sort_client_sessions_resorts_a_session_relabeled_from_ongoing_to_ended():

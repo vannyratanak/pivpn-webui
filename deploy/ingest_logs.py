@@ -34,7 +34,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import config
 from app import db, iplookup
 from app.privileged import run_root
-from app.vpnlog import CONNECT_RE, DISCONNECT_RE, FLOW_RE, _client_ip_map, _split_journal_line
+from app.vpnlog import (
+    CONNECT_RE,
+    DISCONNECT_RE,
+    FLOW_RE,
+    _client_ip_map,
+    _split_journal_line,
+    resolve_real_address,
+)
 
 RETENTION_DAYS = 7
 # Generous relative to the ~15s default — the very first run on a fresh
@@ -53,18 +60,29 @@ def ingest_vpn_events() -> int:
             continue
         m = CONNECT_RE.search(msg)
         if m:
-            rows.append((ts, "connected", m.group("name"), f"{m.group('addr')}:{m.group('port')}", ""))
+            address = f"{m.group('addr')}:{m.group('port')}"
+            # Resolved here, once, rather than live on every Client
+            # Sessions page load (the old design) — this runs within
+            # ~10s of the connection actually starting (the ingest
+            # timer's own interval), while the relay's conntrack entry is
+            # essentially guaranteed to still exist, unlike a live lookup
+            # that might happen hours or days later. resolve_real_address
+            # already no-ops instantly (no SSH call at all) for any address
+            # that isn't behind the relay, so this is cheap for the common
+            # case and only pays a real SSH round-trip when it can actually
+            # produce a useful result.
+            rows.append((ts, "connected", m.group("name"), address, "", resolve_real_address(address)))
             continue
         m = DISCONNECT_RE.search(msg)
         if m:
-            rows.append((ts, "disconnected", m.group("name"), f"{m.group('addr')}:{m.group('port')}", ""))
+            rows.append((ts, "disconnected", m.group("name"), f"{m.group('addr')}:{m.group('port')}", "", None))
             continue
         # Stored too, not dropped — the VPN Sessions tab deliberately shows
         # unrecognized lines as event='other' with the raw text, a
         # diagnostic fallback for a server whose OpenVPN log format doesn't
         # match CONNECT_RE/DISCONNECT_RE (see this app's own module
         # docstring). Losing that here would be a real feature regression.
-        rows.append((ts, "other", "", "", msg))
+        rows.append((ts, "other", "", "", msg, None))
     db.insert_vpn_events(rows)
     return len(rows)
 

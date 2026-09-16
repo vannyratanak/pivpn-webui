@@ -139,6 +139,7 @@ CREATE TABLE IF NOT EXISTS vpn_events (
     client TEXT NOT NULL DEFAULT '',
     address TEXT NOT NULL DEFAULT '',
     detail TEXT NOT NULL DEFAULT '',     -- only populated for event='other'
+    real_address TEXT,                   -- only populated for event='connected' behind the relay; see _MIGRATIONS below for why this also needs an ALTER TABLE path
     UNIQUE (ts, event, client, address, detail)
 );
 CREATE INDEX IF NOT EXISTS idx_vpn_events_ts ON vpn_events(ts);
@@ -179,11 +180,22 @@ def get_conn():
 
 # Columns added after the initial release — CREATE TABLE IF NOT EXISTS won't
 # retrofit these onto a database that already exists, so migrate explicitly.
+# Keyed by table, then column -> DDL.
 _MIGRATIONS = {
-    "out_iface": "ALTER TABLE firewall_rules ADD COLUMN out_iface TEXT",
-    "source": "ALTER TABLE firewall_rules ADD COLUMN source TEXT NOT NULL DEFAULT 'webui'",
-    "snat_ip": "ALTER TABLE firewall_rules ADD COLUMN snat_ip TEXT",
-    "position": "ALTER TABLE firewall_rules ADD COLUMN position REAL",
+    "firewall_rules": {
+        "out_iface": "ALTER TABLE firewall_rules ADD COLUMN out_iface TEXT",
+        "source": "ALTER TABLE firewall_rules ADD COLUMN source TEXT NOT NULL DEFAULT 'webui'",
+        "snat_ip": "ALTER TABLE firewall_rules ADD COLUMN snat_ip TEXT",
+        "position": "ALTER TABLE firewall_rules ADD COLUMN position REAL",
+    },
+    "vpn_events": {
+        # Resolved once, at ingest time (deploy/ingest_logs.py), for
+        # 'connected' rows whose address is behind the relay — see
+        # app/vpnlog.py's resolve_real_address. Added after vpn_events
+        # itself already existed on at least one real install (.10), hence
+        # a migration rather than just a column in CREATE TABLE.
+        "real_address": "ALTER TABLE vpn_events ADD COLUMN real_address TEXT",
+    },
 }
 
 
@@ -191,10 +203,11 @@ def init_db():
     conn = get_conn()
     try:
         conn.executescript(SCHEMA)
-        existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(firewall_rules)")}
-        for col, ddl in _MIGRATIONS.items():
-            if col not in existing_cols:
-                conn.execute(ddl)
+        for table, columns in _MIGRATIONS.items():
+            existing_cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+            for col, ddl in columns.items():
+                if col not in existing_cols:
+                    conn.execute(ddl)
         # Rows from before the position column existed (or any row inserted
         # without one) — fall back to id order, which is what they sorted by
         # already.
@@ -537,16 +550,17 @@ def cache_ip_org(ip: str, org: str | None):
         conn.close()
 
 
-def insert_vpn_events(rows: list[tuple[str, str, str, str, str]]):
-    """Each row: (ts, event, client, address, detail). INSERT OR IGNORE so
-    a duplicate ingest of an already-seen line (see the table's own
-    comment) is silently a no-op rather than a duplicate row."""
+def insert_vpn_events(rows: list[tuple[str, str, str, str, str, str | None]]):
+    """Each row: (ts, event, client, address, detail, real_address).
+    INSERT OR IGNORE so a duplicate ingest of an already-seen line (see the
+    table's own comment) is silently a no-op rather than a duplicate row."""
     if not rows:
         return
     conn = get_conn()
     try:
         conn.executemany(
-            "INSERT OR IGNORE INTO vpn_events (ts, event, client, address, detail) VALUES (?, ?, ?, ?, ?)",
+            "INSERT OR IGNORE INTO vpn_events (ts, event, client, address, detail, real_address) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
             rows,
         )
         conn.commit()
@@ -566,7 +580,8 @@ def list_vpn_events(limit: int = 50000) -> list[dict]:
     conn = get_conn()
     try:
         rows = conn.execute(
-            "SELECT ts, event, client, address, detail FROM vpn_events ORDER BY ts ASC, id ASC LIMIT ?",
+            "SELECT ts, event, client, address, detail, real_address FROM vpn_events "
+            "ORDER BY ts ASC, id ASC LIMIT ?",
             (limit,),
         ).fetchall()
         return [dict(r) for r in rows]

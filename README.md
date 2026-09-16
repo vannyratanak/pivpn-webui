@@ -446,14 +446,24 @@ access from here.
 ## Background log ingestion (Sessions/Traffic history)
 
 `./setup-log-ingest.sh` (run once, after `setup.sh`) installs a systemd
-timer that runs `deploy/ingest_logs.py` once a minute. That script pulls
+timer that runs `deploy/ingest_logs.py` every 10 seconds. That script pulls
 whatever's new since its last run (via `journalctl --cursor-file`, so each
 run only ever sees new lines, never re-scans the whole window) and stores
 it as structured rows in the app's own database — `vpn_events` (OpenVPN
-connect/disconnect/other lines) and `traffic_flows` (per-connection
-Traffic-tab rows, with destination org + client name already resolved).
-The Sessions, Client Sessions, and Traffic tabs then just read those
-tables directly.
+connect/disconnect/other lines, including a `real_address` resolved once
+per connect — see `resolve_real_address`) and `traffic_flows`
+(per-connection Traffic-tab rows, with destination org + client name
+already resolved). The Sessions, Client Sessions, and Traffic tabs then
+just read those tables directly.
+
+Each of those tabs also has a **Refresh now** button
+(`POST /logs/refresh`) that runs one ingestion cycle immediately instead
+of waiting for the next timer tick — useful right after connecting a
+client yourself and wanting to see it show up without a wait. It calls the
+exact same `ingest_vpn_events`/`ingest_traffic_flows` functions the timer
+does; running it early doesn't skip, duplicate, or conflict with the
+timer's own next run (the journal cursor plus each table's `INSERT OR
+IGNORE` already make ingestion safe to run at any time, from anywhere).
 
 **Why this exists, not just a wider `--since` window**: journald itself
 already keeps well over a week of history by default (confirmed live: a
@@ -464,9 +474,10 @@ Sessions/Traffic on each page load (pairing connect/disconnect events,
 matching the kernel's flow-log format, resolving WHOIS) — measured live at
 ~1.5s (Sessions, ~13k lines/week) to ~4s+ (Traffic, thousands of
 lines/day) once the window's widened to a week. Moving that parsing out
-of the request path and into a once-a-minute background job removes that
-cost entirely from every page load, at the price of up to ~1 minute of
-lag before a brand-new session/flow shows up.
+of the request path and into a background job removes that cost entirely
+from every page load, at the price of up to ~10s of lag (the timer
+interval) before a brand-new session/flow shows up — or none at all, if
+you click Refresh now.
 
 **Retention**: both tables are pruned to the last 7 days on every ingest
 run (`db.prune_old_logs`). Change `RETENTION_DAYS` in

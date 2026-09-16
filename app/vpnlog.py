@@ -180,6 +180,16 @@ def list_client_sessions(limit: int = 300) -> list[dict]:
     next disconnect — correct for PiVPN's one-cert-per-client-name model,
     but would misattribute session boundaries if two devices ever shared a
     common name (not supported by pivpn add anyway).
+
+    real_address (the relay's real-IP resolution — see resolve_real_address)
+    is carried straight through from the 'connected' event's own stored
+    value (deploy/ingest_logs.py resolves it once, within about a minute of
+    the connection actually starting) rather than looked up live here. That
+    used to only work for still-ongoing sessions, since a live lookup
+    against the relay's conntrack table fails the instant a client
+    disconnects — resolving it this early instead means an already-*ended*
+    session can now show a real address too, wherever ingestion caught it
+    in time.
     """
     events = _parse_openvpn_events()
     open_sessions: dict[str, dict] = {}
@@ -198,8 +208,11 @@ def list_client_sessions(limit: int = 300) -> list[dict]:
                     "client": e["client"], "start": stale["start"], "end": None,
                     "address": stale["address"], "duration": None, "ongoing": False,
                     "status_note": "Ended (exact time unknown)",
+                    "real_address": stale["real_address"],
                 })
-            open_sessions[e["client"]] = {"start": e["ts"], "address": e["address"]}
+            open_sessions[e["client"]] = {
+                "start": e["ts"], "address": e["address"], "real_address": e.get("real_address"),
+            }
         elif e["event"] == "disconnected":
             pending = open_sessions.pop(e["client"], None)
             start = pending["start"] if pending else None
@@ -208,23 +221,16 @@ def list_client_sessions(limit: int = 300) -> list[dict]:
                 "client": e["client"], "start": start, "end": e["ts"], "address": address,
                 "duration": _format_duration(start, e["ts"]) if start else None,
                 "ongoing": False,
+                "real_address": pending["real_address"] if pending else None,
             })
     for client, pending in open_sessions.items():
         sessions.append({
             "client": client, "start": pending["start"], "end": None,
             "address": pending["address"], "duration": None, "ongoing": True,
+            "real_address": pending["real_address"],
         })
     sort_client_sessions(sessions)
-    sessions = sessions[:limit]
-
-    # Only bother resolving still-open sessions — a relay's conntrack
-    # entry disappears the moment a client disconnects, so a lookup for
-    # anything already-ended would just fail anyway. Keeps this to at most
-    # a handful of SSH calls per page load instead of one per row shown.
-    for s in sessions:
-        if s["ongoing"]:
-            s["real_address"] = resolve_real_address(s["address"])
-    return sessions
+    return sessions[:limit]
 
 
 def _client_ip_map() -> dict[str, str]:

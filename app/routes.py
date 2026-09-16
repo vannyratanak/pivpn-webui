@@ -837,3 +837,29 @@ def logs():
         traffic_flows=traffic_flows, webui_log=webui_log, system_log=system_log,
         auth_entries=auth_entries, activity_entries=activity_entries,
     )
+
+
+@bp.route("/logs/refresh", methods=["POST"])
+@login_required
+def logs_refresh():
+    """Runs one ingestion cycle right now instead of waiting for the next
+    tick of deploy/ingest_logs.py's systemd timer (every 10s) — the
+    Sessions/Client Sessions/Traffic tabs' "Refresh now" button. Calls the
+    exact same functions the timer does; running it early is always safe
+    to do at any time, from anywhere, since the journal cursor plus each
+    table's INSERT OR IGNORE (see db.py) already make re-running ingestion
+    a no-op wherever there's nothing new to find — no separate locking
+    needed against the timer firing at the same moment.
+
+    Not admin-gated (@login_required only) — a moderator can already see
+    Client Sessions, and this is the same read-only background job that
+    already runs on its own every 10 seconds regardless of who's logged
+    in, not a new capability."""
+    from deploy import ingest_logs
+    try:
+        ingest_logs.ingest_vpn_events()
+        ingest_logs.ingest_traffic_flows()
+        db.prune_old_logs(ingest_logs.RETENTION_DAYS)
+    except PrivilegedCommandError as exc:
+        flash(str(exc), "error")
+    return redirect(url_for("main.logs", tab=request.form.get("tab", "client_sessions")))

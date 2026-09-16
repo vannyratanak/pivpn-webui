@@ -19,6 +19,11 @@
 {% if tab == 'sessions' %}
 <section class="card">
   <p class="hint">Client connect/disconnect events parsed from the OpenVPN service journal, most recent first (last 7 days). Parsing is best-effort — lines that don't match a known OpenVPN log format show up with event "other" and the raw message in Detail.</p>
+  <form method="post" action="{{ url_for('main.logs_refresh') }}" class="btn-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="tab" value="sessions">
+    <button type="submit" class="btn btn-sm">Refresh now</button>
+  </form>
   {% if not sessions %}
     <p class="empty">No session events found — run deploy/setup-log-ingest.sh on this server if you haven't yet (see README), then allow a minute or two for the first backfill.</p>
   {% else %}
@@ -63,6 +68,11 @@
 {% if tab == 'client_sessions' %}
 <section class="card">
   <p class="hint">Each client's login sessions — when, how long, and how many — paired from the same connect/disconnect journal events as VPN Sessions. A session still in progress shows as "ongoing" with no end time or duration yet.</p>
+  <form method="post" action="{{ url_for('main.logs_refresh') }}" class="btn-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="tab" value="client_sessions">
+    <button type="submit" class="btn btn-sm">Refresh now</button>
+  </form>
   {% if not client_sessions %}
     <p class="empty">No session events found — run deploy/setup-log-ingest.sh on this server if you haven't yet (see README), then allow a minute or two for the first backfill.</p>
   {% else %}
@@ -131,7 +141,12 @@
 
 {% if tab == 'traffic' %}
 <section class="card">
-  <p class="hint">Which client talked to which destination and when — one row per new connection (not every packet), parsed from the kernel's netfilter log (last 7 days, showing the most recent 300). Requires deploy/setup-traffic-log.sh to have been run on this server; new flows can take up to a minute to appear (ingested periodically in the background, not fetched live on page load).</p>
+  <p class="hint">Which client talked to which destination and when — one row per new connection (not every packet), parsed from the kernel's netfilter log (last 7 days, showing the most recent 300). Requires deploy/setup-traffic-log.sh to have been run on this server; new flows can take up to ~10 seconds to appear (ingested periodically in the background, not fetched live on page load) — or click Refresh now below for less than that.</p>
+  <form method="post" action="{{ url_for('main.logs_refresh') }}" class="btn-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="tab" value="traffic">
+    <button type="submit" class="btn btn-sm">Refresh now</button>
+  </form>
   {% if not traffic_flows %}
     <p class="empty">No traffic flow events found — either deploy/setup-traffic-log.sh hasn't been run on this server yet, or deploy/setup-log-ingest.sh hasn't (see README); allow a minute or two after both for the first backfill.</p>
   {% else %}

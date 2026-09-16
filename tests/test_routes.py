@@ -460,9 +460,9 @@ def test_client_sessions_relabeled_ended_session_resorts_below_more_recent_ones(
     # fixture's own temp DB) — list_client_sessions reads from there now,
     # not a live journalctl fetch (see app/vpnlog.py's module docstring).
     db.insert_vpn_events([
-        ("2026-09-15 09:46:39", "connected", "staleclient", "10.66.66.1:1", ""),
-        ("2026-09-15 13:30:30", "connected", "recentclient", "10.66.66.1:2", ""),
-        ("2026-09-15 13:30:48", "disconnected", "recentclient", "10.66.66.1:2", ""),
+        ("2026-09-15 09:46:39", "connected", "staleclient", "10.66.66.1:1", "", None),
+        ("2026-09-15 13:30:30", "connected", "recentclient", "10.66.66.1:2", "", None),
+        ("2026-09-15 13:30:48", "disconnected", "recentclient", "10.66.66.1:2", "", None),
     ])
     # Neither client is actually connected right now — this is what makes
     # "staleclient" (log-ongoing but not live-connected) get relabeled.
@@ -478,6 +478,59 @@ def test_client_sessions_relabeled_ended_session_resorts_below_more_recent_ones(
     # sole (stale) connect — it must render first now that staleclient has
     # been correctly recognized as not actually ongoing anymore.
     assert body.index("recentclient") < body.index("staleclient")
+
+
+def test_logs_refresh_requires_login(client):
+    resp = client.post("/logs/refresh", data={"tab": "client_sessions"})
+    assert resp.status_code == 302
+    assert "/login" in resp.headers["Location"]
+
+
+def test_logs_refresh_not_admin_gated(client, monkeypatch):
+    # Deliberately not @admin_required — this is the same read-only
+    # background job that already runs on its own every 10s regardless of
+    # who's logged in, not a new capability moderators shouldn't have.
+    from deploy import ingest_logs
+
+    monkeypatch.setattr(ingest_logs, "ingest_vpn_events", lambda: 0)
+    monkeypatch.setattr(ingest_logs, "ingest_traffic_flows", lambda: 0)
+    _add_moderator()
+    _login_moderator(client)
+    resp = client.post("/logs/refresh", data={"tab": "client_sessions"})
+    assert resp.status_code == 302
+    assert "/logs?tab=client_sessions" in resp.headers["Location"]
+
+
+def test_logs_refresh_calls_ingestion_and_redirects_to_requested_tab(client, monkeypatch):
+    from deploy import ingest_logs
+
+    calls = []
+    monkeypatch.setattr(ingest_logs, "ingest_vpn_events", lambda: calls.append("events") or 1)
+    monkeypatch.setattr(ingest_logs, "ingest_traffic_flows", lambda: calls.append("flows") or 2)
+    pruned = []
+    monkeypatch.setattr(db, "prune_old_logs", lambda days: pruned.append(days))
+
+    _login_admin(client)
+    resp = client.post("/logs/refresh", data={"tab": "traffic"})
+
+    assert resp.status_code == 302
+    assert "/logs?tab=traffic" in resp.headers["Location"]
+    assert calls == ["events", "flows"]
+    assert pruned == [ingest_logs.RETENTION_DAYS]
+
+
+def test_logs_refresh_degrades_cleanly_on_privileged_command_error(client, monkeypatch):
+    from deploy import ingest_logs
+    from app.privileged import PrivilegedCommandError
+
+    def boom():
+        raise PrivilegedCommandError("boom")
+
+    monkeypatch.setattr(ingest_logs, "ingest_vpn_events", boom)
+    _login_admin(client)
+    resp = client.post("/logs/refresh", data={"tab": "sessions"})
+    assert resp.status_code == 302
+    assert "/logs?tab=sessions" in resp.headers["Location"]
 
 
 def test_reorder_route_degrades_cleanly_on_privileged_command_error(client, monkeypatch):

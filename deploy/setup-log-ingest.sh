@@ -3,7 +3,7 @@
 # not root/sudo — matches that script's convention) to enable background
 # log ingestion: Sessions/Client Sessions/Traffic move from live
 # journalctl-parse-per-page-load to reading pre-parsed rows from the
-# database, populated by deploy/ingest_logs.py once a minute via a systemd
+# database, populated by deploy/ingest_logs.py every 10 seconds via a systemd
 # timer. See that script's docstring and app/vpnlog.py's module docstring
 # for why — real 7-day parse costs (~1.5s-4s+) made those tabs slow once
 # the original 3-day/6-hour windows were widened.
@@ -42,7 +42,7 @@ echo
 echo "Running the first ingest now (this one backfills up to 7 days of"
 echo "existing history — SINCE it's the very first run for each cursor,"
 echo "see BACKFILL_SINCE in pivpn-webui-log-helper.sh — so it may take a"
-echo "little longer than the once-a-minute runs after it)..."
+echo "little longer than the every-10-seconds runs after it)..."
 sudo systemctl start pivpn-webui-log-ingest.service
 sleep 2
 sudo systemctl status pivpn-webui-log-ingest.service --no-pager -n 10 || true
