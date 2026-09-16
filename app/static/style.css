@@ -58,17 +58,17 @@
 
 * { box-sizing: border-box; }
 
-/* Fixed-height app shell: topbar + page-header-row + everything in a
-   card before its table stay their natural size; the one card holding
-   a table (.card:has(.table-scroll), below) is the sole flex-grow
-   item, so its .table-scroll absorbs exactly whatever vertical space
-   is left after the rest of the page's chrome — the table fills the
-   remaining screen on any page/viewport without knowing anyone else's
-   exact height, and only *it* scrolls internally when its rows overflow
-   that space. height (not min-height) is what makes "leftover space to
-   distribute" exist at all; overflow-y is a fallback, not the intended
-   path — it only ever engages if some page's fixed chrome (e.g. a
-   wrapped topbar nav on a narrow phone) alone exceeds the viewport. */
+/* Fixed-height app shell: topbar stays pinned via flex: 0 0 auto (below)
+   in a body that's a column-flex filling the viewport, so it never
+   scrolls away even on a page whose content runs long. Everything
+   below it (page title, cards, tables) is natural-height, NOT force-
+   stretched to fill whatever's left — see .table-scroll and
+   table-fit.js for how a table's own height specifically is bounded
+   (floor so a near-empty one doesn't look broken, cap so a long one
+   scrolls internally instead of pushing this header away). body's own
+   overflow-y is the fallback for whatever doesn't fit even so — e.g. a
+   wrapped topbar nav on a narrow phone, or a table pinned at its min-
+   height floor on a short viewport. */
 html { height: 100%; }
 body {
   margin: 0;
@@ -267,26 +267,8 @@ h2 { font-size: 16px; margin: 0 0 12px; color: var(--text); }
   flex: 0 0 auto;
 }
 
-/* The one card per page that holds a table grows to fill whatever
-   vertical space .content has left after its page-header-row and any
-   other (flex: 0 0 auto, natural-height) card — see body's own comment
-   for the full mechanism. Scoped to :has(.table-scroll) rather than
-   :last-of-type so a page with no table (or a table-less card sitting
-   after a table-holding one, if that ever happens) is never stretched
-   for no reason. */
 .content > .page-header-row {
   flex: 0 0 auto;
-}
-.card:has(.table-scroll) {
-  flex: 1 1 auto;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-.card:has(.table-scroll) > .table-scroll {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
 }
 
 .card-header-row {
@@ -767,14 +749,22 @@ button:disabled:hover, .btn:disabled:hover { filter: none; }
   width: 100%;
 }
 
-/* No vertical cap — every table shows its full height and scrolls with
-   the page, not inside its own nested scroll box (which used to clip
-   tall tables, e.g. Firewall Rules, to 60vh with a hard-to-discover
-   internal scrollbar). overflow-x stays, for the horizontal scroll a
-   table's own fixed min-width (see #clients-table etc.) still needs on
-   narrow viewports. */
+/* Sized to its own content (a handful of rows shouldn't force this box —
+   and the "Prev/Next" pagination right after it — to stretch down to
+   fill the screen with blank space in between), between a floor and a
+   cap: min-height keeps a near-empty table from looking like a broken
+   sliver of a box; max-height (set dynamically per element by
+   table-fit.js, not here — pure CSS can't express "cap at whatever
+   vertical space is actually left on THIS page" against siblings whose
+   own height varies per page) keeps a long one from pushing the
+   header/title off past a full-page scroll, scrolling internally
+   instead once its rows exceed that. overflow-x stays, for the
+   horizontal scroll a table's own fixed min-width (see #clients-table
+   etc.) still needs on narrow viewports. */
 .table-scroll {
+  min-height: 50vh;
   overflow-x: auto;
+  overflow-y: auto;
   scrollbar-width: thin;                    /* Firefox */
   scrollbar-color: var(--border) transparent;
 }
