@@ -682,19 +682,22 @@ button:disabled:hover, .btn:disabled:hover { filter: none; }
 /* Icon-only button (the Logs tabs' Refresh now) — a plain 34px square
    (matching the Range select's own height right next to it) instead of
    a text button's padding, which would leave a 14px icon sitting off-
-   center in a too-wide box. Ghost-styled (no background/shadow) since
-   it sits beside the Range select as a secondary action, not the main
-   "submit" affordance the base button/.btn styling is for. */
+   center in a too-wide box. Styled to match .custom-select-trigger's own
+   background/border/radius exactly, since it sits directly beside that
+   select. */
 .btn-icon {
   width: 34px;
   padding: 0;
   flex-shrink: 0;
-  background: none;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
   box-shadow: none;
   color: var(--muted);
 }
 .btn-icon:hover {
   background: var(--panel-2);
+  border-color: var(--accent);
   filter: none;
   box-shadow: none;
   color: var(--text);
