@@ -283,10 +283,19 @@ h2 { font-size: 16px; margin: 0 0 12px; color: var(--text); }
   width: auto;
 }
 
+/* Logs page's search_toolbar (search box + Range select + Refresh now)
+   moved up here instead of sitting inside each tab's own card, matching
+   every other page's search-in-the-title-row convention — its own margin
+   would double up with .page-header-row's margin-bottom. */
+.page-header-row .table-toolbar {
+  margin: 0;
+}
+
 @media (max-width: 520px) {
   .page-header-row { flex-wrap: wrap; row-gap: 10px; }
   .page-header-row h1,
-  .page-header-row input[type="text"].filter-input-inline {
+  .page-header-row input[type="text"].filter-input-inline,
+  .page-header-row .table-toolbar {
     flex-basis: 100%;
   }
 }
