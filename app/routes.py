@@ -375,7 +375,15 @@ def client_add_rule(name):
     own behavior. Always redirects back to this same client's page.
     `src` is looked up server-side from the client's own VPN IP rather
     than trusted from the form, since this route's whole premise is
-    "this client's rule", not whatever IP happened to be submitted."""
+    "this client's rule", not whatever IP happened to be submitted.
+
+    The form's "+" button can add more than one Destination field (all
+    named "dst") — one rule gets created per non-blank destination
+    entered, so e.g. two filled-in destinations plus one left blank
+    creates two rules, not three, on the assumption an unused extra
+    field was never meant to become an explicit "any" rule. Only when
+    every destination field is blank (including the default single one)
+    does that still mean one "any" rule, same as before this feature."""
     try:
         name = pivpn_ctl.validate_name(name)
     except pivpn_ctl.PivpnError:
@@ -384,21 +392,30 @@ def client_add_rule(name):
     if not client_ip:
         flash(f"{name} has no VPN IP yet — it needs to connect at least once first.", "error")
         return redirect(url_for("main.client_detail", name=name))
-    try:
-        rule_id = firewall.add_forward_rule(
-            action=request.form.get("action"),
-            protocol=request.form.get("protocol"),
-            src=client_ip,
-            dst=request.form.get("dst"),
-            dport=request.form.get("dport"),
-            comment=request.form.get("comment", ""),
-        )
-        flash("Forward rule added.", "success")
-        _audit("firewall_forward_add", f"rule#{rule_id}")
+    dsts = [d.strip() for d in request.form.getlist("dst")]
+    dsts = [d for d in dsts if d] or [""]
+    added = 0
+    skipped = []
+    for dst in dsts:
+        try:
+            rule_id = firewall.add_forward_rule(
+                action=request.form.get("action"),
+                protocol=request.form.get("protocol"),
+                src=client_ip,
+                dst=dst,
+                dport=request.form.get("dport"),
+                comment=request.form.get("comment", ""),
+            )
+            added += 1
+            _audit("firewall_forward_add", f"rule#{rule_id}")
+        except firewall.FirewallError as exc:
+            skipped.append(f"{dst or 'any'}: {exc}")
+            _audit("firewall_forward_add", "", "error", str(exc))
+    if added:
+        flash(f"Added {added} forward rule(s)." if added > 1 else "Forward rule added.", "success")
         _regenerate_script_for_ip(client_ip)
-    except firewall.FirewallError as exc:
-        flash(str(exc), "error")
-        _audit("firewall_forward_add", "", "error", str(exc))
+    if skipped:
+        flash("Skipped: " + "; ".join(skipped), "error")
     return redirect(url_for("main.client_detail", name=name))
 
 

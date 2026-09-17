@@ -5,50 +5,57 @@
 
 <div class="page-header-row">
   <h1>{{ client.name }}</h1>
+  {% if rules %}
+  <input type="text" id="client-rules-filter" class="log-filter-input filter-input-inline" placeholder="Search…" aria-label="Search firewall rules for {{ client.name }}">
+  {% endif %}
 </div>
 
 <section class="card {{ 'blocked-row' if client.blocked }}">
   <div class="card-header-row">
     <h2>Status</h2>
     {% if client.session %}
-      <span class="badge badge-connected">connected</span>
+      <span class="status-indicator status-indicator-connected"><span class="status-dot status-dot-connected" aria-hidden="true"></span>Active</span>
     {% else %}
-      <span class="badge badge-inactive">inactive</span>
+      <span class="status-indicator"><span class="status-dot" aria-hidden="true"></span>Inactive</span>
     {% endif %}
   </div>
   <dl class="detail-grid">
-    <dt>Certificate status</dt><dd>{{ client.status }}{{ ' (blocked)' if client.blocked else '' }}</dd>
-    <dt>Expiration</dt><dd>{{ client.expiration or '—' }}</dd>
-    <dt>VPN IP</dt><dd>{{ client.ip or '—' }}</dd>
+    <div class="detail-item"><dt>Certificate status</dt><dd>{{ client.status }}{{ ' (blocked)' if client.blocked else '' }}</dd></div>
+    <div class="detail-item"><dt>Expiration</dt><dd>{{ client.expiration or '—' }}</dd></div>
+    <div class="detail-item"><dt>VPN IP</dt><dd>{{ client.ip or '—' }}</dd></div>
     {% if client.session %}
-    <dt>Connected since</dt><dd>{{ client.session.since or '—' }}</dd>
-    <dt>Real address</dt><dd>{{ client.session.real_address or '—' }}</dd>
-    <dt>Data transferred</dt><dd>{{ client.session.bytes_recv or '0' }} in / {{ client.session.bytes_sent or '0' }} out</dd>
+    <div class="detail-item"><dt>Connected since</dt><dd>{{ client.session.since or '—' }}</dd></div>
+    <div class="detail-item"><dt>Real address</dt><dd>{{ client.session.real_address or '—' }}</dd></div>
+    <div class="detail-item"><dt>Data transferred</dt><dd>{{ client.session.bytes_recv or '0' }} in / {{ client.session.bytes_sent or '0' }} out</dd></div>
     {% endif %}
   </dl>
 
   <div class="actions">
     <a class="btn btn-sm" href="{{ url_for('main.download_client', name=client.name) }}">Download</a>
-    <form method="post" action="{{ url_for('main.renew_client', name=client.name) }}" class="btn-form"
-          data-confirm="Renew {{ client.name }}? This revokes the current cert and issues a new one — the old .ovpn will stop working immediately."
-          data-confirm-label="Renew">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button type="submit" class="btn btn-sm btn-secondary">Renew</button>
-    </form>
-    <form method="post" action="{{ url_for('main.block_client', name=client.name) }}" class="btn-form">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <input type="hidden" name="blocked" value="{{ '0' if client.blocked else '1' }}">
-      <button type="submit" class="btn btn-sm {{ 'btn-ok' if client.blocked else 'btn-warn' }}">
-        {{ 'Unblock' if client.blocked else 'Block' }}
-      </button>
-    </form>
-    <form method="post" action="{{ url_for('main.remove_client', name=client.name) }}" class="btn-form"
-          data-confirm="Permanently remove {{ client.name }}? This cannot be undone."
-          data-confirm-label="Remove">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button type="submit" class="btn btn-sm btn-danger">Remove</button>
-    </form>
+    <div class="dropdown" id="client-actions-dropdown">
+      <button type="button" class="btn btn-sm btn-secondary" id="client-actions-btn" aria-haspopup="true" aria-expanded="false">Actions &#9662;</button>
+      <div class="dropdown-menu" id="client-actions-menu" role="menu" aria-labelledby="client-actions-btn" hidden>
+        <form method="post" action="{{ url_for('main.renew_client', name=client.name) }}" class="dropdown-item-form"
+              data-confirm="Renew {{ client.name }}? This revokes the current cert and issues a new one — the old .ovpn will stop working immediately."
+              data-confirm-label="Renew">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="dropdown-item" role="menuitem" data-dropdown-item>Renew</button>
+        </form>
+        <form method="post" action="{{ url_for('main.block_client', name=client.name) }}" class="dropdown-item-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="blocked" value="{{ '0' if client.blocked else '1' }}">
+          <button type="submit" class="dropdown-item" role="menuitem" data-dropdown-item>{{ 'Unblock' if client.blocked else 'Block' }}</button>
+        </form>
+        <form method="post" action="{{ url_for('main.remove_client', name=client.name) }}" class="dropdown-item-form"
+              data-confirm="Permanently remove {{ client.name }}? This cannot be undone."
+              data-confirm-label="Remove">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="dropdown-item dropdown-item-danger" role="menuitem" data-dropdown-item>Remove</button>
+        </form>
+      </div>
+    </div>
   </div>
+  <script>attachDropdown('client-actions-btn', 'client-actions-menu');</script>
 </section>
 
 <section class="card">
@@ -81,9 +88,6 @@
     {% endif %}
   </div>
   <p class="hint">Only rules whose source or destination matches this client's VPN IP — for everything else (INPUT/SNAT/port-forward rules, or rules for other clients), see the full <a href="{{ url_for('main.firewall_rules') }}">Firewall Rules</a> page.</p>
-  {% if rules %}
-  <input type="text" id="client-rules-filter" class="log-filter-input" placeholder="Search…" aria-label="Search firewall rules for {{ client.name }}">
-  {% endif %}
   {% if not client.ip %}
   <p class="empty">{{ client.name }} has no static VPN IP yet (only assigned once it connects at least once) — rules can't be scoped to it until then. Use the full <a href="{{ url_for('main.firewall_rules') }}">Firewall Rules</a> page in the meantime.</p>
   {% else %}
@@ -116,9 +120,10 @@
           <option>{{ client.name }} ({{ client.ip }})</option>
         </select>
       </label>
-      <label>Destination <span class="hint">(IP/CIDR, blank = any)</span>
+      <label class="client-add-rule-dst-field">Destination <span class="hint">(IP/CIDR, blank = any)</span>
         <input type="text" name="dst" placeholder="192.168.1.0/24" pattern="{{ ip_cidr_pattern }}" title="An IPv4 address, optionally with a /0-32 CIDR suffix, e.g. 192.168.1.0/24">
       </label>
+      <button type="button" class="btn btn-sm btn-secondary" id="client-add-rule-add-dst">+ Destination</button>
       <label>Dest. port <span class="hint">(blank = any)</span>
         <input type="text" name="dport" placeholder="443">
       </label>
@@ -130,6 +135,16 @@
       </div>
     </form>
   </dialog>
+  <script>
+    document.getElementById('client-add-rule-add-dst').addEventListener('click', () => {
+      const fields = document.querySelectorAll('.client-add-rule-dst-field');
+      const last = fields[fields.length - 1];
+      const clone = last.cloneNode(true);
+      clone.querySelector('input').value = '';
+      last.after(clone);
+      clone.querySelector('input').focus();
+    });
+  </script>
   {% endif %}
 
   <div class="table-scroll">

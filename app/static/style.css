@@ -749,15 +749,62 @@ button:disabled:hover, .btn:disabled:hover { filter: none; }
 .btn-group-stack { display: flex; flex-direction: column; align-items: stretch; gap: 10px; }
 .header-col { display: flex; flex-direction: column; gap: 10px; }
 
+/* Generic overflow menu (dropdown.js's attachDropdown) — currently used
+   by the client-detail page's Status card Actions menu. Same floating-
+   surface treatment as .custom-select-menu (only thing in the system
+   this shape already existed for): a plain div drawn ourselves, floating
+   above the page, earning its shadow by being open. */
+.dropdown { position: relative; display: inline-flex; }
+.dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 170px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  padding: 4px;
+  z-index: 1200;
+}
+.dropdown-menu[hidden] { display: none; }
+.dropdown-item-form { display: block; }
+.dropdown-item {
+  display: block;
+  width: 100%;
+  background: none;
+  color: var(--text);
+  border: none;
+  box-shadow: none;
+  border-radius: 6px;
+  height: auto;
+  padding: 9px 12px;
+  font-size: 14px;
+  font-weight: 500;
+  text-align: left;
+  justify-content: flex-start;
+}
+.dropdown-item:hover { background: var(--panel-2); filter: none; box-shadow: none; }
+
+.dropdown-item-danger { color: var(--danger); }
+.dropdown-item-danger:hover { background: rgba(var(--danger-rgb), 0.12); }
+
 /* Bulk disable/delete stretch to fill the same width as the row of
    buttons above them (Reapply all / Save Rules / Import Rules), instead
-   of sitting narrower and left-aligned within the stack. */
+   of sitting narrower and left-aligned within the stack. Same rule for
+   the client-detail page's own bulk-actions row (different IDs, same
+   pattern) — kept in one shared list rather than duplicating this block,
+   so the two never drift out of sync again. */
 #bulk-disable-form,
-#bulk-delete-form {
+#bulk-delete-form,
+#client-bulk-disable-form,
+#client-bulk-delete-form {
   flex: 1;
 }
 #bulk-disable-btn,
-#bulk-delete-btn {
+#bulk-delete-btn,
+#client-bulk-disable-btn,
+#client-bulk-delete-btn {
   width: 100%;
 }
 
@@ -960,27 +1007,35 @@ th {
 
 /* rules-table is auto-layout (not fixed like clients-table), and .actions'
    flex-wrap lets its column collapse to one button's width instead of
-   fitting both Disable/Enable + Delete side by side — give it a floor. */
-#rules-table th:last-child { min-width: 190px; }
+   fitting both Disable/Enable + Delete side by side — give it a floor.
+   Same for client-rules-table (client-detail page's own scoped table),
+   same auto-layout/flex-wrap situation. */
+#rules-table th:last-child,
+#client-rules-table th:last-child { min-width: 190px; }
 
 /* Native checkboxes default to ~13x13px. Sized up slightly for tap-ability,
    but kept below the WCAG 2.5.8 24px floor by explicit choice — a visually
    lighter box in a dense table, traded against the stricter touch-target
-   minimum. Shared by every bulk-select table (Firewall Rules, Clients) so
-   the same control looks and behaves identically everywhere it appears. */
+   minimum. Shared by every bulk-select table (Firewall Rules, Clients,
+   the client-detail page's own scoped rules table) so the same control
+   looks and behaves identically everywhere it appears. */
 .rule-select-checkbox,
 #rules-select-all,
 .client-select-checkbox,
-#clients-select-all {
+#clients-select-all,
+.client-rule-select-checkbox,
+#client-rules-select-all {
   width: 15px;
   height: 15px;
   cursor: pointer;
 }
 
-#rules-table .actions {
+#rules-table .actions,
+#client-rules-table .actions {
   justify-content: flex-start;
 }
-#rules-table .actions .btn {
+#rules-table .actions .btn,
+#client-rules-table .actions .btn {
   width: 80px;
   text-align: center;
 }
@@ -1121,6 +1176,18 @@ dialog.modal code {
 .badge-connected { background: rgba(var(--ok-rgb), 0.18); color: var(--ok); }
 .badge-inactive { background: rgba(var(--muted-rgb), 0.15); color: var(--muted); }
 
+/* Client-detail page's own Status header indicator — a compact dot +
+   label instead of the pill-shaped .badge above, which reads as heavier
+   than needed for a single record's own page header (the pill's boxed
+   background made more sense as a scannable marker across many rows in
+   a table, e.g. the Clients list). Color still carries connected/
+   inactive via the same --ok/--muted tokens; the dot is aria-hidden
+   since the adjacent text is what actually conveys the state. */
+.status-indicator { display: inline-flex; align-items: center; font-size: 13px; font-weight: 600; color: var(--muted); }
+.status-dot { width: 8px; height: 8px; border-radius: 999px; margin-right: 6px; background: var(--muted); }
+.status-dot-connected { background: var(--ok); }
+.status-indicator-connected { color: var(--ok); }
+
 /* Account role (Users page) is a different kind of label than
    connected/inactive — it's not a live status, so it deliberately doesn't
    borrow the ok/muted status-color pair those mean. Neutral outline
@@ -1131,16 +1198,22 @@ dialog.modal code {
 .empty { color: var(--muted); }
 
 /* Client detail page's read-only key/value status list — the one place in
-   the app showing a single record's fields instead of a table of rows. */
+   the app showing a single record's fields instead of a table of rows.
+   Each dt/dd pair is grouped in its own .detail-item (a <dl> may contain
+   <div> wrappers around dt/dd groups per the HTML5 spec) so the whole
+   list can flow as one wrapping line of "Label: value" pairs instead of
+   stacking one field per row. */
 .detail-grid {
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 8px 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
   margin: 0 0 16px;
 }
 
-.detail-grid dt { color: var(--muted); }
-.detail-grid dd { margin: 0; }
+.detail-item { display: flex; gap: 6px; align-items: baseline; margin: 0; }
+.detail-item dt { color: var(--muted); margin: 0; }
+.detail-item dt::after { content: ":"; }
+.detail-item dd { margin: 0; }
 
 .tabs {
   display: flex;
