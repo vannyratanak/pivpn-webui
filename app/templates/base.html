@@ -39,6 +39,7 @@
   <script src="{{ url_for('static', filename='js/nav-loading.js') }}"></script>
   <script src="{{ url_for('static', filename='js/theme-toggle.js') }}"></script>
   <script src="{{ url_for('static', filename='js/table-fit.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/flash-toasts.js') }}"></script>
 </head>
 <body>
   <a href="#main-content" class="skip-link">Skip to content</a>
@@ -76,11 +77,27 @@
   <main class="content" id="main-content">
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
+        {% if current_user.is_authenticated %}
+        {# Auto-dismissing toast stack everywhere in the app proper — see
+           the Toasts / Floating Alerts entry in DESIGN.md and
+           flash-toasts.js for the show-then-go-away behavior. The login
+           page below keeps the plain inline banner instead: a transient
+           toast that can vanish before someone's read it is a poor fit
+           for "why did my login just fail," and .flashes:has(+ .login-wrap)
+           already centers/width-matches it to that page's one narrow
+           card. #}
+        <div class="flash-toasts" aria-live="polite">
+          {% for category, message in messages %}
+            <div class="flash-toast flash-{{ category }}">{{ message }}</div>
+          {% endfor %}
+        </div>
+        {% else %}
         <div class="flashes">
           {% for category, message in messages %}
             <div class="flash flash-{{ category }}">{{ message }}</div>
           {% endfor %}
         </div>
+        {% endif %}
       {% endif %}
     {% endwith %}
 

@@ -55,10 +55,35 @@
   <div class="card-header-row">
     <h2>Firewall rules for {{ client.name }}</h2>
     {% if client.ip %}
-    <button type="button" class="btn" onclick="document.getElementById('add-client-rule-dialog').showModal()">Add rule</button>
+    <div class="btn-group-stack">
+      <div class="btn-group">
+        <button type="button" class="btn" onclick="document.getElementById('add-client-rule-dialog').showModal()">Add rule</button>
+        <form method="post" action="{{ url_for('main.client_resync_rules', name=client.name) }}" class="btn-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn">Apply Rules</button>
+        </form>
+        <form method="post" action="{{ url_for('main.client_persist_rules', name=client.name) }}" class="btn-form" {{ '' if has_unsaved else 'hidden' }}>
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn btn-warn btn-unsaved-jump">Save Rules</button>
+        </form>
+      </div>
+      <div class="btn-group" id="client-bulk-actions-group" hidden>
+        <form method="post" action="{{ url_for('main.client_bulk_disable_rules', name=client.name) }}" id="client-bulk-disable-form" class="btn-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn btn-warn" id="client-bulk-disable-btn" disabled>Disable (<span id="client-bulk-disable-count">0</span>)</button>
+        </form>
+        <form method="post" action="{{ url_for('main.client_bulk_delete_rules', name=client.name) }}" id="client-bulk-delete-form" class="btn-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn btn-danger" id="client-bulk-delete-btn" disabled>Delete (<span id="client-bulk-delete-count">0</span>)</button>
+        </form>
+      </div>
+    </div>
     {% endif %}
   </div>
   <p class="hint">Only rules whose source or destination matches this client's VPN IP — for everything else (INPUT/SNAT/port-forward rules, or rules for other clients), see the full <a href="{{ url_for('main.firewall_rules') }}">Firewall Rules</a> page.</p>
+  {% if rules %}
+  <input type="text" id="client-rules-filter" class="log-filter-input" placeholder="Search…" aria-label="Search firewall rules for {{ client.name }}">
+  {% endif %}
   {% if not client.ip %}
   <p class="empty">{{ client.name }} has no static VPN IP yet (only assigned once it connects at least once) — rules can't be scoped to it until then. Use the full <a href="{{ url_for('main.firewall_rules') }}">Firewall Rules</a> page in the meantime.</p>
   {% else %}
@@ -92,7 +117,7 @@
         </select>
       </label>
       <label>Destination <span class="hint">(IP/CIDR, blank = any)</span>
-        <input type="text" name="dst" placeholder="192.168.1.0/24">
+        <input type="text" name="dst" placeholder="192.168.1.0/24" pattern="{{ ip_cidr_pattern }}" title="An IPv4 address, optionally with a /0-32 CIDR suffix, e.g. 192.168.1.0/24">
       </label>
       <label>Dest. port <span class="hint">(blank = any)</span>
         <input type="text" name="dport" placeholder="443">
@@ -111,6 +136,7 @@
   <table id="client-rules-table">
     <thead>
       <tr>
+        <th scope="col"><input type="checkbox" id="client-rules-select-all" aria-label="Select all visible rules"></th>
         <th scope="col">Kind</th>
         <th scope="col">Action</th>
         <th scope="col">Details</th>
@@ -121,10 +147,11 @@
     </thead>
     <tbody id="client-rules-tbody">
       {% if not rules %}
-      <tr class="empty-row"><td colspan="6" class="empty">No rules scoped to this client yet.</td></tr>
+      <tr class="empty-row"><td colspan="7" class="empty">No rules scoped to this client yet.</td></tr>
       {% endif %}
       {% for r in rules %}
       <tr class="{{ '' if r.enabled else 'disabled-row' }}">
+        <td><input type="checkbox" class="client-rule-select-checkbox" data-rule-id="{{ r.id }}" aria-label="Select rule {{ r.id }}"></td>
         <td>{{ r.kind }}</td>
         <td>{{ r.action }}</td>
         <td>{{ r.detail }}</td>
@@ -164,7 +191,68 @@
     </div>
   </div>
   <script>
-    attachPagination('#client-rules-tbody', 'tr:not(.empty-row)', 'client-rules-page-size', 'client-rules-pagination');
+    const clientRulesPager = attachPagination('#client-rules-tbody', 'tr:not(.empty-row)', 'client-rules-page-size', 'client-rules-pagination');
+    attachLogFilter('client-rules-filter', '#client-rules-tbody', 'tr:not(.empty-row)', null, () => clientRulesPager && clientRulesPager.refresh());
+
+    (function() {
+      const selectAll = document.getElementById('client-rules-select-all');
+      const bulkGroup = document.getElementById('client-bulk-actions-group');
+      const disableBtn = document.getElementById('client-bulk-disable-btn');
+      const disableForm = document.getElementById('client-bulk-disable-form');
+      const disableCount = document.getElementById('client-bulk-disable-count');
+      const deleteBtn = document.getElementById('client-bulk-delete-btn');
+      const deleteForm = document.getElementById('client-bulk-delete-form');
+      const deleteCount = document.getElementById('client-bulk-delete-count');
+      if (!selectAll || !bulkGroup || !disableBtn || !disableForm || !deleteBtn || !deleteForm) return;
+
+      const checkboxes = () => Array.from(document.querySelectorAll('#client-rules-tbody .client-rule-select-checkbox'));
+      const visibleCheckboxes = () => checkboxes().filter((cb) => cb.closest('tr').style.display !== 'none');
+
+      function updateCount() {
+        const checked = checkboxes().filter((cb) => cb.checked).length;
+        bulkGroup.hidden = checked === 0;
+        disableCount.textContent = checked;
+        disableBtn.disabled = checked === 0;
+        deleteCount.textContent = checked;
+        deleteBtn.disabled = checked === 0;
+      }
+
+      // "Select all" only selects currently-visible rows — respects
+      // whatever the search box currently narrowed to.
+      selectAll.addEventListener('change', () => {
+        visibleCheckboxes().forEach((cb) => { cb.checked = selectAll.checked; });
+        updateCount();
+      });
+      checkboxes().forEach((cb) => cb.addEventListener('change', updateCount));
+
+      // Checkboxes aren't nested in either form (they'd need to submit to
+      // both), so on submit each form gets its own hidden rule_ids inputs
+      // built from whatever's checked right now.
+      function injectSelectedIds(form) {
+        form.querySelectorAll('input[name="rule_ids"]').forEach((el) => el.remove());
+        checkboxes().filter((cb) => cb.checked).forEach((cb) => {
+          const hidden = document.createElement('input');
+          hidden.type = 'hidden';
+          hidden.name = 'rule_ids';
+          hidden.value = cb.dataset.ruleId;
+          form.appendChild(hidden);
+        });
+      }
+
+      disableForm.addEventListener('submit', (e) => {
+        const checked = checkboxes().filter((cb) => cb.checked).length;
+        if (checked === 0) { e.preventDefault(); return; }
+        injectSelectedIds(disableForm);
+      });
+
+      deleteForm.addEventListener('submit', (e) => {
+        const checked = checkboxes().filter((cb) => cb.checked).length;
+        if (checked === 0) { e.preventDefault(); return; }
+        injectSelectedIds(deleteForm);
+        deleteForm.dataset.confirm = `Delete ${checked} selected rule(s)? This cannot be undone.`;
+        deleteForm.dataset.confirmLabel = 'Delete';
+      });
+    })();
   </script>
 </section>
 {% endblock %}

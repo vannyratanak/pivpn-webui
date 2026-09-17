@@ -68,6 +68,10 @@ def create_app():
     from app.routes import bp as main_bp
     app.register_blueprint(main_bp)
 
+    from app.firewall import IP_CIDR_PATTERN, IP_PATTERN
+    app.jinja_env.globals["ip_cidr_pattern"] = IP_CIDR_PATTERN
+    app.jinja_env.globals["ip_pattern"] = IP_PATTERN
+
     with app.app_context():
         _sync_firewall_once(app)
 

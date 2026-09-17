@@ -1284,6 +1284,76 @@ input[type="text"].filter-input-inline {
 .flash-success { background: rgba(var(--ok-rgb), 0.15); border: 1px solid var(--ok); color: var(--ok); }
 .flash-error { background: rgba(var(--danger-rgb), 0.15); border: 1px solid var(--danger); color: var(--danger); }
 
+/* Auto-dismissing toast stack (base.html + flash-toasts.js) — everywhere
+   in the app except the login page above, which keeps the plain .flash
+   banner. A genuinely floating container surface, not inline content, so
+   per DESIGN.md's Toasts / Floating Alerts entry it takes the Card/Modal
+   treatment (solid --panel background, 10px radius, a single 1px border
+   carrying the semantic color) instead of .flash's translucent wash —
+   same reasoning and the same top offset (clears .topbar) as
+   .reorder-error-toast, just stacked in the corner instead of centered,
+   since more than one of these can be visible at once. */
+.flash-toasts {
+  position: fixed;
+  top: 82px;
+  right: 16px;
+  z-index: 1300;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 360px;
+}
+
+.flash-toast {
+  position: relative;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 36px 14px 16px;
+  font-size: 14px;
+  line-height: 1.5;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  animation: flash-toast-in 0.2s ease-out;
+}
+
+.flash-toast.flash-success { border-color: var(--ok); color: var(--ok); }
+.flash-toast.flash-error { border-color: var(--danger); color: var(--danger); }
+
+.flash-toast.closing { animation: flash-toast-out 0.2s ease-in forwards; }
+
+@keyframes flash-toast-in {
+  from { opacity: 0; transform: translateX(16px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes flash-toast-out {
+  from { opacity: 1; transform: translateX(0); }
+  to { opacity: 0; transform: translateX(16px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flash-toast, .flash-toast.closing { animation: none; }
+}
+
+.flash-toast-close {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 24px;
+  height: 24px;
+  min-height: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  box-shadow: none;
+  color: inherit;
+  font-size: 16px;
+  line-height: 1;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.flash-toast-close:hover { background: var(--panel-2); filter: none; box-shadow: none; }
+
 .login-wrap {
   min-height: 80vh;
   display: flex;

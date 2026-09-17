@@ -89,11 +89,11 @@
           </select>
         </label>
         <label id="fwd-src-custom-wrap" class="fwd-src-custom-wrap">Custom source <span class="hint">(IP/CIDR, blank = any)</span>
-          <input type="text" id="fwd-src-custom-input" placeholder="10.202.226.0/24">
+          <input type="text" id="fwd-src-custom-input" placeholder="10.202.226.0/24" pattern="{{ ip_cidr_pattern }}" title="An IPv4 address, optionally with a /0-32 CIDR suffix, e.g. 192.168.1.0/24">
         </label>
         <input type="hidden" name="src" id="fwd-src-hidden">
         <label>Destination <span class="hint">(IP/CIDR, blank = any)</span>
-          <input type="text" name="dst" placeholder="192.168.1.0/24">
+          <input type="text" name="dst" placeholder="192.168.1.0/24" pattern="{{ ip_cidr_pattern }}" title="An IPv4 address, optionally with a /0-32 CIDR suffix, e.g. 192.168.1.0/24">
         </label>
         <label>Dest. port <span class="hint">(blank = any)</span>
           <input type="text" name="dport" placeholder="443">
@@ -134,7 +134,7 @@
           </select>
         </label>
         <label id="input-src-custom-wrap" class="fwd-src-custom-wrap">Custom source <span class="hint">(IP/CIDR, blank = any)</span>
-          <input type="text" id="input-src-custom-input" placeholder="10.202.226.0/24">
+          <input type="text" id="input-src-custom-input" placeholder="10.202.226.0/24" pattern="{{ ip_cidr_pattern }}" title="An IPv4 address, optionally with a /0-32 CIDR suffix, e.g. 192.168.1.0/24">
         </label>
         <input type="hidden" name="src" id="input-src-hidden">
         <label>Dest. port <span class="hint">(blank = any)</span>
@@ -157,7 +157,7 @@
           <input type="text" name="ext_port" required placeholder="8080">
         </label>
         <label><span class="label-text">Target IP<span class="required-star" aria-hidden="true">*</span></span> <span class="hint">(VPN client's internal IP)</span>
-          <input type="text" name="target_ip" required placeholder="10.8.0.5">
+          <input type="text" name="target_ip" required placeholder="10.8.0.5" pattern="{{ ip_cidr_pattern }}" title="An IPv4 address, optionally with a /0-32 CIDR suffix, e.g. 10.8.0.5">
         </label>
         <label>Target port <span class="hint">(blank = same as external)</span>
           <input type="text" name="target_port" placeholder="80">
@@ -185,10 +185,10 @@
       <form method="post" action="{{ url_for('main.add_snat') }}" class="inline-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <label>Source <span class="hint">(subnet whose outbound traffic gets rewritten)</span>
-          <input type="text" name="src" placeholder="10.202.226.0/24">
+          <input type="text" name="src" placeholder="10.202.226.0/24" pattern="{{ ip_cidr_pattern }}" title="An IPv4 address, optionally with a /0-32 CIDR suffix, e.g. 192.168.1.0/24">
         </label>
         <label><span class="label-text">Fixed exit IP<span class="required-star" aria-hidden="true">*</span></span><span class="hint hint-block">(what the source gets rewritten to)</span>
-          <input type="text" name="snat_ip" required placeholder="10.255.50.10">
+          <input type="text" name="snat_ip" required placeholder="10.255.50.10" pattern="{{ ip_pattern }}" title="A single IPv4 address, no CIDR, e.g. 10.255.50.10">
         </label>
         <label>Outgoing interface <span class="hint">(optional — omit to use the server's default route)</span>
           <select name="out_iface">

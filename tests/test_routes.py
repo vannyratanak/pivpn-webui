@@ -897,3 +897,106 @@ def test_client_delete_rule_redirects_back_to_client_page(client):
     assert resp.headers["Location"] == "/clients/laptop-anna"
     assert db.list_rules() == []
 
+
+# --- /clients/<name>/rules/bulk-disable and /bulk-delete: same underlying
+# _bulk_disable_or_delete() as /firewall/bulk-disable and /bulk-delete, but
+# restricted server-side to rules that actually belong to this client — a
+# submitted rule_id for a *different* client is silently dropped rather
+# than acted on, same "never trust scope from the form" rule
+# client_add_rule's docstring already applies to src.
+
+def _stub_two_clients(monkeypatch):
+    monkeypatch.setattr(
+        "app.routes.pivpn_ctl.list_client_ips",
+        lambda: {"laptop-anna": "10.202.226.2", "phone-bob": "10.202.226.3"},
+    )
+
+
+def test_client_bulk_disable_requires_admin(client):
+    _add_moderator()
+    _login_moderator(client)
+    resp = client.post("/clients/laptop-anna/rules/bulk-disable", data={"rule_ids": ["1"]})
+    assert resp.status_code == 403
+
+
+def test_client_bulk_disable_only_affects_this_clients_rules(client, monkeypatch):
+    _stub_two_clients(monkeypatch)
+    monkeypatch.setattr("app.firewall.run_root", lambda argv, **kwargs: "")
+    _login_admin(client)
+    anna_rule = db.insert_rule({"kind": "forward", "action": "DROP", "protocol": "tcp", "src": "10.202.226.2"})
+    bob_rule = db.insert_rule({"kind": "forward", "action": "DROP", "protocol": "tcp", "src": "10.202.226.3"})
+    resp = client.post("/clients/laptop-anna/rules/bulk-disable", data={
+        "rule_ids": [str(anna_rule), str(bob_rule)],
+    })
+    assert resp.status_code == 302
+    assert resp.headers["Location"] == "/clients/laptop-anna"
+    assert db.get_rule(anna_rule)["enabled"] == 0
+    assert db.get_rule(bob_rule)["enabled"] == 1  # untouched — not this client's rule
+
+
+def test_client_bulk_delete_only_affects_this_clients_rules(client, monkeypatch):
+    _stub_two_clients(monkeypatch)
+    _login_admin(client)
+    anna_rule = db.insert_rule({"kind": "forward", "action": "DROP", "protocol": "tcp", "src": "10.202.226.2"})
+    bob_rule = db.insert_rule({"kind": "forward", "action": "DROP", "protocol": "tcp", "src": "10.202.226.3"})
+    resp = client.post("/clients/laptop-anna/rules/bulk-delete", data={
+        "rule_ids": [str(anna_rule), str(bob_rule)],
+    })
+    assert resp.status_code == 302
+    assert resp.headers["Location"] == "/clients/laptop-anna"
+    assert db.get_rule(anna_rule) is None
+    assert db.get_rule(bob_rule) is not None  # untouched — not this client's rule
+
+
+def test_client_bulk_delete_invalid_name_404s(client):
+    _login_admin(client)
+    resp = client.post("/clients/not a valid name!/rules/bulk-delete", data={"rule_ids": ["1"]})
+    assert resp.status_code == 404
+
+
+# --- /clients/<name>/rules/resync and /persist: the client detail page's
+# own Apply Rules/Save Rules buttons — same underlying system-wide
+# firewall.sync_all()/save_persistent() as /firewall/resync and
+# /firewall/persist, kept as their own routes purely so the redirect
+# target can differ (see client_add_rule's docstring).
+
+def test_client_resync_rules_requires_admin(client):
+    _add_moderator()
+    _login_moderator(client)
+    resp = client.post("/clients/laptop-anna/rules/resync")
+    assert resp.status_code == 403
+
+
+def test_client_resync_rules_redirects_back_to_client_page(client):
+    _login_admin(client)
+    resp = client.post("/clients/laptop-anna/rules/resync")
+    assert resp.status_code == 302
+    assert resp.headers["Location"] == "/clients/laptop-anna"
+
+
+def test_client_resync_rules_invalid_name_404s(client):
+    _login_admin(client)
+    resp = client.post("/clients/not a valid name!/rules/resync")
+    assert resp.status_code == 404
+
+
+def test_client_persist_rules_requires_admin(client):
+    _add_moderator()
+    _login_moderator(client)
+    resp = client.post("/clients/laptop-anna/rules/persist")
+    assert resp.status_code == 403
+
+
+def test_client_persist_rules_redirects_back_to_client_page(client, monkeypatch):
+    monkeypatch.setattr("app.firewall.run_root", lambda argv, **kwargs: "")
+    _login_admin(client)
+    resp = client.post("/clients/laptop-anna/rules/persist")
+    assert resp.status_code == 302
+    assert resp.headers["Location"] == "/clients/laptop-anna"
+
+
+def test_client_persist_rules_invalid_name_404s(client):
+    _login_admin(client)
+    resp = client.post("/clients/not a valid name!/rules/persist")
+    assert resp.status_code == 404
+

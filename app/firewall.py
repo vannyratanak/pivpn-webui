@@ -119,6 +119,21 @@ def _valid_ip(a):
     return a
 
 
+# HTML5 `pattern` strings for the Add Rule forms' IP/CIDR text inputs (see
+# routes.py's jinja globals) — a client-side approximation of _valid_addr/
+# _valid_ip above, not a replacement: these are plain IPv4-only regexes
+# (every example/placeholder in this app is IPv4; ipaddress.ip_network
+# above also accepts IPv6, so a real IPv6 CIDR would still be rejected
+# client-side and never reach the server — an accepted gap, not a bug,
+# since nothing in this codebase's UI has ever shown an IPv6 example).
+# Point is catching plain garbage (e.g. someone typing "vjf" into
+# Destination) before a round-trip to the server, not exhaustively
+# matching every value ipaddress.ip_network would accept.
+_IPV4_OCTET = r"(25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})"
+IP_CIDR_PATTERN = rf"({_IPV4_OCTET}\.){{3}}{_IPV4_OCTET}(/(3[0-2]|[12]?[0-9]))?"
+IP_PATTERN = rf"({_IPV4_OCTET}\.){{3}}{_IPV4_OCTET}"
+
+
 def _valid_proto(p, allow_all=True):
     p = (p or "all").lower()
     choices = ALLOWED_PROTO if allow_all else {"tcp", "udp"}

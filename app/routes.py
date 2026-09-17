@@ -360,7 +360,8 @@ def client_detail(name):
         r["detail"] = firewall.describe_rule(r)
         client_rules.append(r)
 
-    return render_template("client_detail.html", client=client, rules=client_rules)
+    has_unsaved = any(not r["persisted"] for r in client_rules)
+    return render_template("client_detail.html", client=client, rules=client_rules, has_unsaved=has_unsaved)
 
 
 @bp.route("/clients/<name>/rules/add", methods=["POST"])
@@ -445,6 +446,81 @@ def client_delete_rule(name, rule_id):
     except firewall.FirewallError as exc:
         flash(str(exc), "error")
         _audit("firewall_rule_delete", f"rule#{rule_id}", "error", str(exc))
+    return redirect(url_for("main.client_detail", name=name))
+
+
+@bp.route("/clients/<name>/rules/resync", methods=["POST"])
+@login_required
+@admin_required
+def client_resync_rules(name):
+    """Same as /firewall/resync, kept as its own route (see
+    client_add_rule's docstring) purely so its redirect target can differ
+    without touching the Firewall page's own route. The reconcile itself
+    is still system-wide (firewall.sync_all() doesn't take a client scope
+    — there's no such thing as "reconcile just one client's rules" when
+    the whole point is mirroring live iptables state 1:1), only where the
+    admin lands afterward differs."""
+    try:
+        name = pivpn_ctl.validate_name(name)
+    except pivpn_ctl.PivpnError:
+        abort(404)
+    firewall.sync_all()
+    flash("Firewall rules reapplied from the database.", "success")
+    _audit("firewall_resync")
+    return redirect(url_for("main.client_detail", name=name))
+
+
+@bp.route("/clients/<name>/rules/persist", methods=["POST"])
+@login_required
+@admin_required
+def client_persist_rules(name):
+    """Same as /firewall/persist, kept as its own route (see
+    client_add_rule's docstring) purely so its redirect target can differ
+    — save_persistent() is likewise system-wide, not client-scoped."""
+    try:
+        name = pivpn_ctl.validate_name(name)
+    except pivpn_ctl.PivpnError:
+        abort(404)
+    try:
+        firewall.save_persistent()
+        flash("Firewall rules saved for reboot persistence.", "success")
+        _audit("firewall_persist")
+    except firewall.FirewallError as exc:
+        flash(str(exc), "error")
+        _audit("firewall_persist", "", "error", str(exc))
+    return redirect(url_for("main.client_detail", name=name))
+
+
+@bp.route("/clients/<name>/rules/bulk-disable", methods=["POST"])
+@login_required
+@admin_required
+def client_bulk_disable_rules(name):
+    """Same as /firewall/bulk-disable, kept as its own route (see
+    client_add_rule's docstring) so the redirect target can differ — also
+    passes restrict_to_client so a submitted rule_id belonging to a
+    different client is silently dropped instead of acted on, same
+    principle as client_add_rule looking src up server-side."""
+    try:
+        name = pivpn_ctl.validate_name(name)
+    except pivpn_ctl.PivpnError:
+        abort(404)
+    _bulk_disable_or_delete("disable", request.form.getlist("rule_ids"), restrict_to_client=name)
+    return redirect(url_for("main.client_detail", name=name))
+
+
+@bp.route("/clients/<name>/rules/bulk-delete", methods=["POST"])
+@login_required
+@admin_required
+def client_bulk_delete_rules(name):
+    """Same as /firewall/bulk-delete, kept as its own route (see
+    client_add_rule's docstring) so the redirect target can differ — also
+    passes restrict_to_client, same reasoning as
+    client_bulk_disable_rules above."""
+    try:
+        name = pivpn_ctl.validate_name(name)
+    except pivpn_ctl.PivpnError:
+        abort(404)
+    _bulk_disable_or_delete("delete", request.form.getlist("rule_ids"), restrict_to_client=name)
     return redirect(url_for("main.client_detail", name=name))
 
 
@@ -780,15 +856,20 @@ def delete_rule(rule_id):
     return redirect(url_for("main.firewall_rules"))
 
 
-@bp.route("/firewall/bulk-delete", methods=["POST"])
-@login_required
-@admin_required
-def bulk_delete_rules():
-    ids = request.form.getlist("rule_ids")
+def _bulk_disable_or_delete(action, ids, *, restrict_to_client=None):
+    """Shared by /firewall/bulk-delete, /firewall/bulk-disable, and their
+    client-scoped counterparts below. action is 'delete' or 'disable'.
+
+    restrict_to_client, when given, silently drops any submitted rule_id
+    that doesn't actually belong to that client — same "never trust scope
+    handed to us from the form" rule client_add_rule's docstring already
+    applies to src, extended here since these routes take a whole list of
+    IDs rather than one path-scoped ID."""
     client_ip = _client_ip()
     client_ips = pivpn_ctl.list_client_ips()
+    ip_to_name = {ip: n for n, ip in client_ips.items()}
     affected_ips = set()
-    deleted = 0
+    changed = 0
     skipped = []
     for id_str in ids:
         try:
@@ -798,23 +879,39 @@ def bulk_delete_rules():
         rule = db.get_rule(rule_id)
         if not rule:
             continue
+        if restrict_to_client and firewall.rule_client_name(rule, ip_to_name) != restrict_to_client:
+            continue
+        if action == "disable" and not rule["enabled"]:
+            continue
         try:
-            firewall.delete_rule(rule_id, client_ip=client_ip)
+            if action == "disable":
+                firewall.disable_rule(rule_id, client_ip=client_ip)
+            else:
+                firewall.delete_rule(rule_id, client_ip=client_ip)
         except firewall.FirewallError as exc:
             skipped.append(f"rule#{rule_id}: {exc}")
             continue
-        deleted += 1
+        changed += 1
         if rule["kind"] == "forward" and rule.get("src"):
             affected_ips.add(rule["src"])
     for ip in affected_ips:
         _regenerate_script_for_ip(ip, client_ips=client_ips)
-    if deleted:
-        flash(f"Deleted {deleted} rule(s).", "success")
+    verb = "Deleted" if action == "delete" else "Disabled"
+    if changed:
+        flash(f"{verb} {changed} rule(s).", "success")
     if skipped:
         flash("Skipped (would block your own access): " + "; ".join(skipped), "error")
-    elif not deleted:
-        flash("Nothing selected to delete.", "error")
-    _audit("firewall_bulk_delete", f"{deleted} rule(s), {len(skipped)} skipped")
+    elif not changed:
+        flash(f"Nothing selected to {action}.", "error")
+    _audit(f"firewall_bulk_{action}", f"{changed} rule(s), {len(skipped)} skipped")
+    return changed, skipped
+
+
+@bp.route("/firewall/bulk-delete", methods=["POST"])
+@login_required
+@admin_required
+def bulk_delete_rules():
+    _bulk_disable_or_delete("delete", request.form.getlist("rule_ids"))
     return redirect(url_for("main.firewall_rules"))
 
 
@@ -822,37 +919,7 @@ def bulk_delete_rules():
 @login_required
 @admin_required
 def bulk_disable_rules():
-    ids = request.form.getlist("rule_ids")
-    client_ip = _client_ip()
-    client_ips = pivpn_ctl.list_client_ips()
-    affected_ips = set()
-    disabled = 0
-    skipped = []
-    for id_str in ids:
-        try:
-            rule_id = int(id_str)
-        except ValueError:
-            continue
-        rule = db.get_rule(rule_id)
-        if not rule or not rule["enabled"]:
-            continue
-        try:
-            firewall.disable_rule(rule_id, client_ip=client_ip)
-        except firewall.FirewallError as exc:
-            skipped.append(f"rule#{rule_id}: {exc}")
-            continue
-        disabled += 1
-        if rule["kind"] == "forward" and rule.get("src"):
-            affected_ips.add(rule["src"])
-    for ip in affected_ips:
-        _regenerate_script_for_ip(ip, client_ips=client_ips)
-    if disabled:
-        flash(f"Disabled {disabled} rule(s).", "success")
-    if skipped:
-        flash("Skipped (would block your own access): " + "; ".join(skipped), "error")
-    elif not disabled:
-        flash("Nothing selected to disable.", "error")
-    _audit("firewall_bulk_disable", f"{disabled} rule(s), {len(skipped)} skipped")
+    _bulk_disable_or_delete("disable", request.form.getlist("rule_ids"))
     return redirect(url_for("main.firewall_rules"))
 
 
