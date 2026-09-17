@@ -517,6 +517,22 @@ h2 { font-size: 16px; margin: 0 0 12px; color: var(--text); }
      #add-forward-form's "Add rule" button. */
   .card-header-row .btn-group button,
   .inline-form .btn-group button { width: 100%; }
+  /* Real bug, caught live: .inline-form button, .inline-form .btn-group
+     { grid-column: 1 / -1 } already existed (unconditional, written
+     long before .btn-group was ever display: grid) to make a bare
+     submit button span .inline-form's own 4-column outer grid. That
+     selector is a descendant selector, so it also reaches buttons
+     nested inside .btn-group — harmless while .btn-group was just a
+     flex row, but the moment this media query turns .btn-group into its
+     OWN 2-column grid, "span 1 / -1" means span *that* grid instead,
+     so a 2-button group like Import/Cancel had both buttons spanning
+     both columns and stacking instead of sitting side by side (Cancel
+     effectively vanished from its expected spot). (0,2,1) beats the old
+     rule's (0,1,1), so this reset wins regardless of source order; the
+     :only-child / :last-child rules right below win over *this* in turn
+     since they're more specific still, correctly re-spanning the
+     genuinely-lone-button cases. */
+  .inline-form .btn-group button { grid-column: auto; }
   .card-header-row .btn-group > button:only-child,
   .card-header-row .btn-group > .btn-form:only-child,
   .inline-form .btn-group > button:only-child,
@@ -1421,7 +1437,20 @@ th {
 #users-table .actions {
   justify-content: flex-start;
 }
-#users-table .actions .btn {
+/* Direct-child (>) combinator, not a plain descendant selector — real
+   bug, caught live: each row's per-user reset-password <dialog> is
+   itself a direct child of this same .actions div (one <dialog> per
+   row, unlike every other table's shared global confirm-modal), so a
+   descendant selector here also reached the dialog's own Cancel button
+   (which happens to share the .btn class) several levels deep inside
+   it — an #id selector (1,2,0) that no .inline-form .btn-group button
+   class combination (0,2,1) could ever outweigh, so Cancel rendered at
+   this table's 130/165px instead of the dialog's own full-width mobile
+   button sizing, while "Set password" (a bare <button>, no .btn class)
+   was unaffected and looked comparatively "short" and misaligned next
+   to it. > only matches "Reset password" itself, the one .btn that's
+   actually a direct child. */
+#users-table .actions > .btn {
   width: 130px;
   text-align: center;
 }
@@ -1429,7 +1458,7 @@ th {
 @media (max-width: 600px) {
   #users-table { min-width: 870px; }
   #users-table th:nth-child(4) { width: 360px; }
-  #users-table .actions .btn { width: 165px; }
+  #users-table .actions > .btn { width: 165px; }
 }
 
 /* rules-table is auto-layout (not fixed like clients-table), and .actions'
