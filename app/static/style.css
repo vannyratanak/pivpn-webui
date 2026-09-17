@@ -186,15 +186,31 @@ body {
    click-outside behavior as every other dialog in this app, just a
    different shape. No entrance animation, matching every other <dialog>
    in this app (only .reorder-error-toast earns motion, since it appears
-   unprompted — this one only ever opens from a deliberate tap). */
-.nav-drawer {
+   unprompted — this one only ever opens from a deliberate tap).
+
+   Real bug, caught live: single-class .nav-drawer (specificity 0,1,0)
+   never actually beat dialog.modal (0,1,1) on the properties both set —
+   width and border-radius kept losing to dialog.modal's 640px-capped
+   90vw and 10px corners, so the drawer rendered as a small rounded box
+   instead of a full-bleed sidebar. .modal.nav-drawer matches dialog.modal's
+   specificity class-for-class and wins on declaration order. Separately,
+   height: 100dvh was never contested (dialog.modal sets no height) but
+   still got capped short by Chrome's own UA default
+   max-height: calc(100% - 36px) on <dialog> — max-height isn't a value
+   author's height can "win" against by cascade, it's a hard ceiling — so
+   an explicit max-height: none is needed to actually let 100dvh reach
+   the bottom of the screen. Confirmed via getComputedStyle before/after:
+   width 640px/10px radius/643px-of-679px tall -> 70vw/0/full height. */
+.modal.nav-drawer {
   position: fixed;
   top: 0;
   left: 0;
   margin: 0;
   height: 100vh;
   height: 100dvh;
+  max-height: none;
   width: 70vw;
+  max-width: none;
   border-radius: 0;
   border: none;
   border-right: 1px solid var(--border);
