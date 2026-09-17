@@ -211,7 +211,7 @@ Borders are always the single `--border` slate-blue token, always 1px, never a s
 - **Primary** (`.btn`, default): Console Blue background, white text, the resting/hover shadow pair above.
 - **Secondary** (`.btn-secondary`): Slate Panel Raised background, Frost Text color, `--border` outline instead of a filled color — used for routine/neutral actions (e.g. Renew) that shouldn't visually compete with the four semantic-colored buttons (primary/ok/warn/danger).
 - **Ok / Warn / Danger:** Filled with Mint OK / Amber Warn / Pure Danger respectively, each with a specifically contrast-checked text color (not always pure white — Warn and Ok both use a near-black text color, since white fails contrast against their brighter fills).
-- **Compact variant** (`.btn-sm`, table row actions): 26px tall on desktop to fit several actions in one dense row; grows back to a 44px WCAG touch-target minimum below 600px viewport width, since the density trade-off that justifies 26px on desktop no longer applies on mobile.
+- **Compact variant** (`.btn-sm`, table row actions): 26px tall on desktop to fit several actions in one dense row; grows to the standard 34px below 600px viewport width, since the density trade-off that justifies 26px on desktop no longer applies on mobile — but no further than 34px, the same standard height every other button in the system uses. Clears WCAG 2.5.8 AA's 24px target-size minimum at both sizes; this app targets AA, not the stricter AAA 44px guidance.
 - **Focus:** every button, including third-party-feeling ones like a modal's close `×`, gets the same `2px solid` Console Blue outline with `2px` offset on `:focus-visible` — no unstyled default outlines anywhere.
 
 ### Cards / Containers
@@ -228,7 +228,7 @@ Borders are always the single `--border` slate-blue token, always 1px, never a s
 ### Navigation
 - **Style:** A sticky top bar (`Slate Panel` background, `--border` bottom edge) holding the brand mark, a flat inline nav (no pills/boxes around links), and the theme toggle + logout on the right.
 - **Default/Hover/Active:** Nav links are Slate Muted at rest, shift to Frost Text + a Console Blue underline on hover, and stay on that same underlined treatment (plus `aria-current="page"`) when active.
-- **Mobile:** the nav wraps onto a second line below the brand/utility row rather than collapsing into a hamburger menu — there are only 4 destinations, so a full disclosure menu would add a tap for no real space savings.
+- **Mobile:** below 640px, the inline nav is replaced by a hamburger button that opens a left-anchored sidebar drawer (`<dialog>`, reusing the same backdrop/close/click-outside behavior as every other modal in the system — just repositioned rather than centered). Superseded an earlier "wrap onto a second line" approach, which read as cramped once the nav grew past 4 destinations.
 
 ### Badges
 - **Style:** Fully pill-shaped (999px radius), small (11px uppercase text, `0.03em` letter-spacing), background is always a low-opacity (15–18%) tint of the underlying status color with the same color used at full opacity for the text — never a solid fill.

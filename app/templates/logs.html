@@ -105,7 +105,7 @@
   {% endif %}
 </div>
 
-<div class="tabs">
+<div class="tabs" id="logs-tabs">
   <a href="{{ url_for('main.logs', tab='client_sessions') }}" class="{{ 'active' if tab == 'client_sessions' }}" {% if tab == 'client_sessions' %}aria-current="page"{% endif %}>Client Sessions</a>
   {% if current_user.is_admin %}
   <a href="{{ url_for('main.logs', tab='traffic') }}" class="{{ 'active' if tab == 'traffic' }}" {% if tab == 'traffic' %}aria-current="page"{% endif %}>Traffic Sessions</a>

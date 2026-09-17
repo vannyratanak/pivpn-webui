@@ -33,10 +33,16 @@ function fitTableScrollHeights() {
     const available = window.innerHeight - rect.top - spaceBelowWithinCard - pageBottomMargin;
     // A page whose own fixed chrome (title, hint text, dialogs' triggers,
     // etc.) already eats most of a short viewport can push `available`
-    // to near zero or negative — clamp to a small floor so the table
-    // never fully collapses; the page itself still scrolls to reach the
-    // rest, same fallback as everywhere else in this layout.
-    el.style.maxHeight = `${Math.max(available, 120)}px`;
+    // to near zero or negative — most acute on mobile, where the topbar,
+    // page header, card header, and hint text alone can leave almost
+    // nothing below. Clamping to a floor this small only ever showed
+    // ~1 row (th/td is 10px vertical padding + ~19.5px line-height +
+    // 1px border ≈ 41px/row; 120px barely clears the header). 300px
+    // guarantees at least 5-6 real rows before the *table's own* scroll
+    // kicks in — on a short viewport this deliberately makes the table
+    // taller than the visually "available" space, so the page scrolls
+    // to reach the rest of it instead of cramming rows into a tiny box.
+    el.style.maxHeight = `${Math.max(available, 300)}px`;
   });
 }
 

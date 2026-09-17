@@ -44,17 +44,23 @@
 </head>
 <body>
   <a href="#main-content" class="skip-link">Skip to content</a>
+  {% macro nav_links() %}
+    <a href="{{ url_for('main.clients') }}" class="{{ 'active' if request.endpoint == 'main.clients' }}" {% if request.endpoint == 'main.clients' %}aria-current="page"{% endif %}>Clients</a>
+    {% if current_user.is_admin %}
+    <a href="{{ url_for('main.firewall_rules') }}" class="{{ 'active' if request.endpoint == 'main.firewall_rules' }}" {% if request.endpoint == 'main.firewall_rules' %}aria-current="page"{% endif %}>Firewall Rules</a>
+    <a href="{{ url_for('main.vpn_routes_page') }}" class="{{ 'active' if request.endpoint == 'main.vpn_routes_page' }}" {% if request.endpoint == 'main.vpn_routes_page' %}aria-current="page"{% endif %}>VPN Routes</a>
+    {% endif %}
+    <a href="{{ url_for('main.logs') }}" class="{{ 'active' if request.endpoint == 'main.logs' }}" {% if request.endpoint == 'main.logs' %}aria-current="page"{% endif %}>Logs</a>
+    <a href="{{ url_for('main.users') }}" class="{{ 'active' if request.endpoint == 'main.users' }}" {% if request.endpoint == 'main.users' %}aria-current="page"{% endif %}>Users</a>
+  {% endmacro %}
   {% if current_user.is_authenticated %}
   <header class="topbar">
+    <button type="button" class="hamburger-btn" id="nav-drawer-open-btn" aria-label="Open navigation menu" aria-haspopup="dialog">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    </button>
     <div class="brand">PiVPN Web UI</div>
-    <nav>
-      <a href="{{ url_for('main.clients') }}" class="{{ 'active' if request.endpoint == 'main.clients' }}" {% if request.endpoint == 'main.clients' %}aria-current="page"{% endif %}>Clients</a>
-      {% if current_user.is_admin %}
-      <a href="{{ url_for('main.firewall_rules') }}" class="{{ 'active' if request.endpoint == 'main.firewall_rules' }}" {% if request.endpoint == 'main.firewall_rules' %}aria-current="page"{% endif %}>Firewall Rules</a>
-      <a href="{{ url_for('main.vpn_routes_page') }}" class="{{ 'active' if request.endpoint == 'main.vpn_routes_page' }}" {% if request.endpoint == 'main.vpn_routes_page' %}aria-current="page"{% endif %}>VPN Routes</a>
-      {% endif %}
-      <a href="{{ url_for('main.logs') }}" class="{{ 'active' if request.endpoint == 'main.logs' }}" {% if request.endpoint == 'main.logs' %}aria-current="page"{% endif %}>Logs</a>
-      <a href="{{ url_for('main.users') }}" class="{{ 'active' if request.endpoint == 'main.users' }}" {% if request.endpoint == 'main.users' %}aria-current="page"{% endif %}>Users</a>
+    <nav class="topbar-nav-desktop">
+      {{ nav_links() }}
     </nav>
     <button type="button" id="theme-toggle" class="theme-toggle" aria-pressed="false" aria-label="Switch to light mode" title="Toggle light/dark mode">
       <span class="icon-box">
@@ -65,6 +71,28 @@
     </button>
     <a href="{{ url_for('main.logout') }}" class="logout">Log out</a>
   </header>
+
+  <!-- Mobile-only nav drawer — reuses the same <dialog>/::backdrop/
+       closeDialogIfClickedOutside pattern every other dialog in this app
+       already uses, just repositioned (see .nav-drawer) to sit as
+       a left-anchored sidebar instead of a centered modal box. Duplicates
+       nav_links() rather than moving the desktop <nav> in and out of the
+       DOM on resize, which would fight the browser's own focus handling
+       mid-transition. -->
+  <dialog id="nav-drawer-dialog" class="modal nav-drawer" onclick="closeDialogIfClickedOutside(event, this)">
+    <div class="nav-drawer-header">
+      <div class="brand">PiVPN Web UI</div>
+      <button type="button" class="modal-close-btn" onclick="document.getElementById('nav-drawer-dialog').close()" aria-label="Close menu">&times;</button>
+    </div>
+    <nav class="nav-drawer-links" onclick="document.getElementById('nav-drawer-dialog').close()">
+      {{ nav_links() }}
+    </nav>
+  </dialog>
+  <script>
+    document.getElementById('nav-drawer-open-btn').addEventListener('click', () => {
+      document.getElementById('nav-drawer-dialog').showModal();
+    });
+  </script>
   {% else %}
   <button type="button" id="theme-toggle" class="theme-toggle theme-toggle-floating" aria-pressed="false" aria-label="Switch to light mode" title="Toggle light/dark mode">
     <span class="icon-box">
