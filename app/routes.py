@@ -990,7 +990,7 @@ LOG_RANGE_DEFAULT = "1h"
 @login_required
 def logs():
     allowed_tabs = ALL_LOG_TABS if current_user.is_admin else MODERATOR_LOG_TABS
-    default_tab = "sessions" if current_user.is_admin else MODERATOR_LOG_TABS[0]
+    default_tab = "client_sessions" if current_user.is_admin else MODERATOR_LOG_TABS[0]
     tab = request.args.get("tab", default_tab)
     # Enforced here, not just hidden in the template — a moderator editing
     # the URL's ?tab= directly must not be able to reach Sessions/System/

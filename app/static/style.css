@@ -259,9 +259,15 @@ body {
 }
 
 /* Log out is reachable only via the drawer on mobile — hide the
-   topbar's own separate logout link there instead of showing both. */
+   topbar's own separate logout link there instead of showing both.
+   Real bug, caught live: .topbar-logout-desktop alone (one class,
+   specificity 0,1,0) never actually won against .topbar .logout below
+   (two classes, 0,2,0) — display: none was always losing regardless of
+   the media query, so the topbar's logout link never actually hid on
+   mobile. Matching .topbar .logout.topbar-logout-desktop's specificity
+   to at least that of the rule it needs to override fixes it for real. */
 @media (max-width: 640px) {
-  .topbar-logout-desktop { display: none; }
+  .topbar .logout.topbar-logout-desktop { display: none; }
 }
 
 .topbar .logout {
@@ -362,9 +368,23 @@ body {
   top: -48px;
   transform: translateY(56px);
 }
+.topbar-brand-group {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
 @media (max-width: 640px) {
   .hamburger-btn { display: inline-flex; align-items: center; justify-content: center; }
   .topbar nav.topbar-nav-desktop { display: none; }
+  /* Desktop's left-to-right sequence (hamburger, brand, nav, theme
+     toggle, logout) relies on nav's flex: 1 to push the theme toggle
+     and logout to the right — with nav and logout both hidden here,
+     nothing does that anymore, so hamburger+brand and the theme toggle
+     would otherwise just sit side by side on the left. space-between
+     pins hamburger+brand (now one flex item, .topbar-brand-group) to
+     the left and the theme toggle to the right instead. */
+  .topbar { justify-content: space-between; }
 }
 
 .content {
@@ -404,6 +424,18 @@ h2 { font-size: 16px; margin: 0 0 12px; color: var(--text); }
 .card-header-row h1,
 .card-header-row h2 {
   margin: 0;
+}
+
+/* Clients' "Existing clients" header only — keeps the connected/total
+   count glued to the heading (same row, even when .card-header-row wraps
+   on narrow screens below) instead of stuck in .btn-group where it used
+   to force "Add client"/"Import Clients" onto a 3rd wrapped row of their
+   own. User pointed at this exact rearrangement on a live screenshot. */
+.card-header-title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
 }
 
 /* Firewall Rules' "Active rules" header only — Clients' "Existing clients"
@@ -1460,19 +1492,26 @@ dialog.modal code {
    only ever have 4 short labels and live in a narrower modal box) — one
    non-wrapping row that scrolls horizontally instead, same thin-scrollbar
    treatment .table-scroll already uses, rather than spilling onto a
-   second line that pushes the actual log content further down the page. */
+   second line that pushes the actual log content further down the page.
+
+   Real bug, caught live (reproduced and root-caused in an actual
+   browser, not guessed): #logs-tabs is a flex item of .content's own
+   column layout. A flex item's automatic min-height normally equals its
+   content's real height (so it can never shrink below that) — but that
+   protection is dropped to 0 whenever the item's overflow is anything
+   other than visible, which overflow-x: auto here triggers. Once that
+   floor was gone, any page whose total content taller than the viewport
+   (common — this is a flex-shrinkable item by default) let the flex
+   algorithm squeeze this element down to ~1px instead of its real ~40px,
+   clipping every tab out of view while its own 39px-tall links still sat
+   inside it. Confirmed live: adding flex-shrink: 0 took its rendered
+   height from 1px back to 40px immediately. That's the actual fix —
+   overflow-y and align-items alone (a prior guess, never verified in a
+   real browser) did nothing for this. */
 #logs-tabs {
   flex-wrap: nowrap;
-  /* Real bug, caught live: setting only overflow-x leaves overflow-y at
-     its visible default, and per spec a non-visible axis paired with a
-     visible one silently upgrades the visible one to auto too — which
-     on this flex container collapsed its own automatic height to 0
-     (only the .tabs border-bottom line was left visible, no tab text at
-     all). Setting overflow-y explicitly avoids that implicit upgrade;
-     align-items keeps the tabs vertically centered in a row that no
-     longer has content-based auto height to fall back on. */
+  flex-shrink: 0;
   overflow-x: auto;
-  overflow-y: hidden;
   align-items: center;
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;

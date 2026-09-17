@@ -8,9 +8,11 @@
 
 <section class="card">
   <div class="card-header-row">
-    <h2>Existing clients</h2>
-    <div class="btn-group">
+    <div class="card-header-title-group">
+      <h2>Existing clients</h2>
       {% if clients %}<span class="hint">{{ connected_count }} connected / {{ total_count }} total</span>{% endif %}
+    </div>
+    <div class="btn-group">
       <button type="button" class="btn" onclick="document.getElementById('add-client-dialog').showModal()">Add client</button>
       <button type="button" class="btn" onclick="document.getElementById('import-clients-dialog').showModal()">Import Clients</button>
       <form method="post" action="{{ url_for('main.bulk_remove_clients') }}" id="bulk-remove-form" class="btn-form" hidden>
