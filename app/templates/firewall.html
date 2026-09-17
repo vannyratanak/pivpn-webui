@@ -31,7 +31,7 @@
         <button type="button" class="btn" onclick="document.getElementById('import-rules-dialog').showModal()">Import Rules</button>
         <form method="post" action="{{ url_for('main.resync_rules') }}" class="btn-form">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <button type="submit" class="btn">Re-Apply Rules</button>
+          <button type="submit" class="btn">Apply Rules</button>
         </form>
         <form method="post" action="{{ url_for('main.persist_rules') }}" class="btn-form" {{ '' if has_unsaved else 'hidden' }}>
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

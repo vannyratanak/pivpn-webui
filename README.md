@@ -82,7 +82,7 @@ addresses are blurred.
     is unconditional — it doesn't matter who's asking or what else is
     already in the table. Added after a live incident where exactly this
     shape of FORWARD rule took down VPN connectivity for every client.
-  - "Re-Apply Rules" reconciles iptables against the DB (idempotent — safe to
+  - "Apply Rules" reconciles iptables against the DB (idempotent — safe to
     click repeatedly). "Save for reboot" calls `netfilter-persistent save`,
     which requires `iptables-persistent` to be installed.
   - SNAT rules' "Outgoing interface" is a dropdown of the server's real
@@ -693,7 +693,7 @@ admin, manage the firewall, or do anything else admin-only again).
   (on both `INPUT` and `FORWARD`) exists specifically to not depend on
   this simulation at all.
 - Rule **discovery** (`discover_cli_rules`, run when connecting to a
-  server with pre-existing iptables rules) and **"Re-Apply Rules"**
+  server with pre-existing iptables rules) and **"Apply Rules"**
   (`sync_all`) both read/write the DB directly and don't go through any
   of the guards above — by design, since they have to faithfully mirror
   whatever's already live or already recorded, not gatekeep it. A
