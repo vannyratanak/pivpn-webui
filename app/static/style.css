@@ -1197,23 +1197,23 @@ dialog.modal code {
 
 .empty { color: var(--muted); }
 
-/* Client detail page's read-only key/value status list — the one place in
-   the app showing a single record's fields instead of a table of rows.
-   Each dt/dd pair is grouped in its own .detail-item (a <dl> may contain
-   <div> wrappers around dt/dd groups per the HTML5 spec) so the whole
-   list can flow as one wrapping line of "Label: value" pairs instead of
-   stacking one field per row. */
-.detail-grid {
+/* Client detail page's identity strip, right below the page-header-row's
+   name + actions — a single wrapping line of status/cert/session facts
+   separated by bullets, styled quiet/small like a subtitle rather than a
+   bordered card (this replaced an earlier boxed "Status" card entirely). */
+.client-meta-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 24px;
-  margin: 0 0 16px;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+  margin: -8px 0 16px;
 }
-
-.detail-item { display: flex; gap: 6px; align-items: baseline; margin: 0; }
-.detail-item dt { color: var(--muted); margin: 0; }
-.detail-item dt::after { content: ":"; }
-.detail-item dd { margin: 0; }
+.client-meta-row .meta-sep { color: var(--border); }
+.cert-status { display: inline-flex; align-items: center; gap: 5px; }
+.cert-icon-valid { color: var(--ok); }
+.cert-icon-blocked { color: var(--danger); }
 
 .tabs {
   display: flex;

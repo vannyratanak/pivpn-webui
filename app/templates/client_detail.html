@@ -5,35 +5,10 @@
 
 <div class="page-header-row">
   <h1>{{ client.name }}</h1>
-  {% if rules %}
-  <input type="text" id="client-rules-filter" class="log-filter-input filter-input-inline" placeholder="Search…" aria-label="Search firewall rules for {{ client.name }}">
-  {% endif %}
-</div>
-
-<section class="card {{ 'blocked-row' if client.blocked }}">
-  <div class="card-header-row">
-    <h2>Status</h2>
-    {% if client.session %}
-      <span class="status-indicator status-indicator-connected"><span class="status-dot status-dot-connected" aria-hidden="true"></span>Active</span>
-    {% else %}
-      <span class="status-indicator"><span class="status-dot" aria-hidden="true"></span>Inactive</span>
-    {% endif %}
-  </div>
-  <dl class="detail-grid">
-    <div class="detail-item"><dt>Certificate status</dt><dd>{{ client.status }}{{ ' (blocked)' if client.blocked else '' }}</dd></div>
-    <div class="detail-item"><dt>Expiration</dt><dd>{{ client.expiration or '—' }}</dd></div>
-    <div class="detail-item"><dt>VPN IP</dt><dd>{{ client.ip or '—' }}</dd></div>
-    {% if client.session %}
-    <div class="detail-item"><dt>Connected since</dt><dd>{{ client.session.since or '—' }}</dd></div>
-    <div class="detail-item"><dt>Real address</dt><dd>{{ client.session.real_address or '—' }}</dd></div>
-    <div class="detail-item"><dt>Data transferred</dt><dd>{{ client.session.bytes_recv or '0' }} in / {{ client.session.bytes_sent or '0' }} out</dd></div>
-    {% endif %}
-  </dl>
-
-  <div class="actions">
-    <a class="btn btn-sm" href="{{ url_for('main.download_client', name=client.name) }}">Download</a>
+  <div class="btn-group">
+    <a class="btn btn-secondary" href="{{ url_for('main.download_client', name=client.name) }}">Download</a>
     <div class="dropdown" id="client-actions-dropdown">
-      <button type="button" class="btn btn-sm btn-secondary" id="client-actions-btn" aria-haspopup="true" aria-expanded="false">Actions &#9662;</button>
+      <button type="button" class="btn" id="client-actions-btn" aria-haspopup="true" aria-expanded="false">Actions &#9662;</button>
       <div class="dropdown-menu" id="client-actions-menu" role="menu" aria-labelledby="client-actions-btn" hidden>
         <form method="post" action="{{ url_for('main.renew_client', name=client.name) }}" class="dropdown-item-form"
               data-confirm="Renew {{ client.name }}? This revokes the current cert and issues a new one — the old .ovpn will stop working immediately."
@@ -55,8 +30,35 @@
       </div>
     </div>
   </div>
-  <script>attachDropdown('client-actions-btn', 'client-actions-menu');</script>
-</section>
+</div>
+<script>attachDropdown('client-actions-btn', 'client-actions-menu');</script>
+
+<div class="client-meta-row">
+  <span class="status-indicator {{ 'status-indicator-connected' if client.session else '' }}">
+    <span class="status-dot {{ 'status-dot-connected' if client.session else '' }}" aria-hidden="true"></span>{% if client.session %}Active{% endif %}
+  </span>
+  <span class="meta-sep" aria-hidden="true">&middot;</span>
+  <span class="cert-status">
+    {% if client.blocked %}
+    <svg class="cert-icon cert-icon-blocked" aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><line x1="9.5" y1="9.5" x2="14.5" y2="14.5"/><line x1="14.5" y1="9.5" x2="9.5" y2="14.5"/></svg>
+    {% else %}
+    <svg class="cert-icon cert-icon-valid" aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11.5 14.5 15.5 10"/></svg>
+    {% endif %}
+    {{ client.status }}{{ ' (blocked)' if client.blocked else '' }}
+  </span>
+  <span class="meta-sep" aria-hidden="true">&middot;</span>
+  <span>Expires {{ client.expiration or '—' }}</span>
+  <span class="meta-sep" aria-hidden="true">&middot;</span>
+  <span>{{ client.ip or '—' }}</span>
+  {% if client.session %}
+  <span class="meta-sep" aria-hidden="true">&middot;</span>
+  <span>Connected since {{ client.session.since or '—' }}</span>
+  <span class="meta-sep" aria-hidden="true">&middot;</span>
+  <span>{{ client.session.real_address or '—' }}</span>
+  <span class="meta-sep" aria-hidden="true">&middot;</span>
+  <span>{{ client.session.bytes_recv or '0' }} in / {{ client.session.bytes_sent or '0' }} out</span>
+  {% endif %}
+</div>
 
 <section class="card">
   <div class="card-header-row">
@@ -88,6 +90,9 @@
     {% endif %}
   </div>
   <p class="hint">Only rules whose source or destination matches this client's VPN IP — for everything else (INPUT/SNAT/port-forward rules, or rules for other clients), see the full <a href="{{ url_for('main.firewall_rules') }}">Firewall Rules</a> page.</p>
+  {% if rules %}
+  <input type="text" id="client-rules-filter" class="log-filter-input" placeholder="Search…" aria-label="Search firewall rules for {{ client.name }}">
+  {% endif %}
   {% if not client.ip %}
   <p class="empty">{{ client.name }} has no static VPN IP yet (only assigned once it connects at least once) — rules can't be scoped to it until then. Use the full <a href="{{ url_for('main.firewall_rules') }}">Firewall Rules</a> page in the meantime.</p>
   {% else %}
