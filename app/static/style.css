@@ -506,15 +506,6 @@ h2 { font-size: 16px; margin: 0 0 12px; color: var(--text); }
     grid-template-columns: 1fr 1fr;
     width: 100%;
   }
-  /* Every other row here is a <label> — label text + 4px gap sits above
-     its input, so the space the eye reads between two stacked fields is
-     .inline-form's 14px grid gap PLUS that label's own height (measured
-     live: 23.5px for a single-line label like "Comment") — about 37.5px
-     total. .btn-group has no label, so the submit row only ever got the
-     bare 14px, reading as noticeably tighter than every gap above it.
-     Extra margin-top approximates the missing label height so the last
-     gap feels consistent with the rest of the form instead of cramped. */
-  .inline-form .btn-group { margin-top: 24px; }
   /* button, not .btn — several of these submit buttons (firewall.html's
      per-tab "Add rule", vpn_routes.html's "Push route", users.html's
      "Create user"/"Change password") are bare <button> elements with no
@@ -721,6 +712,18 @@ h2 { font-size: 16px; margin: 0 0 12px; color: var(--text); }
   grid-column: 1 / -1;
   justify-self: end;
 }
+
+/* Every other row here is a <label> — label text + 4px gap sits above
+   its input, so the space the eye reads between two stacked fields is
+   .inline-form's 14px grid gap PLUS that label's own height (measured
+   live: 23.5px for a single-line label like "Comment") — about 37.5px
+   total. .btn-group has no label, so the submit row only ever got the
+   bare 14px, reading as noticeably tighter than every gap above it —
+   at every viewport width the form uses a grid (all of them: 4/2/1
+   columns), not just the mobile 1-column case this was first found and
+   fixed for. Extra margin-top approximates the missing label height so
+   the last gap feels consistent with the rest of the form. */
+.inline-form .btn-group { margin-top: 24px; }
 
 /* Client-detail Add Rule dialog's Source + Destination(s) — a dedicated
    2-column sub-grid (equal-width, Source pinned to column 1, every
