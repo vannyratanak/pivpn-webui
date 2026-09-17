@@ -15,7 +15,7 @@
       {% if clients %}<span class="hint">{{ connected_count }} connected / {{ total_count }} total</span>{% endif %}
       <button type="button" class="btn" onclick="document.getElementById('add-client-dialog').showModal()">Add client</button>
       <button type="button" class="btn" onclick="document.getElementById('import-clients-dialog').showModal()">Import Clients</button>
-      <form method="post" action="{{ url_for('main.bulk_remove_clients') }}" id="bulk-remove-form" class="btn-form">
+      <form method="post" action="{{ url_for('main.bulk_remove_clients') }}" id="bulk-remove-form" class="btn-form" hidden>
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit" class="btn btn-danger" id="bulk-remove-btn" disabled>Remove (<span id="bulk-remove-count">0</span>)</button>
       </form>
@@ -160,6 +160,9 @@
         const checked = checkboxes().filter((cb) => cb.checked).length;
         countSpan.textContent = checked;
         bulkBtn.disabled = checked === 0;
+        // Stays out of the toolbar entirely at 0 — same as Firewall Rules'
+        // bulk-action row — instead of sitting there disabled at all times.
+        bulkForm.hidden = checked === 0;
       }
 
       // "Select all" only selects currently-visible rows — respects

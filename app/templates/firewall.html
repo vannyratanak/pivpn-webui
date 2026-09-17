@@ -28,17 +28,22 @@
     <div class="btn-group-stack">
       <div class="btn-group">
         <button type="button" class="btn" onclick="document.getElementById('add-rule-dialog').showModal()">Add Rule</button>
-        <button type="button" class="btn" onclick="document.getElementById('import-rules-dialog').showModal()">Import Rules</button>
-        <form method="post" action="{{ url_for('main.resync_rules') }}" class="btn-form">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <button type="submit" class="btn">Re-Apply Rules</button>
-        </form>
+        <div class="dropdown" id="rules-more-dropdown">
+          <button type="button" class="btn btn-secondary" id="rules-more-btn" aria-haspopup="true" aria-expanded="false">More &#9662;</button>
+          <div class="dropdown-menu" id="rules-more-menu" role="menu" aria-labelledby="rules-more-btn" hidden>
+            <button type="button" class="dropdown-item" role="menuitem" data-more-item onclick="document.getElementById('import-rules-dialog').showModal()">Import Rules</button>
+            <form method="post" action="{{ url_for('main.resync_rules') }}" class="dropdown-item-form">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="dropdown-item" role="menuitem" data-more-item>Re-Apply Rules</button>
+            </form>
+          </div>
+        </div>
         <form method="post" action="{{ url_for('main.persist_rules') }}" class="btn-form">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <button type="submit" class="btn {{ 'btn-warn btn-unsaved-jump' if has_unsaved else '' }}">Save Rules</button>
         </form>
       </div>
-      <div class="btn-group">
+      <div class="btn-group" id="bulk-actions-group" hidden>
         <form method="post" action="{{ url_for('main.bulk_disable_rules') }}" id="bulk-disable-form" class="btn-form">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <button type="submit" class="btn btn-warn" id="bulk-disable-btn" disabled>Disable (<span id="bulk-disable-count">0</span>)</button>
@@ -428,6 +433,7 @@
       {% if not rules %}
       <tr class="empty-row"><td colspan="10" class="empty">No rules yet.</td></tr>
       {% endif %}
+      <tr id="rules-empty-client" class="empty-row" style="display:none"><td colspan="10" class="empty">No rules scoped to this client yet.</td></tr>
       {% for r in rules %}
       <tr class="{{ '' if r.enabled else 'disabled-row' }}"
           {% if r.kind != 'client_block' %}draggable="true" data-rule-id="{{ r.id }}"{% endif %}>
@@ -481,29 +487,102 @@
     </div>
   </div>
   <script>
+    // "No rules scoped to this client yet." only makes sense once a specific
+    // client is picked — with "All Rules" selected, an empty result means
+    // the search box excluded everything, which the pagination status text
+    // ("No results") already covers.
+    const rulesEmptyClientRow = document.getElementById('rules-empty-client');
+    function updateEmptyClientMessage() {
+      if (!rulesEmptyClientRow) return;
+      const clientSelect = document.getElementById('rules-client-filter');
+      const clientSelected = !!clientSelect && clientSelect.value !== '';
+      // dataset.selectMatch is the client filter's own verdict, set
+      // independent of the search box (see select-filter.js) — so this
+      // reflects "does this client have any rules at all," not "does
+      // anything survive the search box too."
+      const clientHasRules = Array.from(document.querySelectorAll('#rules-tbody tr:not(.empty-row)'))
+        .some((row) => row.dataset.selectMatch !== '0');
+      rulesEmptyClientRow.style.display = (clientSelected && !clientHasRules) ? '' : 'none';
+    }
+
     const rulesPager = attachPagination('#rules-tbody', 'tr:not(.empty-row)', 'rules-page-size', 'rules-pagination');
-    const rulesClientFilter = attachSelectFilter('rules-client-filter', '#rules-tbody', 'tr:not(.empty-row)', () => rulesPager && rulesPager.refresh());
+    const rulesClientFilter = attachSelectFilter('rules-client-filter', '#rules-tbody', 'tr:not(.empty-row)', () => {
+      rulesPager && rulesPager.refresh();
+      updateEmptyClientMessage();
+    });
     attachLogFilter('rules-filter', '#rules-tbody', 'tr:not(.empty-row)', '#rules-table thead th:not(:first-child):not(:last-child)', () => {
       rulesClientFilter && rulesClientFilter.refresh();
       rulesPager && rulesPager.refresh();
+      updateEmptyClientMessage();
     });
     attachFirewallReorder('#rules-tbody');
 
     (function() {
+      const wrapper = document.getElementById('rules-more-dropdown');
+      const trigger = document.getElementById('rules-more-btn');
+      const menu = document.getElementById('rules-more-menu');
+      if (!wrapper || !trigger || !menu) return;
+
+      const items = () => Array.from(menu.querySelectorAll('[data-more-item]'));
+
+      function openMenu() {
+        menu.hidden = false;
+        trigger.setAttribute('aria-expanded', 'true');
+        items()[0] && items()[0].focus();
+      }
+
+      function closeMenu(returnFocus) {
+        if (menu.hidden) return;
+        menu.hidden = true;
+        trigger.setAttribute('aria-expanded', 'false');
+        if (returnFocus) trigger.focus();
+      }
+
+      trigger.addEventListener('click', (e) => {
+        e.stopPropagation();
+        menu.hidden ? openMenu() : closeMenu(false);
+      });
+
+      // Each item still does its own thing (open the Import dialog / submit
+      // the Re-Apply form) via the markup's existing onclick/submit — this
+      // just closes the menu afterward so it doesn't sit open behind the
+      // dialog or through the page reload a form submit triggers.
+      items().forEach((item, i) => {
+        item.addEventListener('click', () => closeMenu(false));
+        item.addEventListener('keydown', (e) => {
+          if (e.key === 'ArrowDown') { e.preventDefault(); items()[(i + 1) % items().length].focus(); }
+          if (e.key === 'ArrowUp') { e.preventDefault(); items()[(i - 1 + items().length) % items().length].focus(); }
+          if (e.key === 'Escape') { e.preventDefault(); closeMenu(true); }
+        });
+      });
+
+      document.addEventListener('click', (e) => {
+        if (!wrapper.contains(e.target)) closeMenu(false);
+      });
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeMenu(true);
+      });
+    })();
+
+    (function() {
       const selectAll = document.getElementById('rules-select-all');
+      const bulkGroup = document.getElementById('bulk-actions-group');
       const disableBtn = document.getElementById('bulk-disable-btn');
       const disableForm = document.getElementById('bulk-disable-form');
       const disableCount = document.getElementById('bulk-disable-count');
       const deleteBtn = document.getElementById('bulk-delete-btn');
       const deleteForm = document.getElementById('bulk-delete-form');
       const deleteCount = document.getElementById('bulk-delete-count');
-      if (!selectAll || !disableBtn || !disableForm || !deleteBtn || !deleteForm) return;
+      if (!selectAll || !bulkGroup || !disableBtn || !disableForm || !deleteBtn || !deleteForm) return;
 
       const checkboxes = () => Array.from(document.querySelectorAll('#rules-tbody .rule-select-checkbox'));
       const visibleCheckboxes = () => checkboxes().filter((cb) => cb.closest('tr').style.display !== 'none');
 
       function updateCount() {
         const checked = checkboxes().filter((cb) => cb.checked).length;
+        // Row stays out of the layout entirely at 0 — no dimmed
+        // always-there buttons to scan past on every visit to this page.
+        bulkGroup.hidden = checked === 0;
         disableCount.textContent = checked;
         disableBtn.disabled = checked === 0;
         deleteCount.textContent = checked;

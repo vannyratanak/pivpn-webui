@@ -984,12 +984,12 @@ def logs():
             flash(str(exc), "error")
     elif tab == "system":
         try:
-            webui_log = vpnlog.list_webui_log()
+            webui_log = vpnlog.list_webui_log(log_range=log_range)
         except PrivilegedCommandError as exc:
             webui_log = []
             flash(str(exc), "error")
         try:
-            system_log = vpnlog.list_system_log()
+            system_log = vpnlog.list_system_log(log_range=log_range)
         except PrivilegedCommandError as exc:
             system_log = []
             flash(str(exc), "error")

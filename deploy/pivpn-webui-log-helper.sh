@@ -39,8 +39,27 @@ LINES_OPENVPN=5000
 # the raw lines for display (verified: ~30k lines/week parses in ~0.02s on
 # this box) — so their window can be widened for free, independent of
 # openvpn's above.
-SINCE="7 days ago"
 LINES=60000
+
+# webui/system's window is caller-selectable (the Logs page's System tab
+# range dropdown — same 1h/6h/12h/1d/7d set the DB-backed tabs already use),
+# passed as this script's $2. Resolved through this fixed lookup (sets
+# $since directly rather than echo+command-substitution — under `set -e`,
+# a function's `exit` only actually aborts the script when called as a
+# plain statement; wrapping the call in "$(...)" would swallow that exit
+# and silently fall through with $since empty) — a caller can only ever
+# select one of these five exact --since values, never interpolated into
+# journalctl directly.
+resolve_since() {
+  case "${1:-7d}" in
+    1h) since="1 hour ago" ;;
+    6h) since="6 hours ago" ;;
+    12h) since="12 hours ago" ;;
+    1d) since="1 day ago" ;;
+    7d) since="7 days ago" ;;
+    *) echo "unknown range: $1" >&2; exit 1 ;;
+  esac
+}
 
 # Flow-log rows (see deploy/setup-traffic-log.sh) are a different order of
 # magnitude from connect/disconnect events — one browsing session alone can
@@ -73,7 +92,8 @@ FLOW_CURSOR="$STATE_DIR/flow.cursor"
 BACKFILL_SINCE="7 days ago"
 
 usage() {
-  echo "usage: $0 openvpn | webui | system | flow | openvpn-tail | flow-tail" >&2
+  echo "usage: $0 openvpn | webui [range] | system [range] | flow | openvpn-tail | flow-tail" >&2
+  echo "  range (webui/system only): 1h | 6h | 12h | 1d | 7d (default 7d)" >&2
   exit 1
 }
 
@@ -85,10 +105,12 @@ case "$action" in
     journalctl -u "$OPENVPN_UNIT" --since "$SINCE_OPENVPN" -n "$LINES_OPENVPN" --no-pager -o short-iso
     ;;
   webui)
-    journalctl -u "$WEBUI_UNIT" --since "$SINCE" -n "$LINES" --no-pager -o short-iso
+    resolve_since "${2:-}"
+    journalctl -u "$WEBUI_UNIT" --since "$since" -n "$LINES" --no-pager -o short-iso
     ;;
   system)
-    journalctl --since "$SINCE" -n "$LINES" --no-pager -o short-iso
+    resolve_since "${2:-}"
+    journalctl --since "$since" -n "$LINES" --no-pager -o short-iso
     ;;
   flow)
     # journalctl -g/--grep exits 1 (not 0) when the pattern matches nothing

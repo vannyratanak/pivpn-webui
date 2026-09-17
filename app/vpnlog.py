@@ -366,15 +366,15 @@ def list_traffic_flows(
     return flows, total
 
 
-def list_webui_log(limit: int = 300) -> list[str]:
-    out = run_root([config.LOG_HELPER, "webui"])
+def list_webui_log(log_range: str = "7d", limit: int = 300) -> list[str]:
+    out = run_root([config.LOG_HELPER, "webui", log_range])
     lines = [ln for ln in out.splitlines() if ln.strip()]
     lines.reverse()
     return lines[:limit]
 
 
-def list_system_log(limit: int = 300) -> list[str]:
-    out = run_root([config.LOG_HELPER, "system"])
+def list_system_log(log_range: str = "7d", limit: int = 300) -> list[str]:
+    out = run_root([config.LOG_HELPER, "system", log_range])
     lines = [ln for ln in out.splitlines() if ln.strip()]
     lines.reverse()
     return lines[:limit]

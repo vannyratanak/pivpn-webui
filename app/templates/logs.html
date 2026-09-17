@@ -2,20 +2,27 @@
 {% block title %}Logs — PiVPN Web UI{% endblock %}
 {% block content %}
 
-{# Shared by the five DB-backed, server-paginated tabs (VPN Sessions,
-   Client Sessions, Traffic, Activity, User Auth). search_box sits in the
-   page-header-row up top (matching every other page's search box);
-   range_and_refresh stays in the tab's own card, above its table. Split
-   into separate forms/macros so each carries the others' current value
-   as a hidden field — moving the search box up shouldn't mean losing
-   the selected range (or vice versa) when any one of them submits on
-   its own. Activity/User Auth's own Refresh now is a bit of a fiction
-   (they read audit_log directly, no ingestion lag to actually catch up
-   on) but kept for visual consistency across all five tabs; it's still
-   a real reload, just one that was never stale. Not used by System,
-   which stays on the older client-side filter pattern (a raw journalctl
-   text dump, not a table — no separate DB-backed history to page into
-   at all). #}
+{# search_box/range_and_refresh: search_box sits in the page-header-row up
+   top (matching every other page's search box); range_and_refresh stays in
+   the tab's own card, above its table. Split into separate forms/macros so
+   each carries the others' current value as a hidden field — moving the
+   search box up shouldn't mean losing the selected range (or vice versa)
+   when any one of them submits on its own. Used by the five DB-backed,
+   server-paginated tabs (VPN Sessions, Client Sessions, Traffic, Activity,
+   User Auth) for both macros. Activity/User Auth's own Refresh now is a bit
+   of a fiction (they read audit_log directly, no ingestion lag to actually
+   catch up on) but kept for visual consistency across all five tabs; it's
+   still a real reload, just one that was never stale.
+
+   System uses range_and_refresh too (its journalctl --since window is
+   genuinely caller-selectable — see resolve_since() in
+   deploy/pivpn-webui-log-helper.sh — and Refresh is a real re-fetch, not
+   fiction, since it re-runs journalctl live rather than reading a cache).
+   It does NOT use search_box, though: search there is two independent
+   client-side attachLogFilter() passes over an already-rendered raw
+   journalctl text dump (see the System tab block below), not a single
+   server-side q param over a DB table — there's no separate DB-backed
+   history to page into for it at all. #}
 {% macro search_box(tab_name, label) %}
   <form method="get" action="{{ url_for('main.logs') }}" class="search-form">
     <input type="hidden" name="tab" value="{{ tab_name }}">
@@ -232,13 +239,23 @@
 {% endif %}
 
 {% if tab == 'system' %}
+{# One shared range+refresh — both cards below read the same journalctl
+   window, so the control governs the tab, not either card individually.
+   Search stays client-side (two independent log streams, no server q/
+   pagination for raw journal text — see the top-of-file note), just
+   relocated up here instead of sitting inside each card. #}
+{{ range_and_refresh('system') }}
+<div class="system-search-row">
+  <input type="text" id="webui-log-filter" class="log-filter-input" placeholder="Search PiVPN Web UI service log…" aria-label="Search PiVPN Web UI service log">
+  <input type="text" id="system-log-filter" class="log-filter-input" placeholder="Search system journal…" aria-label="Search system journal">
+</div>
+
 <section class="card">
   <h2>PiVPN Web UI service</h2>
   <p class="hint">journalctl -u pivpn-webui, most recent first (last 7 days).</p>
   {% if not webui_log %}
     <p class="empty">No log lines found (or the log helper isn't installed/configured yet).</p>
   {% else %}
-  <input type="text" id="webui-log-filter" class="log-filter-input" placeholder="Search…" aria-label="Search PiVPN Web UI service log">
   <div class="log-pre" id="webui-log-pre">{% for line in webui_log %}<div class="log-line">{{ line }}</div>{% endfor %}</div>
   <script>attachLogFilter('webui-log-filter', '#webui-log-pre', '.log-line');</script>
   {% endif %}
@@ -250,7 +267,6 @@
   {% if not system_log %}
     <p class="empty">No log lines found (or the log helper isn't installed/configured yet).</p>
   {% else %}
-  <input type="text" id="system-log-filter" class="log-filter-input" placeholder="Search…" aria-label="Search system journal">
   <div class="log-pre" id="system-log-pre">{% for line in system_log %}<div class="log-line">{{ line }}</div>{% endfor %}</div>
   <script>attachLogFilter('system-log-filter', '#system-log-pre', '.log-line');</script>
   {% endif %}
