@@ -70,6 +70,25 @@
    app, present and future, instead of patching each individual class. */
 [hidden] { display: none !important; }
 
+/* Real bug, caught live: no plain <a> anywhere had ever had its color set
+   at all (only class-scoped links — nav, tabs, buttons-as-links — did),
+   so every unclassed link (a client's name in the Clients table, "Back
+   to Clients", inline hint-text links) fell through to the browser's own
+   default blue/purple instead of this app's actual accent token — and
+   :visited's default purple then stuck permanently after one click,
+   which is what was actually reported. Per DESIGN.md's "One Accent
+   Rule," Console Blue is the only color that means "actionable" — a
+   visited link changing color contradicts that, so :visited is pinned
+   to the exact same value as the resting state, not left to the
+   browser's default. Class-scoped link rules elsewhere in this file
+   have higher specificity than this bare `a` and are unaffected.
+   :focus-visible added alongside for the same reason every other
+   interactive element in the system already has it — this was simply
+   never given one, not a deliberate omission. */
+a { color: var(--accent); }
+a:visited { color: var(--accent); }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
 /* Fixed-height app shell: topbar stays pinned via flex: 0 0 auto (below)
    in a body that's a column-flex filling the viewport, so it never
    scrolls away even on a page whose content runs long. Everything
@@ -858,7 +877,15 @@ button:disabled:hover, .btn:disabled:hover { filter: none; }
    of sitting narrower and left-aligned within the stack. Same rule for
    the client-detail page's own bulk-actions row (different IDs, same
    pattern) — kept in one shared list rather than duplicating this block,
-   so the two never drift out of sync again. */
+   so the two never drift out of sync again.
+
+   Real bug, caught live: on client-detail specifically, the row above
+   (just "Add rule" + "Apply Rules") is narrower than "Disable (N)" +
+   "Delete (N)" need, so stretching to match it squeezed Disable's text
+   into wrapping mid-word ("Disable" / "(1)" on two lines). min-width:
+   max-content guarantees the button is never squeezed below what its
+   own label needs, growing past the 100% target instead of wrapping —
+   the 100% width still governs whenever there's room to honor both. */
 #bulk-disable-form,
 #bulk-delete-form,
 #client-bulk-disable-form,
@@ -870,6 +897,8 @@ button:disabled:hover, .btn:disabled:hover { filter: none; }
 #client-bulk-disable-btn,
 #client-bulk-delete-btn {
   width: 100%;
+  min-width: max-content;
+  white-space: nowrap;
 }
 
 /* Sized to its own content — a table with just 2-3 rows shows exactly
