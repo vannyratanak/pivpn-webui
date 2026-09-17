@@ -7,9 +7,13 @@
   <div class="page-header-title-group">
     <h1>{{ client.name }}</h1>
     <div class="btn-group">
-      <a class="btn btn-secondary" href="{{ url_for('main.download_client', name=client.name) }}">Download</a>
+      <a class="btn btn-icon" href="{{ url_for('main.download_client', name=client.name) }}" title="Download" aria-label="Download">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      </a>
       <div class="dropdown" id="client-actions-dropdown">
-        <button type="button" class="btn" id="client-actions-btn" aria-haspopup="true" aria-expanded="false">Actions &#9662;</button>
+        <button type="button" class="btn btn-icon" id="client-actions-btn" aria-haspopup="true" aria-expanded="false" title="Actions" aria-label="Actions">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><circle cx="12" cy="5" r="1.75"/><circle cx="12" cy="12" r="1.75"/><circle cx="12" cy="19" r="1.75"/></svg>
+        </button>
         <div class="dropdown-menu" id="client-actions-menu" role="menu" aria-labelledby="client-actions-btn" hidden>
           <form method="post" action="{{ url_for('main.renew_client', name=client.name) }}" class="dropdown-item-form"
                 data-confirm="Renew {{ client.name }}? This revokes the current cert and issues a new one — the old .ovpn will stop working immediately."
@@ -120,12 +124,12 @@
           <option value="udp">udp</option>
         </select>
       </label>
-      <label>Source
-        <select disabled aria-label="Source (fixed to this client)">
-          <option>{{ client.name }} ({{ client.ip }})</option>
-        </select>
-      </label>
-      <div class="client-add-rule-dst-fields" id="client-add-rule-dst-fields">
+      <div class="client-add-rule-src-dst-grid" id="client-add-rule-dst-fields">
+        <label>Source
+          <select disabled aria-label="Source (fixed to this client)">
+            <option>{{ client.name }} ({{ client.ip }})</option>
+          </select>
+        </label>
         <div class="client-add-rule-dst-row">
           <label>Destination <span class="hint">(IP/CIDR, blank = any)</span>
             <span class="client-add-rule-dst-input-wrap">

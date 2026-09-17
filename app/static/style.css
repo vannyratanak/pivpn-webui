@@ -432,20 +432,24 @@ h2 { font-size: 16px; margin: 0 0 12px; color: var(--text); }
   justify-self: end;
 }
 
-/* Client-detail Add Rule dialog's multiple-Destination fields — a
-   dedicated full-row container (grid-column: 1/-1, same span as the
-   button/btn-group rule above) instead of letting each added field fall
-   wherever .inline-form's 4-column auto-placement happens to put it,
-   which put every field after the first in the grid's rightmost column
-   only. Stacked vertically inside, each its own row, so "+" always adds
-   a full field underneath the others regardless of how many exist. */
-.client-add-rule-dst-fields {
+/* Client-detail Add Rule dialog's Source + Destination(s) — a dedicated
+   2-column sub-grid (equal-width, Source pinned to column 1, every
+   Destination row pinned to column 2) instead of letting them fall
+   wherever .inline-form's 4-column auto-placement happens to put them.
+   Pinning both columns explicitly, rather than just Destination, is
+   what makes new rows land correctly: since only column 2 is ever
+   requested for a .client-add-rule-dst-row, CSS Grid auto-flow finds
+   the next row where that column is free and leaves column 1 there
+   genuinely empty, instead of auto-filling it with whatever comes
+   next in DOM order. */
+.client-add-rule-src-dst-grid {
   grid-column: 1 / -1;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
 }
-.client-add-rule-dst-row { max-width: 320px; }
+.client-add-rule-src-dst-grid > label { grid-column: 1; }
+.client-add-rule-dst-row { grid-column: 2; }
 .client-add-rule-dst-input-wrap { position: relative; display: block; }
 
 /* Sits on the input's own top-right corner (half in, half out of its
