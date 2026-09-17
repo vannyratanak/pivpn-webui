@@ -198,6 +198,18 @@ body {
   border-radius: 0;
   border: none;
   border-right: 1px solid var(--border);
+}
+
+/* Real bug, caught live: a bare `display: flex` here unconditionally
+   beat the browser's own `dialog:not([open]) { display: none }` — author
+   rules always win over user-agent rules regardless of specificity, not
+   just on a tie (see the [hidden] fix above for the same class of bug).
+   The drawer was rendered fixed-and-visible on every page load, with
+   showModal() only adding the backdrop/focus-trap on top of what was
+   already showing — reading as "a second menu" appearing on click, not
+   the first one opening. Scoping display to [open] lets the dialog stay
+   genuinely hidden until showModal() actually opens it. */
+.nav-drawer[open] {
   display: flex;
   flex-direction: column;
 }
