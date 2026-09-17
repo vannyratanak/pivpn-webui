@@ -471,6 +471,17 @@ h2 { font-size: 16px; margin: 0 0 12px; color: var(--text); }
 .client-add-rule-dst-row { grid-column: 2; }
 .client-add-rule-dst-input-wrap { position: relative; display: block; }
 
+/* "+ Destination" now lives inside the same 2-column grid (right under
+   the Destination field it adds to, not a disconnected full-width row
+   elsewhere) — overrides .inline-form button's grid-column: 1/-1 (which
+   would otherwise span both columns here) and right-alignment, since
+   this is a "add one more of these," best read starting at the same
+   left edge as the field above it. */
+.client-add-rule-src-dst-grid #client-add-rule-add-dst {
+  grid-column: 2;
+  justify-self: start;
+}
+
 /* Sits on the input's own top-right corner (half in, half out of its
    border), not the label as a whole — a standard "removable chip"
    position, and specifically what was asked for ("over input field...

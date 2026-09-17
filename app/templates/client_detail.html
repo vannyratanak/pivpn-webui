@@ -60,10 +60,6 @@
   {% if client.session %}
   <span class="meta-sep" aria-hidden="true">&middot;</span>
   <span>Connected since {{ client.session.since or '—' }}</span>
-  <span class="meta-sep" aria-hidden="true">&middot;</span>
-  <span>{{ client.session.real_address or '—' }}</span>
-  <span class="meta-sep" aria-hidden="true">&middot;</span>
-  <span>{{ client.session.bytes_recv or '0' }} in / {{ client.session.bytes_sent or '0' }} out</span>
   {% endif %}
 </div>
 
@@ -137,8 +133,8 @@
             </span>
           </label>
         </div>
+        <button type="button" class="btn btn-sm btn-secondary" id="client-add-rule-add-dst">+ Destination</button>
       </div>
-      <button type="button" class="btn btn-sm btn-secondary" id="client-add-rule-add-dst">+ Destination</button>
       <label>Dest. port <span class="hint">(blank = any)</span>
         <input type="text" name="dport" placeholder="443">
       </label>
@@ -151,7 +147,7 @@
     </form>
   </dialog>
   <script>
-    document.getElementById('client-add-rule-add-dst').addEventListener('click', () => {
+    document.getElementById('client-add-rule-add-dst').addEventListener('click', (e) => {
       const container = document.getElementById('client-add-rule-dst-fields');
       const rows = container.querySelectorAll('.client-add-rule-dst-row');
       const clone = rows[rows.length - 1].cloneNode(true);
@@ -170,7 +166,11 @@
       removeBtn.addEventListener('click', () => clone.remove());
       clone.querySelector('.client-add-rule-dst-input-wrap').appendChild(removeBtn);
 
-      container.appendChild(clone);
+      // Inserted before the "+" button (its own now-permanent child of
+      // this same grid), not appended to the very end of the container —
+      // appendChild would put each new field after the button instead of
+      // building downward beneath the ones before it.
+      e.currentTarget.before(clone);
       clone.querySelector('input').focus();
     });
   </script>

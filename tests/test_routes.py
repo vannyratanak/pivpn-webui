@@ -777,7 +777,7 @@ def test_client_detail_shows_status_and_ip(client, monkeypatch):
     html = resp.data.decode()
     assert "laptop-anna" in html
     assert "10.202.226.2" in html
-    assert "203.0.113.9:5000" in html
+    assert "Connected since 2026-09-16 10:00:00" in html
 
 
 def test_client_detail_shows_only_this_clients_rules(client, monkeypatch):
