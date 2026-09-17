@@ -92,7 +92,16 @@
   {% if tab in log_search_labels %}
     {{ search_box(tab, log_search_labels[tab]) }}
   {% elif tab == 'system' and system_log %}
-    <input type="text" id="system-log-filter" class="log-filter-input filter-input-inline" placeholder="Search…" aria-label="Search system journal">
+    {# Plain div, not a <form> — this input is a client-side-only filter,
+       not a server search like search_box()'s. Reuses .search-form purely
+       for its flex-basis, so it's sized identically to every other Logs
+       tab's search box; log-filter-input (no filter-input-inline) keeps it
+       icon-less like theirs too — filter-input-inline's icon+fixed-width
+       treatment is for Clients'/Firewall's search boxes, a visibly
+       different style that doesn't belong on this page. #}
+    <div class="search-form">
+      <input type="text" id="system-log-filter" class="log-filter-input" placeholder="Search…" aria-label="Search system journal">
+    </div>
   {% endif %}
 </div>
 

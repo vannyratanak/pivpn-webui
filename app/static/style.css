@@ -749,43 +749,6 @@ button:disabled:hover, .btn:disabled:hover { filter: none; }
 .btn-group-stack { display: flex; flex-direction: column; align-items: stretch; gap: 10px; }
 .header-col { display: flex; flex-direction: column; gap: 10px; }
 
-/* Overflow ("More") menu for occasional toolbar actions (Firewall's Import
-   Rules / Re-Apply Rules) — same floating-surface treatment as
-   .custom-select-menu (only thing in the system this shape already existed
-   for), since both are "a plain div drawn ourselves, floating above the
-   page, earning its shadow by being open." */
-.dropdown { position: relative; display: inline-flex; }
-.dropdown-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  min-width: 170px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
-  padding: 4px;
-  z-index: 1200;
-}
-.dropdown-menu[hidden] { display: none; }
-.dropdown-item-form { display: block; }
-.dropdown-item {
-  display: block;
-  width: 100%;
-  background: none;
-  color: var(--text);
-  border: none;
-  box-shadow: none;
-  border-radius: 6px;
-  height: auto;
-  padding: 9px 12px;
-  font-size: 14px;
-  font-weight: 500;
-  text-align: left;
-  justify-content: flex-start;
-}
-.dropdown-item:hover { background: var(--panel-2); filter: none; box-shadow: none; }
-
 /* Bulk disable/delete stretch to fill the same width as the row of
    buttons above them (Reapply all / Save Rules / Import Rules), instead
    of sitting narrower and left-aligned within the stack. */

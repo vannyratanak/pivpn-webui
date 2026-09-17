@@ -28,19 +28,14 @@
     <div class="btn-group-stack">
       <div class="btn-group">
         <button type="button" class="btn" onclick="document.getElementById('add-rule-dialog').showModal()">Add Rule</button>
-        <div class="dropdown" id="rules-more-dropdown">
-          <button type="button" class="btn btn-secondary" id="rules-more-btn" aria-haspopup="true" aria-expanded="false">More &#9662;</button>
-          <div class="dropdown-menu" id="rules-more-menu" role="menu" aria-labelledby="rules-more-btn" hidden>
-            <button type="button" class="dropdown-item" role="menuitem" data-more-item onclick="document.getElementById('import-rules-dialog').showModal()">Import Rules</button>
-            <form method="post" action="{{ url_for('main.resync_rules') }}" class="dropdown-item-form">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <button type="submit" class="dropdown-item" role="menuitem" data-more-item>Re-Apply Rules</button>
-            </form>
-          </div>
-        </div>
-        <form method="post" action="{{ url_for('main.persist_rules') }}" class="btn-form">
+        <button type="button" class="btn" onclick="document.getElementById('import-rules-dialog').showModal()">Import Rules</button>
+        <form method="post" action="{{ url_for('main.resync_rules') }}" class="btn-form">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <button type="submit" class="btn {{ 'btn-warn btn-unsaved-jump' if has_unsaved else '' }}">Save Rules</button>
+          <button type="submit" class="btn">Re-Apply Rules</button>
+        </form>
+        <form method="post" action="{{ url_for('main.persist_rules') }}" class="btn-form" {{ '' if has_unsaved else 'hidden' }}>
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn btn-warn btn-unsaved-jump">Save Rules</button>
         </form>
       </div>
       <div class="btn-group" id="bulk-actions-group" hidden>
@@ -516,53 +511,6 @@
       updateEmptyClientMessage();
     });
     attachFirewallReorder('#rules-tbody');
-
-    (function() {
-      const wrapper = document.getElementById('rules-more-dropdown');
-      const trigger = document.getElementById('rules-more-btn');
-      const menu = document.getElementById('rules-more-menu');
-      if (!wrapper || !trigger || !menu) return;
-
-      const items = () => Array.from(menu.querySelectorAll('[data-more-item]'));
-
-      function openMenu() {
-        menu.hidden = false;
-        trigger.setAttribute('aria-expanded', 'true');
-        items()[0] && items()[0].focus();
-      }
-
-      function closeMenu(returnFocus) {
-        if (menu.hidden) return;
-        menu.hidden = true;
-        trigger.setAttribute('aria-expanded', 'false');
-        if (returnFocus) trigger.focus();
-      }
-
-      trigger.addEventListener('click', (e) => {
-        e.stopPropagation();
-        menu.hidden ? openMenu() : closeMenu(false);
-      });
-
-      // Each item still does its own thing (open the Import dialog / submit
-      // the Re-Apply form) via the markup's existing onclick/submit — this
-      // just closes the menu afterward so it doesn't sit open behind the
-      // dialog or through the page reload a form submit triggers.
-      items().forEach((item, i) => {
-        item.addEventListener('click', () => closeMenu(false));
-        item.addEventListener('keydown', (e) => {
-          if (e.key === 'ArrowDown') { e.preventDefault(); items()[(i + 1) % items().length].focus(); }
-          if (e.key === 'ArrowUp') { e.preventDefault(); items()[(i - 1 + items().length) % items().length].focus(); }
-          if (e.key === 'Escape') { e.preventDefault(); closeMenu(true); }
-        });
-      });
-
-      document.addEventListener('click', (e) => {
-        if (!wrapper.contains(e.target)) closeMenu(false);
-      });
-      document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') closeMenu(true);
-      });
-    })();
 
     (function() {
       const selectAll = document.getElementById('rules-select-all');
