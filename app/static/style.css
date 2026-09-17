@@ -466,6 +466,12 @@ h2 { font-size: 16px; margin: 0 0 12px; color: var(--text); }
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 14px;
+  /* Matches .inline-form's own align-items: end — Source has no hint
+     line under its label while Destination does, so top-alignment (the
+     grid default) left their inputs starting at different heights.
+     Bottom-aligning is the same fix this form already relies on for
+     Dest. port/Comment (hint vs. no hint) right below this grid. */
+  align-items: end;
 }
 .client-add-rule-src-dst-grid > label { grid-column: 1; }
 .client-add-rule-dst-row { grid-column: 2; }
