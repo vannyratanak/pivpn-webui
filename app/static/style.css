@@ -11,8 +11,17 @@
   --text: #e6e9f0;
   --muted: #8a93a8;
   --muted-rgb: 138, 147, 168;
-  --accent: #4f8cff;
-  --accent-rgb: 79, 140, 255;
+  /* White button/link text on --accent needs WCAG 1.4.3's 4.5:1 for
+     normal-size text. The original #4f8cff only measured 3.25:1 — found
+     during /impeccable audit; every other status color (--ok/--warn/
+     --danger/the Delete button below) had already been through this same
+     check, but --accent itself, despite being the single most-used
+     color in the system, had not. #1a69ff keeps the same hue/saturation
+     (just darker) and clears 4.5:1 with real margin (4.66:1), while still
+     contrasting 3:1+ against both --bg and --panel so the button stays
+     clearly visible as its own surface, not just readable text. */
+  --accent: #1a69ff;
+  --accent-rgb: 26, 105, 255;
   --ok: #3ecf8e;
   --ok-rgb: 62, 207, 142;
   --warn: #f5a623;
