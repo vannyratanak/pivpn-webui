@@ -580,8 +580,6 @@
 
       function updateCount() {
         const checked = checkboxes().filter((cb) => cb.checked).length;
-        // Row stays out of the layout entirely at 0 — no dimmed
-        // always-there buttons to scan past on every visit to this page.
         bulkGroup.hidden = checked === 0;
         disableCount.textContent = checked;
         disableBtn.disabled = checked === 0;

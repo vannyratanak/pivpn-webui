@@ -58,6 +58,18 @@
 
 * { box-sizing: border-box; }
 
+/* The browser's own [hidden] { display: none } (UA stylesheet) loses to
+   any author rule that sets display explicitly on the same element at
+   equal specificity — e.g. .btn-group's `display: flex` or .btn-form's
+   `display: inline` — because author rules beat user-agent rules on a
+   specificity tie. Concretely: toggling the hidden IDL property via JS on
+   an element that also carries class="btn-group"/"btn-form" silently did
+   nothing visually (real bug, caught live: Firewall Rules' bulk-actions
+   row stayed visible with `hidden` correctly set). This one rule (higher
+   specificity, !important) makes [hidden] actually win everywhere in the
+   app, present and future, instead of patching each individual class. */
+[hidden] { display: none !important; }
+
 /* Fixed-height app shell: topbar stays pinned via flex: 0 0 auto (below)
    in a body that's a column-flex filling the viewport, so it never
    scrolls away even on a page whose content runs long. Everything
@@ -1235,12 +1247,6 @@ dialog.modal code {
   width: 100%;
   margin: 10px 0;
 }
-
-/* System tab's two search boxes (webui service log + system journal) sit
-   together above both cards now, not one buried inside each — each keeps
-   its own independent client-side attachLogFilter() pass, just relocated. */
-.system-search-row { display: flex; gap: 10px; margin: 10px 0; }
-.system-search-row .log-filter-input { width: auto; flex: 1; margin: 0; }
 
 /* Logs page tabs (Sessions/Client Sessions/Traffic): the Range select and
    Refresh now icon button sit right next to each other in one row, above

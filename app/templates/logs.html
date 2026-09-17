@@ -18,9 +18,10 @@
    genuinely caller-selectable — see resolve_since() in
    deploy/pivpn-webui-log-helper.sh — and Refresh is a real re-fetch, not
    fiction, since it re-runs journalctl live rather than reading a cache).
-   It does NOT use search_box, though: search there is two independent
-   client-side attachLogFilter() passes over an already-rendered raw
-   journalctl text dump (see the System tab block below), not a single
+   It does NOT use search_box, though: its search box (still in the
+   page-header-row up top, same position/width as every other tab's here)
+   is a plain client-side attachLogFilter() pass over an already-rendered
+   raw journalctl text dump (see the System tab block below), not a
    server-side q param over a DB table — there's no separate DB-backed
    history to page into for it at all. #}
 {% macro search_box(tab_name, label) %}
@@ -90,6 +91,8 @@
   <h1>Logs</h1>
   {% if tab in log_search_labels %}
     {{ search_box(tab, log_search_labels[tab]) }}
+  {% elif tab == 'system' and system_log %}
+    <input type="text" id="system-log-filter" class="log-filter-input filter-input-inline" placeholder="Search…" aria-label="Search system journal">
   {% endif %}
 </div>
 
@@ -239,31 +242,9 @@
 {% endif %}
 
 {% if tab == 'system' %}
-{# One shared range+refresh — both cards below read the same journalctl
-   window, so the control governs the tab, not either card individually.
-   Search stays client-side (two independent log streams, no server q/
-   pagination for raw journal text — see the top-of-file note), just
-   relocated up here instead of sitting inside each card. #}
-{{ range_and_refresh('system') }}
-<div class="system-search-row">
-  <input type="text" id="webui-log-filter" class="log-filter-input" placeholder="Search PiVPN Web UI service log…" aria-label="Search PiVPN Web UI service log">
-  <input type="text" id="system-log-filter" class="log-filter-input" placeholder="Search system journal…" aria-label="Search system journal">
-</div>
-
 <section class="card">
-  <h2>PiVPN Web UI service</h2>
-  <p class="hint">journalctl -u pivpn-webui, most recent first (last 7 days).</p>
-  {% if not webui_log %}
-    <p class="empty">No log lines found (or the log helper isn't installed/configured yet).</p>
-  {% else %}
-  <div class="log-pre" id="webui-log-pre">{% for line in webui_log %}<div class="log-line">{{ line }}</div>{% endfor %}</div>
-  <script>attachLogFilter('webui-log-filter', '#webui-log-pre', '.log-line');</script>
-  {% endif %}
-</section>
-
-<section class="card">
-  <h2>System journal</h2>
   <p class="hint">journalctl (whole system), most recent first (last 7 days).</p>
+  {{ range_and_refresh('system') }}
   {% if not system_log %}
     <p class="empty">No log lines found (or the log helper isn't installed/configured yet).</p>
   {% else %}

@@ -916,7 +916,7 @@ def logs():
     if tab not in allowed_tabs:
         tab = default_tab
 
-    sessions = client_sessions = webui_log = system_log = auth_entries = activity_entries = None
+    sessions = client_sessions = system_log = auth_entries = activity_entries = None
     traffic_flows = None
     # Shared by the five DB-backed tabs below (Sessions/Client Sessions/
     # Traffic/Activity/User Auth) — real server-side search + pagination
@@ -984,11 +984,6 @@ def logs():
             flash(str(exc), "error")
     elif tab == "system":
         try:
-            webui_log = vpnlog.list_webui_log(log_range=log_range)
-        except PrivilegedCommandError as exc:
-            webui_log = []
-            flash(str(exc), "error")
-        try:
             system_log = vpnlog.list_system_log(log_range=log_range)
         except PrivilegedCommandError as exc:
             system_log = []
@@ -1009,7 +1004,7 @@ def logs():
 
     return render_template(
         "logs.html", tab=tab, sessions=sessions, client_sessions=client_sessions,
-        traffic_flows=traffic_flows, webui_log=webui_log, system_log=system_log,
+        traffic_flows=traffic_flows, system_log=system_log,
         auth_entries=auth_entries, activity_entries=activity_entries,
         q=q, page=page, page_size=page_size, total=total, total_pages=total_pages,
         log_range=log_range, log_range_options=LOG_RANGE_OPTIONS,
