@@ -91,7 +91,7 @@
   <h1>Logs</h1>
   {% if tab in log_search_labels %}
     {{ search_box(tab, log_search_labels[tab]) }}
-  {% elif tab == 'system' and system_log %}
+  {% elif tab == 'system' %}
     {# Plain div, not a <form> — this input is a client-side-only filter,
        not a server search like search_box()'s. Reuses .search-form purely
        for its flex-basis, so it's sized identically to every other Logs

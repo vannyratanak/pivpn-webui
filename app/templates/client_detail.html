@@ -4,38 +4,41 @@
 <p class="hint"><a href="{{ url_for('main.clients') }}">&larr; Back to Clients</a></p>
 
 <div class="page-header-row">
-  <h1>{{ client.name }}</h1>
-  <div class="btn-group">
-    <a class="btn btn-secondary" href="{{ url_for('main.download_client', name=client.name) }}">Download</a>
-    <div class="dropdown" id="client-actions-dropdown">
-      <button type="button" class="btn" id="client-actions-btn" aria-haspopup="true" aria-expanded="false">Actions &#9662;</button>
-      <div class="dropdown-menu" id="client-actions-menu" role="menu" aria-labelledby="client-actions-btn" hidden>
-        <form method="post" action="{{ url_for('main.renew_client', name=client.name) }}" class="dropdown-item-form"
-              data-confirm="Renew {{ client.name }}? This revokes the current cert and issues a new one — the old .ovpn will stop working immediately."
-              data-confirm-label="Renew">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <button type="submit" class="dropdown-item" role="menuitem" data-dropdown-item>Renew</button>
-        </form>
-        <form method="post" action="{{ url_for('main.block_client', name=client.name) }}" class="dropdown-item-form">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <input type="hidden" name="blocked" value="{{ '0' if client.blocked else '1' }}">
-          <button type="submit" class="dropdown-item" role="menuitem" data-dropdown-item>{{ 'Unblock' if client.blocked else 'Block' }}</button>
-        </form>
-        <form method="post" action="{{ url_for('main.remove_client', name=client.name) }}" class="dropdown-item-form"
-              data-confirm="Permanently remove {{ client.name }}? This cannot be undone."
-              data-confirm-label="Remove">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <button type="submit" class="dropdown-item dropdown-item-danger" role="menuitem" data-dropdown-item>Remove</button>
-        </form>
+  <div class="page-header-title-group">
+    <h1>{{ client.name }}</h1>
+    <div class="btn-group">
+      <a class="btn btn-secondary" href="{{ url_for('main.download_client', name=client.name) }}">Download</a>
+      <div class="dropdown" id="client-actions-dropdown">
+        <button type="button" class="btn" id="client-actions-btn" aria-haspopup="true" aria-expanded="false">Actions &#9662;</button>
+        <div class="dropdown-menu" id="client-actions-menu" role="menu" aria-labelledby="client-actions-btn" hidden>
+          <form method="post" action="{{ url_for('main.renew_client', name=client.name) }}" class="dropdown-item-form"
+                data-confirm="Renew {{ client.name }}? This revokes the current cert and issues a new one — the old .ovpn will stop working immediately."
+                data-confirm-label="Renew">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="dropdown-item" role="menuitem" data-dropdown-item>Renew</button>
+          </form>
+          <form method="post" action="{{ url_for('main.block_client', name=client.name) }}" class="dropdown-item-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="blocked" value="{{ '0' if client.blocked else '1' }}">
+            <button type="submit" class="dropdown-item" role="menuitem" data-dropdown-item>{{ 'Unblock' if client.blocked else 'Block' }}</button>
+          </form>
+          <form method="post" action="{{ url_for('main.remove_client', name=client.name) }}" class="dropdown-item-form"
+                data-confirm="Permanently remove {{ client.name }}? This cannot be undone."
+                data-confirm-label="Remove">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="dropdown-item dropdown-item-danger" role="menuitem" data-dropdown-item>Remove</button>
+          </form>
+        </div>
       </div>
     </div>
   </div>
+  <input type="text" id="client-rules-filter" class="log-filter-input filter-input-inline" placeholder="Search…" aria-label="Search firewall rules for {{ client.name }}">
 </div>
 <script>attachDropdown('client-actions-btn', 'client-actions-menu');</script>
 
 <div class="client-meta-row">
   <span class="status-indicator {{ 'status-indicator-connected' if client.session else '' }}">
-    <span class="status-dot {{ 'status-dot-connected' if client.session else '' }}" aria-hidden="true"></span>{% if client.session %}Active{% endif %}
+    <span class="status-dot {{ 'status-dot-connected' if client.session else '' }}" aria-hidden="true"></span>{{ 'Active' if client.session else 'Inactive' }}
   </span>
   <span class="meta-sep" aria-hidden="true">&middot;</span>
   <span class="cert-status">
@@ -90,9 +93,6 @@
     {% endif %}
   </div>
   <p class="hint">Only rules whose source or destination matches this client's VPN IP — for everything else (INPUT/SNAT/port-forward rules, or rules for other clients), see the full <a href="{{ url_for('main.firewall_rules') }}">Firewall Rules</a> page.</p>
-  {% if rules %}
-  <input type="text" id="client-rules-filter" class="log-filter-input" placeholder="Search…" aria-label="Search firewall rules for {{ client.name }}">
-  {% endif %}
   {% if not client.ip %}
   <p class="empty">{{ client.name }} has no static VPN IP yet (only assigned once it connects at least once) — rules can't be scoped to it until then. Use the full <a href="{{ url_for('main.firewall_rules') }}">Firewall Rules</a> page in the meantime.</p>
   {% else %}
@@ -125,9 +125,15 @@
           <option>{{ client.name }} ({{ client.ip }})</option>
         </select>
       </label>
-      <label class="client-add-rule-dst-field">Destination <span class="hint">(IP/CIDR, blank = any)</span>
-        <input type="text" name="dst" placeholder="192.168.1.0/24" pattern="{{ ip_cidr_pattern }}" title="An IPv4 address, optionally with a /0-32 CIDR suffix, e.g. 192.168.1.0/24">
-      </label>
+      <div class="client-add-rule-dst-fields" id="client-add-rule-dst-fields">
+        <div class="client-add-rule-dst-row">
+          <label>Destination <span class="hint">(IP/CIDR, blank = any)</span>
+            <span class="client-add-rule-dst-input-wrap">
+              <input type="text" name="dst" placeholder="192.168.1.0/24" pattern="{{ ip_cidr_pattern }}" title="An IPv4 address, optionally with a /0-32 CIDR suffix, e.g. 192.168.1.0/24">
+            </span>
+          </label>
+        </div>
+      </div>
       <button type="button" class="btn btn-sm btn-secondary" id="client-add-rule-add-dst">+ Destination</button>
       <label>Dest. port <span class="hint">(blank = any)</span>
         <input type="text" name="dport" placeholder="443">
@@ -142,11 +148,25 @@
   </dialog>
   <script>
     document.getElementById('client-add-rule-add-dst').addEventListener('click', () => {
-      const fields = document.querySelectorAll('.client-add-rule-dst-field');
-      const last = fields[fields.length - 1];
-      const clone = last.cloneNode(true);
+      const container = document.getElementById('client-add-rule-dst-fields');
+      const rows = container.querySelectorAll('.client-add-rule-dst-row');
+      const clone = rows[rows.length - 1].cloneNode(true);
       clone.querySelector('input').value = '';
-      last.after(clone);
+
+      // Only cloned rows get a remove button — the first, server-rendered
+      // row always stays (there must be at least one Destination field),
+      // so it never gets one. Positioned on the input's own corner (see
+      // .client-add-rule-dst-remove), not the label as a whole, since
+      // "over the input field" is specifically what was asked for.
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'client-add-rule-dst-remove';
+      removeBtn.setAttribute('aria-label', 'Remove this destination');
+      removeBtn.textContent = '×';
+      removeBtn.addEventListener('click', () => clone.remove());
+      clone.querySelector('.client-add-rule-dst-input-wrap').appendChild(removeBtn);
+
+      container.appendChild(clone);
       clone.querySelector('input').focus();
     });
   </script>
