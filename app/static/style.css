@@ -458,9 +458,26 @@ h2 { font-size: 16px; margin: 0 0 12px; color: var(--text); }
    header keeps the shared .card-header-row's align-items: center. */
 .firewall-rules-header { align-items: flex-end; }
 
+/* Page-header action buttons (Add client/Import Clients, Add Rule/Import
+   Rules/Apply Rules/Save Rules, the Disable/Delete bulk-action pair, …) —
+   auto-width flex-wrap let each button keep its own text-sized width, so
+   rows of mismatched labels (e.g. "Add Rule" next to "Apply Rules") never
+   lined up and never used the mobile screen's full width. A 2-column grid
+   makes every button an equal-width, max-width cell instead — 2 buttons
+   fill one row (Disable/Delete, Add client/Import Clients), 4 wrap evenly
+   into 2 rows of 2 (firewall's Add/Import/Apply/Save Rules group). A lone
+   button (e.g. a moderator's single "Change password") spans both columns
+   rather than sitting at half width next to empty space. */
 @media (max-width: 520px) {
   .card-header-row { flex-wrap: wrap; row-gap: 10px; }
-  .card-header-row .btn-group { flex-wrap: wrap; }
+  .card-header-row .btn-group {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    width: 100%;
+  }
+  .card-header-row .btn-group .btn { width: 100%; }
+  .card-header-row .btn-group > .btn:only-child,
+  .card-header-row .btn-group > .btn-form:only-child { grid-column: 1 / -1; }
 }
 
 /* Page title + search row (Clients/Firewall/VPN Routes h1) — distinct from
@@ -684,7 +701,16 @@ h2 { font-size: 16px; margin: 0 0 12px; color: var(--text); }
 .fwd-src-custom-wrap { display: none; }
 
 @media (max-width: 520px) {
-  .inline-form { grid-template-columns: 1fr; }
+  /* Plain .inline-form here (specificity 0,1,0) — dialog.modal .inline-form
+     (0,2,1, unconditional, see that rule far below) always wins the tie
+     against this one regardless of media-query truth, since being inside
+     an @media block doesn't grant extra cascade priority by itself. Real
+     bug, caught live in a real browser: every dialog's form (Add Rule,
+     Add client, …) stayed forced to 2 columns on an actual phone, cramming
+     each field into ~half the already-narrow (90vw-capped) modal width
+     instead of stacking. The matching override lives right after that
+     rule (same selector, same specificity, later in the file — genuinely
+     wins the tie) rather than here. */
   /* .inline-form itself already collapses to 1 column above — this
      nested sub-grid (Source/Destination) has its own hardcoded 2-column
      track independent of that, so it needs its own matching override or
@@ -1405,6 +1431,16 @@ dialog.modal::backdrop {
    either being squeezed to 1/4 width or stacked one per row. */
 dialog.modal .inline-form { grid-template-columns: repeat(2, 1fr); }
 dialog.modal .inline-form .btn-group { justify-self: end; }
+
+/* Same selector/specificity as the rule directly above (0,2,1) — wins the
+   tie by coming later in the file, which is what actually matters here
+   (an @media block's own truth doesn't add cascade priority on its own).
+   Every dialog form (Add Rule, Add client, Add route, …) down to one
+   column, full width, on an actual phone — not squeezed into a forced
+   2-column grid inside an already 90vw-capped modal. */
+@media (max-width: 520px) {
+  dialog.modal .inline-form { grid-template-columns: 1fr; }
+}
 
 dialog.modal code {
   background: var(--panel-2);
