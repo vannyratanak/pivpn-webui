@@ -1,0 +1,10 @@
+[Unit]
+Description=Run PiVPN Web UI database retention prune once a day
+
+[Timer]
+OnBootSec=5m
+OnUnitActiveSec=1d
+Unit=pivpn-webui-prune-db.service
+
+[Install]
+WantedBy=timers.target

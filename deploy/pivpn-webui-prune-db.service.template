@@ -1,0 +1,10 @@
+[Unit]
+Description=PiVPN Web UI database retention prune (30-day logs, 1-day login_failures)
+After=network.target postgresql.service
+
+[Service]
+Type=oneshot
+User=__USER__
+WorkingDirectory=__APP_DIR__
+EnvironmentFile=__APP_DIR__/.env
+ExecStart=/usr/bin/bash __APP_DIR__/deploy/prune_db.sh
