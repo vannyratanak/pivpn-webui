@@ -458,26 +458,49 @@ h2 { font-size: 16px; margin: 0 0 12px; color: var(--text); }
    header keeps the shared .card-header-row's align-items: center. */
 .firewall-rules-header { align-items: flex-end; }
 
-/* Page-header action buttons (Add client/Import Clients, Add Rule/Import
-   Rules/Apply Rules/Save Rules, the Disable/Delete bulk-action pair, …) —
-   auto-width flex-wrap let each button keep its own text-sized width, so
-   rows of mismatched labels (e.g. "Add Rule" next to "Apply Rules") never
-   lined up and never used the mobile screen's full width. A 2-column grid
-   makes every button an equal-width, max-width cell instead — 2 buttons
-   fill one row (Disable/Delete, Add client/Import Clients), 4 wrap evenly
-   into 2 rows of 2 (firewall's Add/Import/Apply/Save Rules group). A lone
-   button (e.g. a moderator's single "Change password") spans both columns
-   rather than sitting at half width next to empty space. */
+/* Every button group, anywhere — page headers (Add client/Import Clients,
+   Add Rule/Import Rules/Apply Rules/Save Rules, the Disable/Delete bulk
+   pair, client-detail's own "Firewall rules for X" section) and dialog/
+   tab submit rows (Add Rule dialog's Forward/Input/Port-forward/SNAT
+   tabs, Add client, Add user, Push route, Create user, …) — auto-width
+   flex-wrap let each button keep its own text-sized width, so rows of
+   mismatched labels (e.g. "Add Rule" next to "Apply Rules") never lined
+   up and never used the mobile screen's full width, and a single submit
+   button (e.g. one tab's lone "Add rule") sat shrink-wrapped and right-
+   aligned instead of filling the row. A 2-column grid makes every button
+   an equal-width, max-width cell instead — 2 buttons fill one row
+   (Disable/Delete, Add client/Import Clients), 4 wrap evenly into 2 rows
+   of 2 (firewall's Add/Import/Apply/Save Rules group), and a lone button
+   spans both columns rather than sitting at half (or auto) width next to
+   empty space. Scoped to .card-header-row and .inline-form specifically
+   (not every .btn-group unconditionally) so it never touches the
+   confirm-modal's Confirm/Cancel pair or client-detail's compact
+   Download/Actions icon buttons, which .page-header-title-group already
+   keeps deliberately icon-sized and space-between per an earlier,
+   explicit "I dont want it wrap i want it just-between" request. */
 @media (max-width: 520px) {
   .card-header-row { flex-wrap: wrap; row-gap: 10px; }
-  .card-header-row .btn-group {
+  .card-header-row .btn-group,
+  .inline-form .btn-group {
     display: grid;
     grid-template-columns: 1fr 1fr;
     width: 100%;
   }
-  .card-header-row .btn-group .btn { width: 100%; }
-  .card-header-row .btn-group > .btn:only-child,
-  .card-header-row .btn-group > .btn-form:only-child { grid-column: 1 / -1; }
+  /* button, not .btn — several of these submit buttons (firewall.html's
+     per-tab "Add rule", vpn_routes.html's "Push route", users.html's
+     "Create user"/"Change password") are bare <button> elements with no
+     .btn class at all (button, .btn share their base look via the shared
+     button, .btn { … } rule elsewhere), so a .btn-scoped selector here
+     silently missed them — the grid container would stretch full width
+     but the button inside would stay shrink-wrapped to its own text.
+     Caught live: querying .btn-group .btn found nothing for
+     #add-forward-form's "Add rule" button. */
+  .card-header-row .btn-group button,
+  .inline-form .btn-group button { width: 100%; }
+  .card-header-row .btn-group > button:only-child,
+  .card-header-row .btn-group > .btn-form:only-child,
+  .inline-form .btn-group > button:only-child,
+  .inline-form .btn-group > .btn-form:only-child { grid-column: 1 / -1; }
 }
 
 /* Page title + search row (Clients/Firewall/VPN Routes h1) — distinct from
@@ -1203,6 +1226,35 @@ button:disabled:hover, .btn:disabled:hover { filter: none; }
    needs a much wider select than the page-size dropdown's 80px — client
    names + IPs don't fit in that. */
 .rule-client-filter .custom-select-wrapper { width: 240px; min-width: 240px; }
+
+/* On mobile, .header-col (the "Active rules" heading + this filter,
+   firewall.html's own left column of .card-header-row) sizes to its
+   widest child by default — that widest child was the filter's fixed
+   240px select, so the whole column, and the select inside it, stopped
+   well short of the card's real width instead of matching the button
+   grid's full-width rows right below it. Real bug, caught live via the
+   relay against real rule/client data (not guessed): the "Filter by
+   client" dropdown sat at 240 of the card's ~300px-wide mobile content
+   box, leaving dead space instead of using the screen.
+
+   Fixing .header-col alone wasn't enough, caught live the same way:
+   .pagination-size (the label's own parent) is itself a row-direction
+   flex container, and a row-flex's default sizing is content-based along
+   the main axis (width) — cross-axis stretch only affects height there.
+   So the <label> child kept shrink-wrapping to the select's ~240px
+   content width regardless of .header-col's fix, which left
+   .custom-select-wrapper's own width: 100% resolving against that same
+   shrink-wrapped, indeterminate-width label — a percentage of a size
+   that itself depends on content can't actually grow anything. Even an
+   inline width: 100% !important on the wrapper measurably proved this
+   (still rendered 240px). Giving the label an explicit width breaks that
+   circularity — explicit width overrides a flex item's own default
+   content-based sizing, unlike a percentage nested another level down. */
+@media (max-width: 520px) {
+  .header-col { width: 100%; }
+  .rule-client-filter label { width: 100%; }
+  .rule-client-filter .custom-select-wrapper { width: 100%; }
+}
 
 /* Logs page's Range filter (search_toolbar in logs.html) — reuses
    .pagination-size's flex/gap sizing (no visible label text here, just
