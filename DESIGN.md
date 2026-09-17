@@ -101,7 +101,8 @@ components:
     backgroundColor: "{colors.slate-panel-raised}"
     textColor: "{colors.frost-text}"
     rounded: "{rounded.lg}"
-    padding: "10px 12px"
+    padding: "0 12px"
+    height: "34px"
   card:
     backgroundColor: "{colors.slate-panel}"
     textColor: "{colors.frost-text}"
@@ -180,7 +181,7 @@ Single-column page structure: a sticky top navigation bar, then a stack of `.car
 
 Forms use a 4-column CSS grid (`.inline-form`, `repeat(4, 1fr)`, 14px gap) that collapses to 2 columns at 900px and 1 column at 520px — never truncating or hiding a field, only re-stacking it. Tables use fixed-width columns on desktop (so layout doesn't jitter) and rely on horizontal scroll (with a deliberately-visible thin scrollbar, not a hidden one) rather than shrinking columns below a usable width on narrow viewports.
 
-Interactive controls (buttons, the custom dropdown trigger) are a **consistent 34px tall** everywhere at every viewport width — this was a real, recently-fixed inconsistency (a `<button>`-based custom dropdown and its neighboring `.btn-sm` pagination controls drifted to different heights through several browser quirks before being pinned to match). Text inputs are a separate, taller 43px, matching each other but intentionally not matching buttons — inputs and buttons are visually distinct control families, not meant to look identical.
+Every interactive control — buttons, the custom dropdown trigger, and text inputs/selects — is a **consistent 34px tall**, everywhere, at every viewport width. Text inputs were originally a separate, taller 43px on desktop/tablet (intentionally distinct from buttons); found during a later `/impeccable audit` pass and standardized to the shared 34px, matching the mobile-only fix that already existed for the same mismatch below 520px.
 
 ### Named Rules
 **The Never-Shrink-Below-Usable Rule.** A table or form never gets visually cramped to fit a narrow screen — it either re-flows to fewer columns or gains a scrollbar, but a value (an IP, a rule, a client name) is never truncated or hidden to save space.
@@ -221,9 +222,9 @@ Borders are always the single `--border` slate-blue token, always 1px, never a s
 - **Internal Padding:** 20px, uniform on all sides.
 
 ### Inputs / Fields
-- **Style:** Slate Panel Raised background, `--border` outline, 8px radius, 43px tall (10px vertical + 12px horizontal padding, 21px line-height, 1px border).
+- **Style:** Slate Panel Raised background, `--border` outline, 8px radius, 34px tall (0 vertical padding, 12px horizontal, matching every button's height) — standardized from an earlier 43px (10px vertical padding) after `/impeccable audit` flagged the mismatch against buttons.
 - **Focus:** border color shifts to Console Blue; no glow or shadow added, just the color shift plus the standard focus-visible outline where applicable.
-- **The custom dropdown** (`select-enhance.js` + `.custom-select-trigger`): every `<select>` in the system is replaced with a synthetic `<button>`-based trigger + a fully custom-rendered option menu, so the open dropdown list looks identical across every browser (a native `<select>` popup is OS-drawn and unstylable). Matches the plain text input's 43px height and left-aligned text everywhere except the pagination "Show N" and Firewall "Filter by client" contexts, which are explicitly the shorter 34px button height instead, since those specific instances sit directly beside regular buttons rather than form fields.
+- **The custom dropdown** (`select-enhance.js` + `.custom-select-trigger`): every `<select>` in the system is replaced with a synthetic `<button>`-based trigger + a fully custom-rendered option menu, so the open dropdown list looks identical across every browser (a native `<select>` popup is OS-drawn and unstylable). Matches the plain text input's 34px height and left-aligned text everywhere, including the pagination "Show N" and Firewall "Filter by client" contexts (previously a separate, narrower-scope 34px exception to the old 43px default — now the same value as everywhere else, just still narrower in width for those two contexts).
 
 ### Navigation
 - **Style:** A sticky top bar (`Slate Panel` background, `--border` bottom edge) holding the brand mark, a flat inline nav (no pills/boxes around links), and the theme toggle + logout on the right.

@@ -825,6 +825,14 @@ input, select, button {
   font: inherit;
 }
 
+/* height: 34px + 0 vertical padding, not the old 43px (10px top/bottom
+   padding) — standardized to match buttons at every viewport width, not
+   just mobile (where this started, before /impeccable audit's follow-up
+   caught it on desktop/tablet too, where a field's own height still
+   didn't match its neighboring button). A fixed height plus the
+   browser's own centered line-box text works fine for a single-line
+   field — same pattern .pagination-size .custom-select-trigger's
+   narrower-scope 34px already used. */
 input[type="text"], input[type="password"], select {
   width: 100%;
   min-width: 160px;
@@ -832,7 +840,8 @@ input[type="text"], input[type="password"], select {
   border: 1px solid var(--border);
   color: var(--text);
   border-radius: 8px;
-  padding: 10px 12px;
+  height: 34px;
+  padding: 0 12px;
   font-size: 14px;
   transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
@@ -889,17 +898,15 @@ select {
      text-align has no effect on a flex item, so the label stayed centered
      despite text-align: left below. display: block fixes that part. */
   display: block;
-  /* Separately, a <button>'s auto height doesn't measure the same way an
-     <input>'s does — with identical padding/border/line-height/font-size,
-     a sibling text input in this same form measures 43px tall and this
-     button still only measured 34px even after the display: block above.
-     Rather than rely on auto-sizing lining up by coincidence, pin it to
-     match: 10px+10px padding + 21px line-height + 1px+1px border = 43px,
-     the same box-sizing: border-box math the text inputs already use. */
-  min-height: 43px;
+  /* Matches input[type=text]/select's own 34px standard height above —
+     a <button>'s auto height doesn't measure the same way an <input>'s
+     does, so this needs pinning explicitly rather than relying on
+     auto-sizing to line up by coincidence. */
+  height: 34px;
+  min-height: 34px;
   width: 100%;
   text-align: left;
-  padding: 10px 34px 10px 12px;
+  padding: 0 34px 0 12px;
   background: var(--panel-2);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -931,28 +938,6 @@ select {
 .custom-select-trigger:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
-}
-
-/* Text inputs/selects (43px, sized for desktop's roomier 10px vertical
-   padding) and buttons (34px) never matched heights, most visible where
-   a form's fields sit directly above/below its submit button row on a
-   narrow phone — a Text input taller than the button next to or below
-   it. Standardizing every field to the same 34px buttons already use
-   (dropping the vertical padding to 0, since a fixed height plus
-   centered line-box text works fine for a single-line field — same
-   pattern already used by .pagination-size .custom-select-trigger's
-   own narrower-scope 34px). */
-@media (max-width: 520px) {
-  input[type="text"], input[type="password"], select {
-    height: 34px;
-    padding: 0 12px;
-  }
-  select { padding: 0 34px 0 12px; }
-  .custom-select-trigger {
-    height: 34px;
-    min-height: 34px;
-    padding: 0 34px 0 12px;
-  }
 }
 
 .custom-select-menu {
