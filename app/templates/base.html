@@ -69,7 +69,7 @@
       </span>
       <span id="theme-toggle-label">Dark</span>
     </button>
-    <a href="{{ url_for('main.logout') }}" class="logout">Log out</a>
+    <a href="{{ url_for('main.logout') }}" class="logout topbar-logout-desktop">Log out</a>
   </header>
 
   <!-- Mobile-only nav drawer — reuses the same <dialog>/::backdrop/
@@ -78,7 +78,9 @@
        a left-anchored sidebar instead of a centered modal box. Duplicates
        nav_links() rather than moving the desktop <nav> in and out of the
        DOM on resize, which would fight the browser's own focus handling
-       mid-transition. -->
+       mid-transition. Log out lives here too (bottom, separated from the
+       nav links) — .topbar-logout-desktop hides below 640px, so this is
+       the only remaining way to reach it on a narrow viewport. -->
   <dialog id="nav-drawer-dialog" class="modal nav-drawer" onclick="closeDialogIfClickedOutside(event, this)">
     <div class="nav-drawer-header">
       <div class="brand">PiVPN Web UI</div>
@@ -87,6 +89,7 @@
     <nav class="nav-drawer-links" onclick="document.getElementById('nav-drawer-dialog').close()">
       {{ nav_links() }}
     </nav>
+    <a href="{{ url_for('main.logout') }}" class="logout nav-drawer-logout">Log out</a>
   </dialog>
   <script>
     document.getElementById('nav-drawer-open-btn').addEventListener('click', () => {
