@@ -480,6 +480,17 @@ h2 { font-size: 16px; margin: 0 0 12px; color: var(--text); }
    explicit "I dont want it wrap i want it just-between" request. */
 @media (max-width: 520px) {
   .card-header-row { flex-wrap: wrap; row-gap: 10px; }
+  /* Firewall Rules and client-detail's own rules section both nest their
+     main action .btn-group one level deeper, inside .btn-group-stack (so
+     it can stack above the separate Disable/Delete bulk-action group).
+     .card-header-row itself doesn't stretch children (align-items stays
+     the shared rule's center, not stretch), so without this the stack
+     shrink-wrapped to its content — the same width it was already
+     failing to fill — leaving .btn-group's own width: 100% resolving
+     against that already-shrunk parent instead of the card's real width.
+     Caught live against real client data: groupWidth measured 231.58px,
+     exactly equal to stackWidth, on a 285px-wide row. */
+  .card-header-row .btn-group-stack { width: 100%; }
   .card-header-row .btn-group,
   .inline-form .btn-group {
     display: grid;
@@ -501,6 +512,33 @@ h2 { font-size: 16px; margin: 0 0 12px; color: var(--text); }
   .card-header-row .btn-group > .btn-form:only-child,
   .inline-form .btn-group > button:only-child,
   .inline-form .btn-group > .btn-form:only-child { grid-column: 1 / -1; }
+  /* A lone item stranded alone in a 2-column grid's final row (e.g.
+     "Apply Rules" as the 3rd of Add Rule/Import Rules/Apply Rules once
+     Save Rules isn't in the DOM to fill the 4th cell — see has_unsaved
+     in firewall.html/client_detail.html, now a real {% if %} instead of
+     a hidden attribute specifically so this DOM-position math is
+     accurate) spans both columns instead of sitting at half width next
+     to dead space. :last-child + :nth-child(odd) together mean "last,
+     and in an odd position" — the only way to be alone in a 2-col grid's
+     trailing row. */
+  .card-header-row .btn-group > :last-child:nth-child(odd) { grid-column: 1 / -1; }
+  /* At a fixed 2-column 1fr width, the longer labels in this button set
+     ("Change password", 16 chars) don't fit their ~half-card-width column
+     at the base 15px button font — the box itself stays a fixed 34px
+     tall (height doesn't grow for overflowing content), so the wrapped
+     2nd line just visually spills out above/below the box instead of the
+     button growing to fit it. Caught live: measured natural (single-
+     line) width 153px against a 137.5px-wide column. 13px/10px padding
+     measured 130.6px for the same label — comfortably under with margin
+     to spare — and every button in these grids gets it uniformly rather
+     than only the ones that happen to overflow, so the row reads as one
+     consistent size instead of some buttons text being smaller than
+     others. */
+  .card-header-row .btn-group button,
+  .inline-form .btn-group button {
+    font-size: 13px;
+    padding: 0 10px;
+  }
 }
 
 /* Page title + search row (Clients/Firewall/VPN Routes h1) — distinct from
@@ -859,6 +897,28 @@ select {
 .custom-select-trigger:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+/* Text inputs/selects (43px, sized for desktop's roomier 10px vertical
+   padding) and buttons (34px) never matched heights, most visible where
+   a form's fields sit directly above/below its submit button row on a
+   narrow phone — a Text input taller than the button next to or below
+   it. Standardizing every field to the same 34px buttons already use
+   (dropping the vertical padding to 0, since a fixed height plus
+   centered line-box text works fine for a single-line field — same
+   pattern already used by .pagination-size .custom-select-trigger's
+   own narrower-scope 34px). */
+@media (max-width: 520px) {
+  input[type="text"], input[type="password"], select {
+    height: 34px;
+    padding: 0 12px;
+  }
+  select { padding: 0 34px 0 12px; }
+  .custom-select-trigger {
+    height: 34px;
+    min-height: 34px;
+    padding: 0 34px 0 12px;
+  }
 }
 
 .custom-select-menu {

@@ -74,10 +74,12 @@
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <button type="submit" class="btn">Apply Rules</button>
         </form>
-        <form method="post" action="{{ url_for('main.client_persist_rules', name=client.name) }}" class="btn-form" {{ '' if has_unsaved else 'hidden' }}>
+        {% if has_unsaved %}
+        <form method="post" action="{{ url_for('main.client_persist_rules', name=client.name) }}" class="btn-form">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <button type="submit" class="btn btn-warn btn-unsaved-jump">Save Rules</button>
         </form>
+        {% endif %}
       </div>
       <div class="btn-group" id="client-bulk-actions-group" hidden>
         <form method="post" action="{{ url_for('main.client_bulk_disable_rules', name=client.name) }}" id="client-bulk-disable-form" class="btn-form">
