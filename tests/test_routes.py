@@ -287,18 +287,19 @@ def test_delete_other_user_succeeds(client):
 
 
 def test_delete_user_db_busy_degrades_cleanly(client, monkeypatch):
-    # Regression test: delete_user_guarded's BEGIN IMMEDIATE can raise
-    # sqlite3.OperationalError if it can't acquire the write lock within
-    # the connection's timeout (extremely unlikely given how fast this
-    # app's own writes are, but a raw 500 is a worse failure mode than a
-    # clean "try again" message when it does happen).
-    import sqlite3
+    # Regression test: delete_user_guarded's SELECT ... FOR UPDATE can
+    # raise psycopg2.errors.LockNotAvailable if it can't acquire the row
+    # lock within locked_transaction's 5s lock_timeout (extremely
+    # unlikely given how fast this app's own writes are, but a raw 500
+    # is a worse failure mode than a clean "try again" message when it
+    # does happen).
+    import psycopg2.errors
     _add_moderator()
     _login_admin(client)
     mod_row = db.get_user_by_username("mod")
 
     def fake_guarded(user_id):
-        raise sqlite3.OperationalError("database is locked")
+        raise psycopg2.errors.LockNotAvailable("could not obtain lock on row")
 
     monkeypatch.setattr("app.routes.db.delete_user_guarded", fake_guarded)
     resp = client.post(f"/users/{mod_row['id']}/delete")
@@ -592,7 +593,7 @@ def test_activity_tab_range_and_search_filter_via_the_route(client, monkeypatch)
     conn = db.get_conn()
     old_ts = (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%d %H:%M:%S")
     conn.execute(
-        "INSERT INTO audit_log (ts, actor, action, target, result) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO audit_log (ts, actor, action, target, result) VALUES (%s, %s, %s, %s, %s)",
         (old_ts, "admin", "client_add", "old-client", "ok"),
     )
     conn.commit()

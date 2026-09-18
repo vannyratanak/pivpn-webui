@@ -43,6 +43,16 @@ PIVPN_CERT_DAYS = os.environ.get("PIVPN_CERT_DAYS", "1080")
 
 DB_PATH = os.environ.get("PIVPN_WEBUI_DB", str(BASE_DIR / "instance" / "pivpn_webui.db"))
 
+# Postgres — replaces DB_PATH's SQLite file as of the Postgres migration.
+# No default host: unlike every other setting here, there's no sane
+# fallback for "which database" — .env must set this explicitly (see
+# require_secrets below, which now also enforces it).
+DB_HOST = os.environ.get("PIVPN_WEBUI_DB_HOST")
+DB_PORT = int(os.environ.get("PIVPN_WEBUI_DB_PORT", "5432"))
+DB_NAME = os.environ.get("PIVPN_WEBUI_DB_NAME", "pivpn_webui")
+DB_USER = os.environ.get("PIVPN_WEBUI_DB_USER", "pivpn_webui_app")
+DB_PASSWORD = os.environ.get("PIVPN_WEBUI_DB_PASSWORD")
+
 BIND_HOST = os.environ.get("BIND_HOST", "127.0.0.1")
 BIND_PORT = int(os.environ.get("BIND_PORT", "8443"))
 
@@ -74,4 +84,9 @@ def require_secrets():
         raise RuntimeError(
             "SECRET_KEY and ADMIN_PASSWORD_HASH must be set in the environment (.env). "
             "Run setup.sh to generate them."
+        )
+    if not DB_HOST or not DB_PASSWORD:
+        raise RuntimeError(
+            "PIVPN_WEBUI_DB_HOST and PIVPN_WEBUI_DB_PASSWORD must be set in the environment (.env) "
+            "— the app now requires a Postgres connection, not just the SQLite file path."
         )

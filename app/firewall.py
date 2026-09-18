@@ -542,8 +542,8 @@ def reorder_rule(rule_id: int, target_id: int, place: str, client_ip: str | None
         raise FirewallError(f"Invalid place: {place!r}")
 
     with db.locked_transaction() as conn:
-        rule_row = conn.execute("SELECT * FROM firewall_rules WHERE id=?", (rule_id,)).fetchone()
-        target_row = conn.execute("SELECT * FROM firewall_rules WHERE id=?", (target_id,)).fetchone()
+        rule_row = conn.execute("SELECT * FROM firewall_rules WHERE id=%s", (rule_id,)).fetchone()
+        target_row = conn.execute("SELECT * FROM firewall_rules WHERE id=%s", (target_id,)).fetchone()
         if not rule_row or not target_row:
             raise FirewallError("Rule not found.")
         rule = dict(rule_row)
@@ -583,7 +583,7 @@ def reorder_rule(rule_id: int, target_id: int, place: str, client_ip: str | None
             ]
             _check_self_lockout(client_ip, simulated)
 
-        conn.execute("UPDATE firewall_rules SET position=? WHERE id=?", (new_pos, rule_id))
+        conn.execute("UPDATE firewall_rules SET position=%s WHERE id=%s", (new_pos, rule_id))
 
     for chain, table in my_chains:
         _rebuild_chain(chain, table)
@@ -668,15 +668,17 @@ def add_input_rule(action, protocol, src, dport, comment="", client_ip: str | No
         # rule's position increases monotonically regardless of kind, so
         # this still always lands the new rule last among input rules
         # too, same guarantee the non-atomic version relied on.
-        (overall_max_pos,) = conn.execute("SELECT COALESCE(MAX(position), 0) FROM firewall_rules").fetchone()
+        overall_max_pos = conn.execute(
+            "SELECT COALESCE(MAX(position), 0) AS max_pos FROM firewall_rules"
+        ).fetchone()["max_pos"]
         rule_to_insert = {**rule, "position": overall_max_pos + 1}
         cols = list(rule_to_insert.keys())
-        placeholders = ",".join("?" for _ in cols)
+        placeholders = ",".join("%s" for _ in cols)
         cur = conn.execute(
-            f"INSERT INTO firewall_rules ({','.join(cols)}) VALUES ({placeholders})",
+            f"INSERT INTO firewall_rules ({','.join(cols)}) VALUES ({placeholders}) RETURNING id",
             [rule_to_insert[c] for c in cols],
         )
-        rule_id = cur.lastrowid
+        rule_id = cur.fetchone()["id"]
     rule["id"] = rule_id
     try:
         _apply(rule)
@@ -964,7 +966,7 @@ def set_client_block(client_name: str, client_ip: str, blocked: bool, admin_ip: 
     delete-then-unapply split would need instead."""
     with db.locked_transaction() as conn:
         existing_row = conn.execute(
-            "SELECT * FROM firewall_rules WHERE kind='client_block' AND client_name=?",
+            "SELECT * FROM firewall_rules WHERE kind='client_block' AND client_name=%s",
             (client_name,),
         ).fetchone()
         if blocked:
@@ -980,15 +982,17 @@ def set_client_block(client_name: str, client_ip: str, blocked: bool, admin_ip: 
                 "comment": f"Block {client_name}",
                 "enabled": 1,
             }
-            (max_pos,) = conn.execute("SELECT COALESCE(MAX(position), 0) FROM firewall_rules").fetchone()
+            max_pos = conn.execute(
+                "SELECT COALESCE(MAX(position), 0) AS max_pos FROM firewall_rules"
+            ).fetchone()["max_pos"]
             rule_to_insert = {**rule, "position": max_pos + 1}
             cols = list(rule_to_insert.keys())
-            placeholders = ",".join("?" for _ in cols)
+            placeholders = ",".join("%s" for _ in cols)
             cur = conn.execute(
-                f"INSERT INTO firewall_rules ({','.join(cols)}) VALUES ({placeholders})",
+                f"INSERT INTO firewall_rules ({','.join(cols)}) VALUES ({placeholders}) RETURNING id",
                 [rule_to_insert[c] for c in cols],
             )
-            rule_id = cur.lastrowid
+            rule_id = cur.fetchone()["id"]
         else:
             if not existing_row:
                 return None
@@ -997,7 +1001,7 @@ def set_client_block(client_name: str, client_ip: str, blocked: bool, admin_ip: 
                 _unapply(existing)
             except PrivilegedCommandError as exc:
                 raise FirewallError(str(exc)) from exc
-            conn.execute("DELETE FROM firewall_rules WHERE id=?", (existing["id"],))
+            conn.execute("DELETE FROM firewall_rules WHERE id=%s", (existing["id"],))
             return None
 
     rule["id"] = rule_id
@@ -1016,7 +1020,7 @@ def _other_enabled_input_rules(conn, rule_id: int) -> list[dict]:
     actually enforced, just via a different DB field)."""
     return [
         dict(r) for r in conn.execute(
-            "SELECT * FROM firewall_rules WHERE enabled=1 AND kind='input' AND id!=?", (rule_id,)
+            "SELECT * FROM firewall_rules WHERE enabled=1 AND kind='input' AND id!=%s", (rule_id,)
         ).fetchall()
     ]
 
@@ -1030,7 +1034,7 @@ def toggle_rule(rule_id: int, client_ip: str | None = None):
     happens after the transaction commits — _rebuild_chain/_apply re-read
     the DB themselves, so they don't need the lock."""
     with db.locked_transaction() as conn:
-        row = conn.execute("SELECT * FROM firewall_rules WHERE id=?", (rule_id,)).fetchone()
+        row = conn.execute("SELECT * FROM firewall_rules WHERE id=%s", (rule_id,)).fetchone()
         if not row:
             raise FirewallError("Rule not found.")
         rule = dict(row)
@@ -1047,7 +1051,7 @@ def toggle_rule(rule_id: int, client_ip: str | None = None):
             if new_state:
                 _check_not_unrestricted_input_drop(rule)
             _check_self_lockout(client_ip, simulated)
-        conn.execute("UPDATE firewall_rules SET enabled=? WHERE id=?", (1 if new_state else 0, rule_id))
+        conn.execute("UPDATE firewall_rules SET enabled=%s WHERE id=%s", (1 if new_state else 0, rule_id))
 
     if new_state:
         chains = _chains_for(rule)
@@ -1067,13 +1071,13 @@ def disable_rule(rule_id: int, client_ip: str | None = None):
 
     Same locked-transaction treatment as toggle_rule, for the same race."""
     with db.locked_transaction() as conn:
-        row = conn.execute("SELECT * FROM firewall_rules WHERE id=?", (rule_id,)).fetchone()
+        row = conn.execute("SELECT * FROM firewall_rules WHERE id=%s", (rule_id,)).fetchone()
         if not row or not row["enabled"]:
             return
         rule = dict(row)
         if rule["kind"] == "input":
             _check_self_lockout(client_ip, _other_enabled_input_rules(conn, rule_id))
-        conn.execute("UPDATE firewall_rules SET enabled=0 WHERE id=?", (rule_id,))
+        conn.execute("UPDATE firewall_rules SET enabled=0 WHERE id=%s", (rule_id,))
     _unapply(rule)
 
 
@@ -1082,13 +1086,13 @@ def delete_rule(rule_id: int, client_ip: str | None = None):
     the same race — flagged and deliberately left alone when those three
     were fixed, now closed the same way."""
     with db.locked_transaction() as conn:
-        row = conn.execute("SELECT * FROM firewall_rules WHERE id=?", (rule_id,)).fetchone()
+        row = conn.execute("SELECT * FROM firewall_rules WHERE id=%s", (rule_id,)).fetchone()
         if not row:
             return
         rule = dict(row)
         if rule["kind"] == "input":
             _check_self_lockout(client_ip, _other_enabled_input_rules(conn, rule_id))
-        conn.execute("DELETE FROM firewall_rules WHERE id=?", (rule_id,))
+        conn.execute("DELETE FROM firewall_rules WHERE id=%s", (rule_id,))
     if rule["enabled"]:
         try:
             _unapply(rule)

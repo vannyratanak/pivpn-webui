@@ -1,6 +1,7 @@
 import math
-import sqlite3
 from datetime import datetime, timedelta
+
+import psycopg2.errors
 
 from flask import Blueprint, abort, flash, jsonify, redirect, render_template, request, send_file, session, url_for
 from flask_login import current_user, login_required, login_user, logout_user
@@ -169,12 +170,13 @@ def delete_user(user_id):
     # race between two concurrent requests (see its docstring).
     try:
         target, error = db.delete_user_guarded(user_id)
-    except sqlite3.OperationalError:
-        # BEGIN IMMEDIATE waits for SQLite's write lock (default 5s
-        # timeout) rather than failing instantly — this app's own writes
-        # are all fast, short transactions, so contention this long isn't
-        # expected, but a raw 500 for "try that again" is a worse failure
-        # mode than a clean message when it does happen.
+    except psycopg2.errors.LockNotAvailable:
+        # locked_transaction() sets a 5s lock_timeout (matching SQLite's
+        # old default busy_timeout) rather than waiting forever — this
+        # app's own writes are all fast, short transactions, so
+        # contention this long isn't expected, but a raw 500 for "try
+        # that again" is a worse failure mode than a clean message when
+        # it does happen.
         flash("Could not complete that right now — the database was busy. Try again.", "error")
         _audit("user_delete", str(user_id), "error", "database busy")
         return redirect(url_for("main.users"))

@@ -7,6 +7,7 @@ import pytest
 import config
 from app import db
 from app.privileged import PrivilegedCommandError
+from tests.conftest import _configure_test_db
 from app.firewall import (
     _IMPORT_ADDERS,
     FirewallError,
@@ -333,8 +334,7 @@ def test_client_block_self_lockout_no_admin_ip_skips_check():
 
 
 def _setup_client_block_db(tmp_path, monkeypatch):
-    monkeypatch.setattr(config, "DB_PATH", str(tmp_path / "test.db"))
-    db.init_db()
+    _configure_test_db(monkeypatch)
     applied = []
 
     def _run_root(argv):
@@ -426,13 +426,12 @@ def test_concurrent_block_requests_never_create_duplicate_rows(tmp_path, monkeyp
 
 def _setup_input_rules(tmp_path, monkeypatch, existing_input):
     # add_input_rule now opens a real db.locked_transaction() connection
-    # (BEGIN IMMEDIATE against config.DB_PATH) to close the self-lockout
-    # race — that bypasses attribute-level mocks of db.list_rules/
-    # db.insert_rule entirely, so give it a real temp database instead,
-    # matching test_db.py's tmp_path pattern. run_root is still mocked:
-    # self-lockout is what's under test, not real iptables.
-    monkeypatch.setattr(config, "DB_PATH", str(tmp_path / "test.db"))
-    db.init_db()
+    # (SELECT ... FOR UPDATE against the real Postgres test db) to close
+    # the self-lockout race — that bypasses attribute-level mocks of
+    # db.list_rules/db.insert_rule entirely, so give it a real temp
+    # database instead, matching test_db.py's pattern. run_root is still
+    # mocked: self-lockout is what's under test, not real iptables.
+    _configure_test_db(monkeypatch)
     for r in existing_input:
         db.insert_rule({**r, "kind": "input", "enabled": 1})
     applied = []
@@ -522,14 +521,13 @@ def test_add_input_rule_allows_unrestricted_accept(tmp_path, monkeypatch):
 
 def _setup_toggle_rule(tmp_path, monkeypatch, rule, other_input_rules=()):
     # toggle_rule/disable_rule now open a real db.locked_transaction()
-    # connection (BEGIN IMMEDIATE against config.DB_PATH) to close the
-    # self-lockout race — that bypasses attribute-level mocks of
-    # db.get_rule/db.list_rules/db.set_enabled entirely, so give it a real
-    # temp database instead, matching _setup_input_rules above. rule's own
+    # connection (SELECT ... FOR UPDATE against the real Postgres test db)
+    # to close the self-lockout race — that bypasses attribute-level mocks
+    # of db.get_rule/db.list_rules/db.set_enabled entirely, so give it a
+    # real temp database instead, matching _setup_input_rules above. rule's own
     # "id" is inserted as-is, so callers can still address it by the literal
     # id _rule() was given. run_root is still mocked.
-    monkeypatch.setattr(config, "DB_PATH", str(tmp_path / "test.db"))
-    db.init_db()
+    _configure_test_db(monkeypatch)
     db.insert_rule(dict(rule))
     for r in other_input_rules:
         db.insert_rule({"kind": "input", "enabled": 1, **r})
@@ -640,8 +638,7 @@ def test_disable_and_enable_race_never_locks_out_admin(tmp_path, monkeypatch):
     # concurrency, same pattern as test_db.py's delete_user_guarded race test.
     import threading
 
-    monkeypatch.setattr(config, "DB_PATH", str(tmp_path / "test.db"))
-    db.init_db()
+    _configure_test_db(monkeypatch)
     admin_ip = "203.0.113.55"
     accept_id = db.insert_rule({
         "kind": "input", "action": "ACCEPT", "protocol": "tcp",
@@ -697,8 +694,7 @@ def test_delete_and_enable_race_never_locks_out_admin(tmp_path, monkeypatch):
     # DROP must never both succeed.
     import threading
 
-    monkeypatch.setattr(config, "DB_PATH", str(tmp_path / "test.db"))
-    db.init_db()
+    _configure_test_db(monkeypatch)
     admin_ip = "203.0.113.55"
     accept_id = db.insert_rule({
         "kind": "input", "action": "ACCEPT", "protocol": "tcp",
@@ -745,8 +741,7 @@ def test_delete_and_enable_race_never_locks_out_admin(tmp_path, monkeypatch):
 def _setup_reorder_rules(tmp_path, monkeypatch, rules):
     # reorder_rule now opens a real db.locked_transaction() connection too
     # — same reason as _setup_input_rules/_setup_toggle_rule above.
-    monkeypatch.setattr(config, "DB_PATH", str(tmp_path / "test.db"))
-    db.init_db()
+    _configure_test_db(monkeypatch)
     for r in rules:
         db.insert_rule(dict(r))
     applied = []
@@ -920,8 +915,7 @@ def test_add_forward_rule_rejects_any_protocol_with_port():
 # incident that started this whole investigation.
 
 def _setup_forward_db(tmp_path, monkeypatch):
-    monkeypatch.setattr(config, "DB_PATH", str(tmp_path / "test.db"))
-    db.init_db()
+    _configure_test_db(monkeypatch)
     applied = []
     monkeypatch.setattr("app.firewall.run_root", lambda argv: applied.append(argv))
     return applied
@@ -1079,8 +1073,7 @@ def _stateful_fake_iptables(initial_input_specs):
 
 
 def test_concurrent_rebuild_chain_never_duplicates_live_rules(tmp_path, monkeypatch):
-    monkeypatch.setattr(config, "DB_PATH", str(tmp_path / "test.db"))
-    db.init_db()
+    _configure_test_db(monkeypatch)
     for i in range(1, 4):
         db.insert_rule({
             "kind": "input", "action": "ACCEPT", "protocol": "tcp",
@@ -1123,8 +1116,7 @@ def test_concurrent_discover_never_leaves_an_orphaned_live_rule(tmp_path, monkey
     # cleaned up by any later rebuild. Reproduced for real against .12
     # (raw untracked rules added by hand, /firewall loaded twice
     # concurrently) before this fix — cleaned up immediately after.
-    monkeypatch.setattr(config, "DB_PATH", str(tmp_path / "test.db"))
-    db.init_db()
+    _configure_test_db(monkeypatch)
 
     # 6 raw, untracked INPUT rules -- a slice of a large pre-existing
     # production ruleset (the actual scenario this was found chasing).

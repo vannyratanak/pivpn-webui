@@ -2,17 +2,26 @@ from datetime import datetime, timedelta
 
 import config
 from app import db
+from tests.conftest import _configure_test_db
 
 
 def _use_temp_db(tmp_path, monkeypatch):
-    monkeypatch.setattr(config, "DB_PATH", str(tmp_path / "test.db"))
-    db.init_db()
+    # tmp_path kept in the signature (unused now) so every existing call
+    # site below didn't need touching — this just delegates to the same
+    # Postgres test-db config + truncate conftest.py's temp_db/client
+    # fixtures use.
+    _configure_test_db(monkeypatch)
 
 
 def test_init_db_creates_both_tables(tmp_path, monkeypatch):
     _use_temp_db(tmp_path, monkeypatch)
     conn = db.get_conn()
-    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    tables = {
+        row["table_name"]
+        for row in conn.execute(
+            "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
+        )
+    }
     conn.close()
     assert {"firewall_rules", "audit_log", "users"}.issubset(tables)
 
@@ -56,7 +65,7 @@ def test_add_audit_prunes_rows_older_than_retention(tmp_path, monkeypatch):
     conn = db.get_conn()
     old_ts = (datetime.now() - timedelta(days=db.AUDIT_LOG_RETENTION_DAYS + 1)).strftime("%Y-%m-%d %H:%M:%S")
     conn.execute(
-        "INSERT INTO audit_log (ts, actor, action, result) VALUES (?, ?, ?, ?)",
+        "INSERT INTO audit_log (ts, actor, action, result) VALUES (%s, %s, %s, %s)",
         (old_ts, "admin", "login", "ok"),
     )
     conn.commit()
@@ -72,7 +81,7 @@ def test_add_audit_keeps_rows_within_retention(tmp_path, monkeypatch):
     conn = db.get_conn()
     recent_ts = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
     conn.execute(
-        "INSERT INTO audit_log (ts, actor, action, result) VALUES (?, ?, ?, ?)",
+        "INSERT INTO audit_log (ts, actor, action, result) VALUES (%s, %s, %s, %s)",
         (recent_ts, "admin", "login", "ok"),
     )
     conn.commit()
@@ -105,7 +114,7 @@ def test_list_audit_page_since_filters_by_cutoff(tmp_path, monkeypatch):
     conn = db.get_conn()
     old_ts = (datetime.now() - timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S")
     conn.execute(
-        "INSERT INTO audit_log (ts, actor, action, result) VALUES (?, ?, ?, ?)",
+        "INSERT INTO audit_log (ts, actor, action, result) VALUES (%s, %s, %s, %s)",
         (old_ts, "admin", "old-action", "ok"),
     )
     conn.commit()
@@ -140,9 +149,11 @@ def test_login_failures_count_per_ip(tmp_path, monkeypatch):
 def test_login_failures_outside_window_not_counted(tmp_path, monkeypatch):
     _use_temp_db(tmp_path, monkeypatch)
     conn = db.get_conn()
+    from datetime import timezone
+    old_ts = (datetime.now(timezone.utc) - timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M:%S")
     conn.execute(
-        "INSERT INTO login_failures (ip, ts) VALUES (?, datetime('now', '-10 minutes'))",
-        ("203.0.113.9",),
+        "INSERT INTO login_failures (ip, ts) VALUES (%s, %s)",
+        ("203.0.113.9", old_ts),
     )
     conn.commit()
     conn.close()

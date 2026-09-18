@@ -3,6 +3,7 @@ import threading
 
 import config
 from app import db, iplookup
+from tests.conftest import _configure_test_db
 
 # Real `whois <ip>` output, captured live for three real destinations seen
 # in .10's Traffic tab (see app/iplookup.py's docstring for why the system
@@ -122,8 +123,10 @@ def test_extract_org_no_match_returns_none():
 
 
 def _use_temp_db(tmp_path, monkeypatch):
-    monkeypatch.setattr(config, "DB_PATH", str(tmp_path / "test.db"))
-    db.init_db()
+    # tmp_path kept in the signature (unused now) so every existing call
+    # site didn't need touching — delegates to the shared Postgres test-db
+    # config + truncate conftest.py's temp_db/client fixtures use.
+    _configure_test_db(monkeypatch)
 
 
 def test_get_ip_org_private_address_skips_whois_entirely(tmp_path, monkeypatch):
