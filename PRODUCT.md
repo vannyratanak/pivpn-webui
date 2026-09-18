@@ -42,9 +42,14 @@ unrestricted DROP rule (no source, destination, or port) on the INPUT or
 FORWARD chain regardless of who's asking — added after a real incident
 where that exact shape took down VPN connectivity for every client, a
 class of damage the self-lockout guard alone can't see since it only
-ever reasons about the requester's own access. No separate database server or background agent
-process — SQLite plus a handful of narrowly-scoped, sudoers-gated root
-helper scripts, installable on the exact box PiVPN already runs on.
+ever reasons about the requester's own access. Uses PostgreSQL (migrated
+from an embedded SQLite file in Sept 2026, at the operator's request for
+centralized DB management) plus a handful of narrowly-scoped,
+sudoers-gated root helper scripts. No separate database server is
+required — Postgres can run on the exact box PiVPN already runs on, as it
+does today — but the app always connects over a real network address
+rather than a local socket, so pointing it at a genuinely separate DB
+server later is a config change, not a rearchitecture.
 
 ## Operating Context
 
