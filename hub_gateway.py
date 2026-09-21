@@ -149,6 +149,25 @@ def _build_tls_context() -> ssl.SSLContext | None:
         sys.exit(1)
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(config.GATEWAY_TLS_CERT, config.GATEWAY_TLS_KEY)
+    if config.GATEWAY_CLIENT_CA:
+        # Mutual TLS: require every connecting agent to present a
+        # certificate signed by this hub's own CA (see setup-hub-tls.sh
+        # and manage_servers.py's register()) before the connection even
+        # completes — a stolen hello token alone is no longer enough to
+        # open a new connection, since forging an acceptable cert needs
+        # the CA's private key too, which never leaves this hub.
+        ctx.verify_mode = ssl.CERT_REQUIRED
+        ctx.load_verify_locations(config.GATEWAY_CLIENT_CA)
+        # TLS 1.3 session tickets let a later connection resume an
+        # earlier session without redoing the full handshake — in some
+        # server/library combinations, that resumed handshake skips
+        # re-verifying the client certificate rather than re-checking it.
+        # Disabling tickets on this context removes that ambiguity
+        # entirely: every connection goes through a full handshake with
+        # real client-cert verification, every time. (The actual
+        # enforcement was verified directly, repeatedly, with a real
+        # WebSocket client — see the mTLS rollout notes.)
+        ctx.options |= ssl.OP_NO_TICKET
     return ctx
 
 
@@ -170,8 +189,10 @@ async def main():
     # ceiling against a truly pathological payload, just one sized for
     # this app's actual traffic instead of the library's generic default.
     await websockets.serve(handle_agent, AGENT_HOST, AGENT_PORT, max_size=MAX_MESSAGE_BYTES, ssl=tls_ctx)
-    log.info("listening for agents on %s:%s (%s), for Flask on %s",
-              AGENT_HOST, AGENT_PORT, "wss://" if tls_ctx else "ws://", socket_path)
+    mtls = tls_ctx is not None and tls_ctx.verify_mode == ssl.CERT_REQUIRED
+    log.info("listening for agents on %s:%s (%s%s), for Flask on %s",
+              AGENT_HOST, AGENT_PORT, "wss://" if tls_ctx else "ws://",
+              " mTLS-required" if mtls else "", socket_path)
 
     await asyncio.Future()  # run forever — cleanup is just process exit
 

@@ -138,6 +138,29 @@ AGENT_TOKEN = os.environ.get("AGENT_TOKEN")
 # unset, a wss:// HUB_URL falls back to the system trust store, which is
 # the right behavior once hub_gateway.py ever gets a real CA-signed cert.
 HUB_TLS_CERT = os.environ.get("HUB_TLS_CERT")
+# Mutual TLS — this agent's own certificate, signed by the hub's private
+# CA (see manage_servers.py's register(), which issues one per agent, and
+# setup-hub-tls.sh, which creates the CA that signs them). Presented
+# during the TLS handshake so the hub can verify "this really is an agent
+# we issued a cert to," on top of (not instead of) the existing hello
+# token check — closes the gap where a stolen token alone was enough to
+# open a brand-new connection and impersonate this agent, since forging a
+# cert the hub's CA would accept requires the CA's own private key, which
+# never leaves the hub. Both unset (the default) means this agent
+# presents no client cert, matching every deployment before this existed;
+# only meaningful when HUB_TLS_CERT/wss:// TLS is already on.
+AGENT_TLS_CERT = os.environ.get("AGENT_TLS_CERT")
+AGENT_TLS_KEY = os.environ.get("AGENT_TLS_KEY")
+
+# Hub-side (hub_gateway.py) counterpart to AGENT_TLS_CERT/KEY above — path
+# to this hub's own CA certificate (instance/hub-ca.crt, made by
+# setup-hub-tls.sh), used to verify an agent's client certificate was
+# really signed by it. Unset (the default) means hub_gateway.py doesn't
+# require a client cert at all — only the hello message's token gates
+# entry, exactly as before mutual TLS existed. Only meaningful alongside
+# GATEWAY_TLS_CERT/KEY (mTLS needs the base TLS connection to exist
+# first).
+GATEWAY_CLIENT_CA = os.environ.get("GATEWAY_CLIENT_CA")
 
 # Only enforced when this module is actually imported by the running app
 # (wsgi.py / app factory), not by setup.sh or other tooling that imports

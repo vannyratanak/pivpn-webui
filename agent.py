@@ -156,6 +156,13 @@ def _build_tls_context() -> ssl.SSLContext | None:
     ctx = ssl.create_default_context()
     if config.HUB_TLS_CERT:
         ctx = ssl.create_default_context(cafile=config.HUB_TLS_CERT)
+    if config.AGENT_TLS_CERT and config.AGENT_TLS_KEY:
+        # Mutual TLS — see hub_gateway.py's GATEWAY_CLIENT_CA for what
+        # this proves to the hub on connect. Both unset (the default)
+        # means this agent presents no client cert; a hub with
+        # GATEWAY_CLIENT_CA set would then refuse the TLS handshake
+        # entirely, never even reaching the hello/token exchange.
+        ctx.load_cert_chain(config.AGENT_TLS_CERT, config.AGENT_TLS_KEY)
     return ctx
 
 
