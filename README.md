@@ -847,6 +847,52 @@ logged in as (avoids a confusing mid-session logout), and the last
 remaining admin account (would leave nobody who can create a replacement
 admin, manage the firewall, or do anything else admin-only again).
 
+## API access (JWT)
+
+Besides the browser UI, every action in this app is also reachable as a
+JSON API (`app/api.py`) for scripts or another system to call without a
+browser — get a short-lived token, then use it as a bearer credential:
+
+```bash
+curl -s -X POST https://<host>/api/login \
+  -H "Content-Type: application/json" \
+  -d '{"username": "admin", "password": "..."}'
+# -> {"access_token": "...", "role": "admin", "expires_in_minutes": 15}
+
+curl -s https://<host>/api/clients \
+  -H "Authorization: Bearer <access_token>"
+```
+
+Tokens expire in 15 minutes by default (`JWT_ACCESS_TOKEN_MINUTES` in
+`.env`) — deliberately short, so a token that leaks (logged somewhere,
+committed to a script by accident) self-expires quickly instead of
+staying valid indefinitely. `JWT_SECRET_KEY` is a separate secret from
+`SECRET_KEY` (falls back to it if unset) so rotating one doesn't force
+rotating the other.
+
+Endpoints mirror the browser pages 1:1, with the same role gating
+(admin-only where the equivalent page is admin-only):
+
+| Area | Endpoints |
+|---|---|
+| Auth | `POST /api/login` |
+| Clients | `GET/POST /api/clients`, `GET /api/clients/<name>`, `POST /api/clients/<name>/renew`, `DELETE /api/clients/<name>`, `GET /api/clients/<name>/download`, `POST /api/clients/<name>/block` |
+| Per-client rules | `POST /api/clients/<name>/rules`, `POST .../rules/<id>/toggle`, `DELETE .../rules/<id>` |
+| Firewall (admin) | `GET /api/firewall/rules`, `POST /api/firewall/forward\|input\|snat\|portforward`, `POST /api/firewall/rules/<id>/toggle`, `DELETE /api/firewall/rules/<id>` |
+| VPN Routes (admin) | `GET/POST/DELETE /api/vpn-routes` |
+| Logs | `GET /api/logs?tab=...`, `POST /api/logs/refresh` |
+| Users | `GET/POST /api/users`, `DELETE /api/users/<id>`, `POST /api/users/<id>/reset-password` (admin except list/your own password), `POST /api/account/password` |
+
+`app/api.py` is the source of truth for exact request/response shapes —
+each endpoint's docstring says which browser view it mirrors.
+
+**The browser UI itself also runs on a JWT**, not Flask's session cookie
+— `app/auth.py` issues one as an httpOnly cookie on login, invisible to
+page JavaScript, refreshed on every request so a login still lasts the
+usual idle window (`SESSION_LIFETIME_HOURS`). This is separate from the
+bearer-token flow above and not something you interact with directly;
+CSRF protection (the hidden token in every form) is unchanged.
+
 ## Known limitations / things to check
 
 - The INPUT self-lockout guard only ever protects **the requester's own
