@@ -10,7 +10,7 @@
 // these on separate signals from style.display is what lets filtering,
 // sorting, and paging compose correctly instead of fighting over the same
 // property.
-function attachPagination(containerSelector, itemSelector, pageSizeId, controlsId) {
+function attachPagination(containerSelector, itemSelector, pageSizeId, controlsId, onChange) {
   const container = document.querySelector(containerSelector);
   const pageSizeSelect = document.getElementById(pageSizeId);
   const controls = document.getElementById(controlsId);
@@ -48,6 +48,12 @@ function attachPagination(containerSelector, itemSelector, pageSizeId, controlsI
     status.textContent = matching.length === 0
       ? 'No results'
       : `Page ${currentPage} of ${totalPages} (${matching.length} total)`;
+
+    // Optional — lets a page react to the page/size actually changing
+    // (e.g. Firewall Rules' kind-divider rows, which this file doesn't
+    // know anything about, need to hide/show per page since they aren't
+    // part of itemSelector's own matching set).
+    if (onChange) onChange();
   }
 
   prevBtn.addEventListener('click', () => { currentPage -= 1; refresh(); });

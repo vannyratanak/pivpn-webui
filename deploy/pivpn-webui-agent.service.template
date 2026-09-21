@@ -1,0 +1,21 @@
+[Unit]
+Description=PiVPN Web UI hub/agent connector
+After=network.target openvpn.service
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__APP_DIR__
+EnvironmentFile=__APP_DIR__/.env
+ExecStart=__APP_DIR__/venv/bin/python3 __APP_DIR__/agent.py
+Restart=on-failure
+RestartSec=5
+# Same reasoning as pivpn-webui.service.template: this calls `sudo` (via
+# app/privileged.py's run_root, dispatched from hub_gateway.py's messages
+# instead of an inbound Flask request), and sudo's setuid needs
+# NoNewPrivileges off to work under systemd. The privilege boundary is
+# the narrow sudoers allowlist, not this setting.
+NoNewPrivileges=false
+
+[Install]
+WantedBy=multi-user.target

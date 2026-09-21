@@ -2,14 +2,17 @@ import fcntl
 from datetime import timedelta
 from pathlib import Path
 
-from flask import Flask
+from flask import Flask, g
+from flask_jwt_extended import JWTManager
+from flask_login import current_user
 from flask_wtf import CSRFProtect
 
 import config
 from app import db
-from app.auth import login_manager
+from app.auth import issue_html_jwt_cookie, login_manager
 
 csrf = CSRFProtect()
+jwt = JWTManager()
 
 # Holds this worker's lock_file object for the life of the process — see
 # _sync_firewall_once. A function-local variable's refcount hits zero the
@@ -55,22 +58,52 @@ def create_app():
 
     app = Flask(__name__)
     app.config["SECRET_KEY"] = config.SECRET_KEY
-    # See routes.py's login() for where session.permanent actually gets
-    # set — this alone doesn't apply a limit to the plain (non-permanent)
-    # session cookie Flask uses by default.
-    app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=config.SESSION_LIFETIME_HOURS)
     app.config["SESSION_COOKIE_SECURE"] = config.SESSION_COOKIE_SECURE
+    app.config["JWT_SECRET_KEY"] = config.JWT_SECRET_KEY
+    app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(minutes=config.JWT_ACCESS_TOKEN_MINUTES)
 
     db.init_db()
     login_manager.init_app(app)
     csrf.init_app(app)
+    jwt.init_app(app)
 
     from app.routes import bp as main_bp
     app.register_blueprint(main_bp)
 
-    from app.firewall import IP_CIDR_PATTERN, IP_PATTERN
+    from app.api import bp as api_bp
+    # Token-authenticated, not cookie-authenticated — CSRF's threat model
+    # (a malicious page tricking a victim's *browser* into firing a
+    # request that rides along their *existing cookie*) doesn't apply
+    # here: an API caller has to already possess the bearer token, which
+    # never sits in a cookie a browser would attach on its own.
+    csrf.exempt(api_bp)
+    app.register_blueprint(api_bp)
+
+    @app.after_request
+    def _refresh_html_jwt_cookie(response):
+        # A JWT's expiry is normally fixed at issuance — unlike the old
+        # session cookie (SESSION_REFRESH_EACH_REQUEST, Flask's own
+        # default), it does not extend itself just because a request came
+        # in. Re-issuing a fresh cookie on every authenticated response is
+        # what makes SESSION_LIFETIME_HOURS still mean "N hours since your
+        # *last* request" instead of turning into a hard cutoff from
+        # login time — matching the exact behavior login()'s old
+        # session.permanent = True line documented before this switch to
+        # JWT-based identity (see auth.py's issue_html_jwt_cookie).
+        #
+        # g.skip_jwt_cookie_refresh: set by logout() — current_user is
+        # still "authenticated" for the rest of *this* request (resolved
+        # once at request start, before logout's own cookie-clear ran),
+        # so without this check this hook would re-issue a fresh cookie
+        # right after logout() just cleared it, silently undoing it.
+        if current_user.is_authenticated and not g.get("skip_jwt_cookie_refresh", False):
+            issue_html_jwt_cookie(response, current_user)
+        return response
+
+    from app.firewall import IP_CIDR_PATTERN, IP_PATTERN, KIND_DISPLAY_LABEL
     app.jinja_env.globals["ip_cidr_pattern"] = IP_CIDR_PATTERN
     app.jinja_env.globals["ip_pattern"] = IP_PATTERN
+    app.jinja_env.globals["kind_display_label"] = KIND_DISPLAY_LABEL
 
     with app.app_context():
         _sync_firewall_once(app)

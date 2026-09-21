@@ -14,16 +14,13 @@
    catch up on) but kept for visual consistency across all five tabs; it's
    still a real reload, just one that was never stale.
 
-   System uses range_and_refresh too (its journalctl --since window is
-   genuinely caller-selectable — see resolve_since() in
-   deploy/pivpn-webui-log-helper.sh — and Refresh is a real re-fetch, not
-   fiction, since it re-runs journalctl live rather than reading a cache).
-   It does NOT use search_box, though: its search box (still in the
-   page-header-row up top, same position/width as every other tab's here)
-   is a plain client-side attachLogFilter() pass over an already-rendered
-   raw journalctl text dump (see the System tab block below), not a
-   server-side q param over a DB table — there's no separate DB-backed
-   history to page into for it at all. #}
+   System is now DB-backed too (deploy/ingest_logs.py's system-tail
+   ingestion — see app/vpnlog.py's module docstring for why it moved off
+   a live journalctl fetch), so it uses both macros exactly like Sessions/
+   Client Sessions/Traffic: search_box's q is a real server-side search
+   over system_log_lines, and range_and_refresh's Refresh re-runs
+   ingestion (catching up early instead of waiting for the next tick),
+   not a live journalctl re-fetch. #}
 {% macro search_box(tab_name, label) %}
   <form method="get" action="{{ url_for('main.logs') }}" class="search-form">
     <input type="hidden" name="tab" value="{{ tab_name }}">
@@ -86,29 +83,18 @@
   </div>
 {% endmacro %}
 
-{% set log_search_labels = {'sessions': 'VPN sessions', 'client_sessions': 'client sessions', 'traffic': 'traffic flows', 'activity': 'activity log', 'auth': 'user auth log'} %}
+{% set log_search_labels = {'sessions': 'VPN sessions', 'client_sessions': 'client sessions', 'traffic': 'traffic flows', 'system': 'system log', 'activity': 'activity log', 'auth': 'user auth log'} %}
 <div class="page-header-row">
   <h1>Logs</h1>
   {% if tab in log_search_labels %}
     {{ search_box(tab, log_search_labels[tab]) }}
-  {% elif tab == 'system' %}
-    {# Plain div, not a <form> — this input is a client-side-only filter,
-       not a server search like search_box()'s. Reuses .search-form purely
-       for its flex-basis, so it's sized identically to every other Logs
-       tab's search box; log-filter-input (no filter-input-inline) keeps it
-       icon-less like theirs too — filter-input-inline's icon+fixed-width
-       treatment is for Clients'/Firewall's search boxes, a visibly
-       different style that doesn't belong on this page. #}
-    <div class="search-form">
-      <input type="text" id="system-log-filter" class="log-filter-input" placeholder="Search…" aria-label="Search system journal">
-    </div>
   {% endif %}
 </div>
 
 <div class="tabs" id="logs-tabs">
   <a href="{{ url_for('main.logs', tab='client_sessions') }}" class="{{ 'active' if tab == 'client_sessions' }}" {% if tab == 'client_sessions' %}aria-current="page"{% endif %}>Client Sessions</a>
-  {% if current_user.is_admin %}
   <a href="{{ url_for('main.logs', tab='traffic') }}" class="{{ 'active' if tab == 'traffic' }}" {% if tab == 'traffic' %}aria-current="page"{% endif %}>Traffic Sessions</a>
+  {% if current_user.is_admin %}
   <a href="{{ url_for('main.logs', tab='sessions') }}" class="{{ 'active' if tab == 'sessions' }}" {% if tab == 'sessions' %}aria-current="page"{% endif %}>VPN Sessions</a>
   <a href="{{ url_for('main.logs', tab='system') }}" class="{{ 'active' if tab == 'system' }}" {% if tab == 'system' %}aria-current="page"{% endif %}>System</a>
   <a href="{{ url_for('main.logs', tab='activity') }}" class="{{ 'active' if tab == 'activity' }}" {% if tab == 'activity' %}aria-current="page"{% endif %}>Activity</a>
@@ -250,14 +236,32 @@
 
 {% if tab == 'system' %}
 <section class="card">
-  <p class="hint">journalctl (whole system), most recent first (last 7 days).</p>
+  <p class="hint">journalctl (whole system) — every process, not just VPN-related ones. Most recent first, searchable and paginated below; new lines can take up to ~10 seconds to appear (ingested periodically in the background, not fetched live on page load) — or use Refresh for less than that.</p>
   {{ range_and_refresh('system') }}
-  {% if not system_log %}
-    <p class="empty">No log lines found (or the log helper isn't installed/configured yet).</p>
-  {% else %}
-  <div class="log-pre" id="system-log-pre">{% for line in system_log %}<div class="log-line">{{ line }}</div>{% endfor %}</div>
-  <script>attachLogFilter('system-log-filter', '#system-log-pre', '.log-line');</script>
-  {% endif %}
+  <div class="table-scroll">
+  <table id="system-log-table">
+    <thead>
+      <tr>
+        <th scope="col">Time</th>
+        <th scope="col">Process</th>
+        <th scope="col">Message</th>
+      </tr>
+    </thead>
+    <tbody id="system-log-tbody">
+      {% if not system_log %}
+      <tr><td colspan="3" class="empty">{{ 'No log lines match that search.' if q else 'No log lines found yet.' }}</td></tr>
+      {% endif %}
+      {% for e in system_log %}
+      <tr>
+        <td>{{ e.ts }}</td>
+        <td>{{ e.process or '—' }}</td>
+        <td>{{ e.message }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {{ pagination_nav('system') }}
 </section>
 {% endif %}
 

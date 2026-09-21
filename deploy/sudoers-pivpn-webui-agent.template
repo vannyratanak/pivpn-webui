@@ -1,0 +1,25 @@
+# Installed to /etc/sudoers.d/pivpn-webui-agent on an AGENT box (with
+# __USER__ substituted) — everything agent.py itself needs to run
+# run_root()/_run_pivpn() calls relayed from the hub, and nothing else.
+#
+# Deliberately narrower than sudoers-pivpn-webui.template (the standalone/
+# hub template): this box never runs the Flask app or the CD-deploy forced
+# command, so it doesn't need the `systemctl restart pivpn-webui` or the
+# `install ... /usr/local/sbin/...` grants that template also carries —
+# both are specific to that other service existing on this box, which it
+# doesn't on an agent-only install.
+__USER__ ALL=(root) NOPASSWD: /usr/local/sbin/pivpn-webui-ccd-helper.sh
+__USER__ ALL=(root) NOPASSWD: /usr/local/sbin/pivpn-webui-log-helper.sh
+__USER__ ALL=(root) NOPASSWD: /usr/local/sbin/pivpn-webui-routes-helper.sh
+__USER__ ALL=(root) NOPASSWD: /usr/local/sbin/pivpn-webui-client-script-helper.sh
+__USER__ ALL=(root) NOPASSWD: /usr/sbin/iptables
+__USER__ ALL=(root) NOPASSWD: /usr/sbin/iptables-save
+__USER__ ALL=(root) NOPASSWD: /usr/sbin/netfilter-persistent
+# persisted_rule_ids() reads the saved-rules snapshot back via this, as
+# root, since the file is root:root 640 — see the standalone template's
+# own comment on this exact line for the full reasoning.
+__USER__ ALL=(root) NOPASSWD: /bin/cat /etc/iptables/rules.v4
+# pivpn itself internally runs each real subcommand as `sudo /opt/pivpn/...`
+# — see the standalone template's own comment on this exact line for the
+# full reasoning (same on an agent box as anywhere else this app runs).
+__USER__ ALL=(root) NOPASSWD: /opt/pivpn/*.sh, /opt/pivpn/openvpn/*.sh, /opt/pivpn/wireguard/*.sh

@@ -353,12 +353,7 @@
   <dialog id="import-rules-dialog" class="modal" onclick="closeDialogIfClickedOutside(event, this)">
     <button type="button" class="modal-close-btn" onclick="document.getElementById('import-rules-dialog').close()" aria-label="Close">&times;</button>
     <h2>Import rules from file</h2>
-    <p class="hint">Upload a plain text file to add several firewall rules at once — one rule per line.</p>
-    <ul class="hint import-help-list">
-      <li>Each line looks like <code>kind key=value key=value ...</code> — start with the rule's kind (see the table below), then its fields as <code>key=value</code> pairs.</li>
-      <li>Blank lines, and lines starting with <code>#</code>, are skipped — use <code>#</code> to leave yourself notes.</li>
-      <li>If a value has spaces in it, wrap it in quotes, e.g. <code>comment="block guest wifi"</code>.</li>
-    </ul>
+    <p class="hint">Upload a plain text file to add several rules at once — one rule per line: <code>kind key=value key=value ...</code> (see table below). Blank lines and <code>#</code> comments are skipped; quote values with spaces, e.g. <code>comment="block guest wifi"</code>.</p>
 
     <table class="import-example-table">
       <thead>
@@ -387,13 +382,12 @@
         </tr>
       </tbody>
     </table>
-    <p class="hint">* means that field is required. Any other field can be left blank, same as on the "Add ___ rule" forms above.</p>
+    <p class="hint">* required. Other fields can be left blank, same as the "Add ___ rule" forms above.</p>
 
-    <p class="hint"><strong>A few shortcuts that also work:</strong></p>
     <ul class="hint import-help-list">
-      <li><strong>Reusable values.</strong> A line with just <code>NAME=value</code> (no rule kind) defines a variable you can reuse below. E.g. put <code>CLIENT_IP=10.202.226.21</code> at the top of the file, then use <code>src=$CLIENT_IP</code> in any rule line after it.</li>
-      <li><strong>Client names instead of IPs.</strong> For <code>src</code>/<code>dst</code>, you can type a VPN client's name instead of its IP — e.g. <code>src=nurak</code> automatically resolves to that client's current VPN IP.</li>
-      <li><strong>Paste from an existing script.</strong> Lines can also be raw <code>iptables -A FORWARD ...</code> / <code>-A INPUT ...</code> commands instead of <code>kind key=value</code> syntax — an existing shell script's rule lines can be uploaded almost as-is (variables and client names above still work on these too). Any other kind of line, like a "clean up old rules" pipeline, is silently skipped rather than treated as an error — this app's own rule sync already replaces the need for that cleanup step.</li>
+      <li><strong>Variables:</strong> a line with just <code>NAME=value</code> defines one to reuse as <code>$NAME</code> below, e.g. <code>CLIENT_IP=10.202.226.21</code> then <code>src=$CLIENT_IP</code>.</li>
+      <li><strong>Client names:</strong> use a client's name for <code>src</code>/<code>dst</code> instead of its IP, e.g. <code>src=nurak</code>.</li>
+      <li><strong>Raw iptables lines</strong> work too — paste <code>-A FORWARD ...</code> / <code>-A INPUT ...</code> straight from a script; anything else is skipped.</li>
     </ul>
 
     <form method="post" action="{{ url_for('main.import_rules') }}" enctype="multipart/form-data" class="inline-form">
@@ -429,14 +423,24 @@
       <tr class="empty-row"><td colspan="10" class="empty">No rules yet.</td></tr>
       {% endif %}
       <tr id="rules-empty-client" class="empty-row" style="display:none"><td colspan="10" class="empty">No rules scoped to this client yet.</td></tr>
+      {% set ns = namespace(prev_label=None) %}
       {% for r in rules %}
-      <tr class="{{ '' if r.enabled else 'disabled-row' }}"
+      {% set label = kind_display_label.get(r.kind, r.kind) %}
+      {% if label != ns.prev_label %}
+      <tr class="kind-divider-row"><td colspan="10">{{ label }}</td></tr>
+      {% set ns.prev_label = label %}
+      {% endif %}
+      <tr class="{{ '' if r.enabled else 'disabled-row' }} {{ 'missing-live-row' if r.missing_live else '' }}"
           {% if r.kind != 'client_block' %}draggable="true" data-rule-id="{{ r.id }}"{% endif %}>
         <td><input type="checkbox" class="rule-select-checkbox" data-rule-id="{{ r.id }}" aria-label="Select rule {{ r.id }}"></td>
         <td>{{ r.client_name or '' }}</td>
         <td>{{ r.kind }}</td>
         <td>{{ r.action }}</td>
-        <td>{{ r.detail }}</td>
+        <td>{{ r.detail }}
+          {% if r.missing_live %}
+          <br><span class="missing-live-badge" title="Rule #{{ r.id }} — tracked here, but not found in the live firewall (likely removed directly via iptables). Delete to stop tracking it, or Apply Rules to re-add it live.">⚠ #{{ r.id }} — not found live</span>
+          {% endif %}
+        </td>
         <td>{{ r.comment or '' }}</td>
         <td>{{ 'CLI' if r.source == 'cli' else 'webui' }}</td>
         <td><span class="{{ 'saved-yes' if r.persisted else 'saved-no' }}">{{ 'Saved' if r.persisted else 'Unsaved' }}</span></td>
@@ -469,9 +473,9 @@
   <div class="pagination" id="rules-pagination">
     <label class="pagination-size">Show
       <select id="rules-page-size">
-        <option value="10" selected>10</option>
+        <option value="10">10</option>
         <option value="25">25</option>
-        <option value="50">50</option>
+        <option value="50" selected>50</option>
         <option value="100">100</option>
       </select>
     </label>
@@ -495,17 +499,53 @@
       // independent of the search box (see select-filter.js) — so this
       // reflects "does this client have any rules at all," not "does
       // anything survive the search box too."
-      const clientHasRules = Array.from(document.querySelectorAll('#rules-tbody tr:not(.empty-row)'))
+      const clientHasRules = Array.from(document.querySelectorAll('#rules-tbody tr:not(.empty-row):not(.kind-divider-row)'))
         .some((row) => row.dataset.selectMatch !== '0');
       rulesEmptyClientRow.style.display = (clientSelected && !clientHasRules) ? '' : 'none';
     }
 
-    const rulesPager = attachPagination('#rules-tbody', 'tr:not(.empty-row)', 'rules-page-size', 'rules-pagination');
-    const rulesClientFilter = attachSelectFilter('rules-client-filter', '#rules-tbody', 'tr:not(.empty-row)', () => {
+    // Divider rows aren't real rules — excluded from every one of these
+    // (pagination count, both filters, drag-reorder) the same way
+    // .empty-row already is, so they never eat into "Show 10" or get
+    // treated as a search/filter match or a drag target. They're a pure
+    // grouping label (see firewall.KIND_DISPLAY_ORDER's own comment); a
+    // divider's own visibility is handled separately below
+    // (updateDividerVisibility), since pagination.js only ever manages
+    // style.display for rows matching itemSelector, and dividers
+    // deliberately aren't one of those.
+    const rulesRowSelector = 'tr:not(.empty-row):not(.kind-divider-row)';
+
+    // Shows a kind-divider only when at least one row in the group it
+    // labels is currently visible (post search/filter/page slicing) —
+    // without this, a divider can show with zero visible rows under it
+    // (its whole group landed on a different page, or got filtered out
+    // entirely), or a page can start mid-group with the divider itself
+    // left behind on the previous page. Re-run after anything that
+    // changes which rows are visible: paging, either filter, or page size.
+    function updateDividerVisibility() {
+      let currentDivider = null;
+      let groupHasVisibleRow = false;
+      function closeGroup() {
+        if (currentDivider) currentDivider.style.display = groupHasVisibleRow ? '' : 'none';
+      }
+      Array.from(document.querySelectorAll('#rules-tbody > tr')).forEach((row) => {
+        if (row.classList.contains('kind-divider-row')) {
+          closeGroup();
+          currentDivider = row;
+          groupHasVisibleRow = false;
+        } else if (!row.classList.contains('empty-row') && row.style.display !== 'none') {
+          groupHasVisibleRow = true;
+        }
+      });
+      closeGroup();
+    }
+
+    const rulesPager = attachPagination('#rules-tbody', rulesRowSelector, 'rules-page-size', 'rules-pagination', updateDividerVisibility);
+    const rulesClientFilter = attachSelectFilter('rules-client-filter', '#rules-tbody', rulesRowSelector, () => {
       rulesPager && rulesPager.refresh();
       updateEmptyClientMessage();
     });
-    attachLogFilter('rules-filter', '#rules-tbody', 'tr:not(.empty-row)', '#rules-table thead th:not(:first-child):not(:last-child)', () => {
+    attachLogFilter('rules-filter', '#rules-tbody', rulesRowSelector, '#rules-table thead th:not(:first-child):not(:last-child)', () => {
       rulesClientFilter && rulesClientFilter.refresh();
       rulesPager && rulesPager.refresh();
       updateEmptyClientMessage();

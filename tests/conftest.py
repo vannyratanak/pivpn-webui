@@ -14,8 +14,22 @@ TEST_PASSWORD = "testpass123"
 # from clearing data, not a fresh file path.
 _ALL_TABLES = (
     "firewall_rules", "audit_log", "login_failures", "users",
-    "ip_org_cache", "vpn_events", "traffic_flows",
+    "ip_org_cache", "vpn_events", "traffic_flows", "servers",
+    "system_log_lines",
 )
+
+
+@pytest.fixture(autouse=True)
+def _force_local_execution(monkeypatch):
+    """Every test exercises the local-execution path — forced off here,
+    unconditionally, for every single test (not just ones using the
+    client/temp_db fixtures below) regardless of what a developer's own
+    .env happens to have set (e.g. mid hub/agent manual testing, which is
+    exactly how this was caught: HUB_MODE=true leaking from a real .env
+    silently made every pivpn_ctl test that doesn't touch the DB at all —
+    plain _run_pivpn-mocking unit tests — route through a nonexistent
+    hub_gateway.py instead of the mock)."""
+    monkeypatch.setattr(config, "HUB_MODE", False)
 
 
 def _configure_test_db(monkeypatch):

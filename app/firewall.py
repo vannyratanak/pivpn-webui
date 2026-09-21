@@ -15,7 +15,7 @@ import subprocess
 from pathlib import Path
 
 import config
-from app import db
+from app import db, hub_client
 from app.privileged import PrivilegedCommandError, run_root
 
 _REBUILD_CHAIN_LOCK_PATH = Path(config.DB_PATH).parent / ".rebuild-chain.lock"
@@ -82,6 +82,38 @@ _CHAIN_FOR_KIND = {
 
 _OWNED_TAG_RE = re.compile(r"^pivpn-webui:(\d+)$")
 
+# Display grouping for the Active Rules table — roughly the order traffic
+# actually meets these chains (FORWARD, then INPUT, then the NAT table),
+# not the raw per-chain `position` value each rule happens to carry. That
+# raw value only has meaning *within* one chain (it's what actually
+# controls live iptables order, via _rebuild_chain) — using it directly
+# to sort the *combined* table falls apart the moment more than one
+# chain's rules get bulk-discovered in the same pass (see
+# discover_cli_rules): each chain's positions restart independently
+# (0, 1, 2, ...), so forward/input/nat rows land on the same numbers and
+# interleave in the combined list instead of grouping, even though each
+# chain's own relative order is still correct. Regrouping for display
+# only (via a stable sort — see routes.py's firewall_rules()) doesn't
+# touch anything's actual position/live order, just how the one combined
+# table presents them.
+KIND_DISPLAY_ORDER = {
+    "forward": 0,
+    "input": 1,
+    "masquerade": 2,
+    "snat": 3,
+    "portforward": 4,
+    "client_block": 5,
+}
+
+KIND_DISPLAY_LABEL = {
+    "forward": "FORWARD — traffic passing through this server",
+    "input": "INPUT — traffic to this server itself",
+    "masquerade": "NAT — outbound address translation",
+    "snat": "NAT — outbound address translation",
+    "portforward": "PORT FORWARDS",
+    "client_block": "CLIENT BLOCKS",
+}
+
 
 class FirewallError(RuntimeError):
     pass
@@ -92,8 +124,8 @@ def _valid_port(p):
         return None
     try:
         n = int(p)
-    except (TypeError, ValueError):
-        raise FirewallError(f"Invalid port: {p!r}")
+    except (TypeError, ValueError) as exc:
+        raise FirewallError(f"Invalid port: {p!r}") from exc
     if not (1 <= n <= 65535):
         raise FirewallError(f"Port out of range: {p!r}")
     return str(n)
@@ -104,8 +136,8 @@ def _valid_addr(a):
         return None
     try:
         ipaddress.ip_network(a, strict=False)
-    except ValueError:
-        raise FirewallError(f"Invalid IP/CIDR: {a!r}")
+    except ValueError as exc:
+        raise FirewallError(f"Invalid IP/CIDR: {a!r}") from exc
     return a
 
 
@@ -114,8 +146,8 @@ def _valid_ip(a):
     exact IP (or a-b range) to rewrite into, not a network."""
     try:
         ipaddress.ip_address(a)
-    except ValueError:
-        raise FirewallError(f"Invalid IP address: {a!r}")
+    except ValueError as exc:
+        raise FirewallError(f"Invalid IP address: {a!r}") from exc
     return a
 
 
@@ -409,8 +441,20 @@ def _check_self_lockout(client_ip: str | None, simulated_input_rules: list[dict]
     block client_ip's own access to the web UI. client_ip is None when
     there's no real request to protect (discover_cli_rules, sync_all,
     tests) — skip the check entirely in that case, there's nothing to
-    guard."""
-    if client_ip is None:
+    guard.
+
+    Also a no-op in HUB_MODE, regardless of client_ip: that value is the
+    admin's IP as seen by *this* (hub) process handling the HTTP request,
+    but the INPUT rules being changed here apply to the *agent's* box —
+    a completely different machine. Editing them can never cut off access
+    to the web UI itself (this page is served by the hub, not the agent),
+    which is the one specific thing this guard exists to prevent — so
+    checking client_ip against the agent's rules here isn't just checking
+    the wrong identity, it's checking a scenario that can't happen. (This
+    guard was always narrowly about port-443/the web UI specifically, not
+    general box access like SSH — see _input_rule_matches' own port-443
+    check — so this doesn't leave a broader gap than existed before.)"""
+    if client_ip is None or config.HUB_MODE:
         return
     if not _would_allow_client(simulated_input_rules, client_ip):
         raise FirewallError(
@@ -513,8 +557,14 @@ def _check_client_block_self_lockout(admin_ip: str | None, blocked_client_ip: st
     — so there's nothing to simulate: if it's the same address, blocking
     it will unconditionally cut off this request, full stop. admin_ip is
     None when there's no real request to protect (tests, or an internal
-    caller) — skip the check in that case."""
-    if admin_ip is None:
+    caller) — skip the check in that case.
+
+    Also a no-op in HUB_MODE — same reasoning as _check_self_lockout's own
+    HUB_MODE guard: admin_ip is the admin's IP as seen by the hub serving
+    this page, blocked_client_ip is a VPN IP on the agent's network, and
+    blocking it can't cut off access to a page the agent isn't even
+    serving."""
+    if admin_ip is None or config.HUB_MODE:
         return
     if admin_ip == blocked_client_ip:
         raise FirewallError(
@@ -910,20 +960,26 @@ def import_rules(
             continue
         if tokens[0].lower() not in _IMPORT_ADDERS:
             name, eq, value = tokens[0].partition("=")
-            if len(tokens) == 1 and eq and name.isidentifier():
-                variables[name] = value
-                continue
             # Clients page's own import format is "name=foo passphrase=bar"
-            # per line — an easy file to upload here by mistake, since both
-            # pages phrase their dialog the same way ("Import ... from
-            # file"). Caught, not just a generic unknown-kind error, so the
-            # fix is obvious instead of cryptic.
+            # per line, and passphrase is optional there — a lone
+            # "name=foo" is a complete, valid client-import line, which
+            # would otherwise satisfy the variable-definition check right
+            # below (single token, has '=', 'name' is a valid identifier)
+            # and get silently swallowed as a $name variable no one ever
+            # references, defeating this catch entirely for exactly the
+            # single-field files most likely to get uploaded here by
+            # mistake, since both pages phrase their dialog the same way
+            # ("Import ... from file"). Checked first, unconditionally, so
+            # the fix is obvious instead of a silent no-op.
             if name.lower() == "name" and eq:
                 errors.append(
                     f"line {i}: {tokens[0]!r} looks like a client import line, "
                     "not a firewall rule — this file probably belongs on the "
                     "Clients page's Import Client dialog instead."
                 )
+                continue
+            if len(tokens) == 1 and eq and name.isidentifier():
+                variables[name] = value
                 continue
             errors.append(
                 f"line {i}: Unknown rule kind {tokens[0]!r} "
@@ -1061,7 +1117,12 @@ def toggle_rule(rule_id: int, client_ip: str | None = None):
         else:
             _apply(rule)  # e.g. client_block — outside the position-ordering system, see _CHAIN_FOR_KIND
     else:
-        _unapply(rule)
+        # Same PrivilegedCommandError-swallowing as disable_rule/delete_rule's
+        # own _unapply, for the same reason — see disable_rule's docstring.
+        try:
+            _unapply(rule)
+        except PrivilegedCommandError:
+            pass
 
 
 def disable_rule(rule_id: int, client_ip: str | None = None):
@@ -1069,7 +1130,16 @@ def disable_rule(rule_id: int, client_ip: str | None = None):
     selected rules may already be disabled and a toggle would wrongly
     re-enable them.
 
-    Same locked-transaction treatment as toggle_rule, for the same race."""
+    Same locked-transaction treatment as toggle_rule, for the same race.
+
+    Same PrivilegedCommandError-swallowing as delete_rule's own _unapply,
+    for the same reason: the DB row (already committed disabled above) is
+    the source of truth going forward, and a rule that wasn't actually
+    live to begin with is a normal, not-exceptional case here. Without
+    this, a single already-not-live rule in a bulk-disable batch used to
+    raise PrivilegedCommandError straight through _bulk_disable_or_delete's
+    narrower `except firewall.FirewallError`, aborting the whole batch —
+    every rule after it in the list silently never got touched."""
     with db.locked_transaction() as conn:
         row = conn.execute("SELECT * FROM firewall_rules WHERE id=%s", (rule_id,)).fetchone()
         if not row or not row["enabled"]:
@@ -1078,7 +1148,10 @@ def disable_rule(rule_id: int, client_ip: str | None = None):
         if rule["kind"] == "input":
             _check_self_lockout(client_ip, _other_enabled_input_rules(conn, rule_id))
         conn.execute("UPDATE firewall_rules SET enabled=0 WHERE id=%s", (rule_id,))
-    _unapply(rule)
+    try:
+        _unapply(rule)
+    except PrivilegedCommandError:
+        pass
 
 
 def delete_rule(rule_id: int, client_ip: str | None = None):
@@ -1271,7 +1344,22 @@ def _server_ip() -> str:
     """This box's own address on its default-route interface — a plain
     unprivileged routing-table lookup (no packet sent), not a guess. Cached
     for the life of the process: it can only change via a network config
-    change, which needs a service restart to take effect here anyway."""
+    change, which needs a service restart to take effect here anyway (true
+    whether resolved locally or, in HUB_MODE, on the agent's box).
+
+    Found live via the exact symptom this bug class keeps producing: a
+    masquerade rule's Details column showing the *interface name* itself
+    ("→ ens18") instead of a resolved IP — this function's HUB_MODE-less
+    twin, _iface_ip, hitting the same "ip command not found on the hub's
+    own machine" failure and silently falling back. This one's own
+    fallback ("this server") looks plausible enough on its own to have
+    gone unnoticed the same way, for every INPUT rule shown this session."""
+    if config.HUB_MODE:
+        return _server_ip_remote()
+    return _server_ip_local()
+
+
+def _server_ip_local() -> str:
     try:
         out = subprocess.run(
             ["ip", "-4", "route", "get", "1.1.1.1"],
@@ -1283,6 +1371,16 @@ def _server_ip() -> str:
         return "this server"
 
 
+def _server_ip_remote() -> str:
+    try:
+        response = hub_client.call(config.DEFAULT_SERVER_ID, "server_ip", timeout=5)
+    except hub_client.HubClientError:
+        return "this server"
+    if not response.get("ok"):
+        return "this server"
+    return response.get("result") or "this server"
+
+
 def list_interfaces() -> list[str]:
     """Real network interfaces on this box, for the SNAT rule form's
     Outgoing interface dropdown — loopback excluded (never a meaningful
@@ -1290,7 +1388,20 @@ def list_interfaces() -> list[str]:
     VPN interfaces alike), since this app doesn't get to assume which one
     an admin's topology needs. Not cached like _server_ip/_iface_ip: unlike
     those, this reads the interface *list itself*, which the whole reason
-    someone plugs in a NIC or brings up a new tunnel is to change."""
+    someone plugs in a NIC or brings up a new tunnel is to change.
+
+    In HUB_MODE this box's own interfaces are irrelevant — the dropdown
+    needs the *agent's* box's interfaces (see agent.py's own copy of this
+    same subprocess call). This is a plain unprivileged read (no sudo),
+    so it goes straight to the agent as its own "list_interfaces" action
+    rather than through run_root — there's nothing here for a sudoers
+    grant to scope."""
+    if config.HUB_MODE:
+        return _list_interfaces_remote()
+    return _list_interfaces_local()
+
+
+def _list_interfaces_local() -> list[str]:
     try:
         out = subprocess.run(
             ["ip", "-o", "link", "show"],
@@ -1302,11 +1413,29 @@ def list_interfaces() -> list[str]:
         return []
 
 
+def _list_interfaces_remote() -> list[str]:
+    try:
+        response = hub_client.call(config.DEFAULT_SERVER_ID, "list_interfaces", timeout=5)
+    except hub_client.HubClientError:
+        return []
+    if not response.get("ok"):
+        return []
+    return response.get("result") or []
+
+
 @functools.lru_cache(maxsize=None)
 def _iface_ip(iface: str) -> str:
     """Current IPv4 address of a network interface, e.g. what MASQUERADE on
     that interface actually rewrites source addresses to. Same caching
-    rationale as _server_ip()."""
+    rationale as _server_ip() — see its own docstring for how this pair's
+    HUB_MODE gap was actually found (a masquerade rule's Details text
+    showing the raw interface name instead of a resolved IP)."""
+    if config.HUB_MODE:
+        return _iface_ip_remote(iface)
+    return _iface_ip_local(iface)
+
+
+def _iface_ip_local(iface: str) -> str:
     try:
         out = subprocess.run(
             ["ip", "-4", "-o", "addr", "show", "dev", iface],
@@ -1316,6 +1445,29 @@ def _iface_ip(iface: str) -> str:
         return m.group(1) if m else iface
     except (OSError, subprocess.SubprocessError):
         return iface
+
+
+def _iface_ip_remote(iface: str) -> str:
+    try:
+        response = hub_client.call(config.DEFAULT_SERVER_ID, "iface_ip", iface=iface, timeout=5)
+    except hub_client.HubClientError:
+        return iface
+    if not response.get("ok"):
+        return iface
+    return response.get("result") or iface
+
+
+def _strip_host_suffix(addr: str | None) -> str | None:
+    """iptables normalizes a single-host address to '<ip>/32' in its own
+    -S output (see discover_cli_rules/_parse_rule_spec) — client_names
+    (pivpn_ctl.list_client_ips(), bare IPs with no suffix at all) would
+    otherwise never match a discovered rule's src/dst/target_ip, even
+    though '10.202.226.2/32' and '10.202.226.2' mean the exact same
+    address. Left untouched for any other prefix (a real subnet like
+    /24 isn't one client's single address to match against)."""
+    if addr and addr.endswith("/32"):
+        return addr[:-3]
+    return addr
 
 
 def rule_client_name(rule: dict, client_names: dict[str, str] | None = None) -> str:
@@ -1330,9 +1482,9 @@ def rule_client_name(rule: dict, client_names: dict[str, str] | None = None) -> 
         return rule.get("client_name") or ""
     client_names = client_names or {}
     if rule["kind"] == "portforward":
-        return client_names.get(rule.get("target_ip"), "")
+        return client_names.get(_strip_host_suffix(rule.get("target_ip")), "")
     for key in ("src", "dst"):
-        name = client_names.get(rule.get(key))
+        name = client_names.get(_strip_host_suffix(rule.get(key)))
         if name:
             return name
     return ""
@@ -1473,7 +1625,7 @@ def _positions_for_new_specs(anchor_info: list[tuple[bool, float | None]]) -> li
     return result
 
 
-def discover_cli_rules() -> int:
+def discover_cli_rules() -> tuple[int, list[dict]]:
     """Find rules that exist live in iptables but aren't in our DB (i.e.
     someone ran iptables directly instead of using this app, or a previous
     database was wiped/replaced — e.g. a fresh redeploy — while these rules
@@ -1491,6 +1643,26 @@ def discover_cli_rules() -> int:
     as already ours — checking either against known_ids would never match
     and would re-adopt the same rule as a duplicate on every single page
     load.
+
+    Also detects (never auto-corrects — see the second element of the
+    return value) the reverse case: a DB-tracked, enabled, non-client_block
+    rule whose chain(s) were all successfully scanned this call but whose
+    own pivpn-webui:<id> tag wasn't found anywhere live — most likely
+    removed directly via iptables rather than through this app, which
+    normally keeps the two in sync via delete_rule/toggle_rule's own
+    _unapply calls. A chain that failed to scan (PrivilegedCommandError)
+    is excluded from this check entirely for any rule that depends on it,
+    rather than treating "couldn't check" the same as "confirmed absent"
+    — misreading the first as the second could flag every tracked rule in
+    that chain after one transient failure (or a box that just rebooted
+    and hasn't finished coming up), not just genuinely-removed ones.
+    Deliberately not auto-deleted from the DB even when detected: unlike
+    adopting a new CLI rule (purely additive, safe to do unattended), this
+    branch is a *delete* against data that might be right and the check
+    that's wrong — routes.py surfaces it as a warning instead, and the
+    existing Delete button (already tolerant of the live side being gone
+    — see its own _unapply try/except) is what actually removes the row,
+    once a human's confirmed it.
 
     Adopting a rule doesn't re-add it immediately — its DB row gets a
     `position` interpolated from where it actually sits among the chain's
@@ -1522,17 +1694,22 @@ def discover_cli_rules() -> int:
         known_ids = {str(r["id"]) for r in all_rules}
         positions_by_id = {str(r["id"]): r["position"] for r in all_rules}
         touched_chains: set[tuple[str, str | None]] = set()
+        seen_ids: set[str] = set()
+        scanned_chains: set[tuple[str, str | None]] = set()
 
         for chain, table, kind in _DISCOVERY_TARGETS:
             try:
                 specs = _list_chain_specs(chain, table)
             except PrivilegedCommandError:
                 continue
+            scanned_chains.add((chain, table))
 
             parsed_list = [_parse_rule_spec(tokens) for tokens in specs]
             anchor_info = []
             for parsed in parsed_list:
                 m = _OWNED_TAG_RE.match(parsed.get("comment", ""))
+                if m:
+                    seen_ids.add(m.group(1))
                 if m and m.group(1) in known_ids:
                     anchor_info.append((True, positions_by_id[m.group(1)]))
                 else:
@@ -1568,4 +1745,11 @@ def discover_cli_rules() -> int:
 
         for chain, table in touched_chains:
             _rebuild_chain_unlocked(chain, table)
-        return imported
+
+        missing = [
+            r for r in all_rules
+            if r["enabled"] and r["kind"] != "client_block"
+            and str(r["id"]) not in seen_ids
+            and _chains_for(r) and all(c in scanned_chains for c in _chains_for(r))
+        ]
+        return imported, missing

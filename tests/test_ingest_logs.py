@@ -166,14 +166,54 @@ def test_ingest_traffic_flows_looks_up_org_once_per_unique_destination(temp_db, 
     assert len(calls) == 1  # one bulk call for the whole batch, not per row
 
 
-def test_main_ingests_both_and_prunes(temp_db, monkeypatch):
+def test_ingest_system_log_stores_ts_process_and_message(temp_db, monkeypatch):
+    monkeypatch.setattr(ingest_logs, "run_root", lambda argv, timeout=None: CONNECT_LINE)
+
+    count = ingest_logs.ingest_system_log()
+
+    assert count == 1
+    rows, total = db.list_system_log_page()
+    assert total == 1
+    assert rows[0]["ts"] == "2026-08-21 13:20:11"
+    assert rows[0]["process"] == "ovpn-server"
+    assert rows[0]["message"] == "[macbook-phanne] Peer Connection Initiated with [AF_INET]10.66.66.1:2642"
+
+
+def test_ingest_system_log_reprocessing_same_line_is_a_noop(temp_db, monkeypatch):
+    # Same reprocessing-safety reasoning as vpn_events — journalctl
+    # --cursor-file (system-tail) can re-emit the last-seen line.
+    monkeypatch.setattr(ingest_logs, "run_root", lambda argv, timeout=None: CONNECT_LINE)
+
+    ingest_logs.ingest_system_log()
+    ingest_logs.ingest_system_log()
+
+    _, total = db.list_system_log_page()
+    assert total == 1
+
+
+def test_ingest_system_log_multiple_lines_different_processes(temp_db, monkeypatch):
+    monkeypatch.setattr(
+        ingest_logs, "run_root",
+        lambda argv, timeout=None: "\n".join([CONNECT_LINE, OTHER_LINE]),
+    )
+
+    count = ingest_logs.ingest_system_log()
+
+    assert count == 2
+    rows, total = db.list_system_log_page()
+    assert total == 2
+    assert {r["process"] for r in rows} == {"ovpn-server"}  # both lines are from the same unit here
+
+
+def test_main_ingests_all_three_and_prunes(temp_db, monkeypatch):
     monkeypatch.setattr(pivpn_ctl, "list_client_ips", lambda: {})
     monkeypatch.setattr(pivpn_ctl, "list_connected_clients", lambda: {})
-    calls = {"openvpn": 0, "flow": 0}
+    calls = {"openvpn": 0, "flow": 0, "system": 0}
 
     def fake_run_root(argv, timeout=None):
-        calls["openvpn" if argv[-1] == "openvpn-tail" else "flow"] += 1
-        return CONNECT_LINE if argv[-1] == "openvpn-tail" else TCP_FLOW_LINE
+        action = argv[-1]
+        calls[{"openvpn-tail": "openvpn", "flow-tail": "flow", "system-tail": "system"}[action]] += 1
+        return {"openvpn-tail": CONNECT_LINE, "flow-tail": TCP_FLOW_LINE, "system-tail": OTHER_LINE}[action]
 
     monkeypatch.setattr(ingest_logs, "run_root", fake_run_root)
     monkeypatch.setattr(ingest_logs.iplookup, "get_ip_orgs_bulk", lambda ips: {ip: None for ip in ips})
@@ -183,5 +223,5 @@ def test_main_ingests_both_and_prunes(temp_db, monkeypatch):
 
     ingest_logs.main()
 
-    assert calls == {"openvpn": 1, "flow": 1}
+    assert calls == {"openvpn": 1, "flow": 1, "system": 1}
     assert pruned == [ingest_logs.RETENTION_DAYS]

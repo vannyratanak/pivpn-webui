@@ -6,7 +6,7 @@
 // pausing the timer while the pointer's over one, so a message someone's
 // actually reading doesn't vanish out from under them.
 (function() {
-  const DISMISS_MS = { 'flash-success': 4000, 'flash-error': 6000 };
+  const DISMISS_MS = { 'flash-success': 4000, 'flash-warning': 8000, 'flash-error': 6000 };
   const DEFAULT_MS = 4000;
 
   function dismiss(toast) {

@@ -3,12 +3,12 @@ from datetime import datetime, timedelta
 
 import psycopg2.errors
 
-from flask import Blueprint, abort, flash, jsonify, redirect, render_template, request, send_file, session, url_for
-from flask_login import current_user, login_required, login_user, logout_user
+from flask import Blueprint, Response, abort, flash, g, jsonify, redirect, render_template, request, url_for
+from flask_login import current_user, login_required
 
 import config
 from app import db, firewall, pivpn_ctl, vpn_routes, vpnlog
-from app.auth import admin_required, hash_password, verify_credentials
+from app.auth import admin_required, clear_html_jwt_cookie, hash_password, issue_html_jwt_cookie, verify_credentials
 from app.privileged import PrivilegedCommandError
 
 bp = Blueprint("main", __name__)
@@ -80,17 +80,17 @@ def login():
         password = request.form.get("password", "")
         user = verify_credentials(username, password)
         if user:
-            login_user(user)
-            # A plain Flask session cookie never expires unless marked
-            # permanent — this is what actually activates
-            # PERMANENT_SESSION_LIFETIME (see create_app). Combined with
-            # SESSION_REFRESH_EACH_REQUEST (Flask's own default, on), the
-            # cookie's expiry renews on every request, making this an
-            # idle timeout, not a fixed one from login time.
-            session.permanent = True
             db.clear_login_failures(ip)
             db.add_audit(user.username, "login", detail=f"from {ip}")
-            return redirect(url_for("main.clients"))
+            resp = redirect(url_for("main.clients"))
+            # Identity now lives in a JWT cookie, not Flask's session —
+            # see auth.py's issue_html_jwt_cookie for why, and
+            # __init__.py's after_request hook for how the old "N hours
+            # since your *last* request" idle-timeout behavior is
+            # preserved despite a JWT's expiry normally being fixed at
+            # issuance.
+            issue_html_jwt_cookie(resp, user)
+            return resp
         db.record_login_failure(ip)
         db.add_audit(username or "(blank)", "login", result="error", detail=f"bad credentials from {ip}")
         flash("Invalid username or password.", "error")
@@ -101,8 +101,17 @@ def login():
 @login_required
 def logout():
     _audit("logout")
-    logout_user()
-    return redirect(url_for("main.login"))
+    resp = redirect(url_for("main.login"))
+    clear_html_jwt_cookie(resp)
+    # current_user is still resolved as authenticated for the rest of
+    # *this* request (flask_login loads it once, at request start, from
+    # the cookie that was still valid when the request came in) — without
+    # this flag, __init__.py's after_request sliding-refresh hook would
+    # see that and re-issue a fresh cookie right after the line above
+    # just cleared it, silently undoing the logout. Caught live: curl
+    # could still load /clients immediately after calling /logout.
+    g.skip_jwt_cookie_refresh = True
+    return resp
 
 
 VALID_ROLES = ("admin", "moderator")
@@ -315,25 +324,30 @@ def download_client(name):
         name = pivpn_ctl.validate_name(name)
     except pivpn_ctl.PivpnError:
         abort(404)
-    path = pivpn_ctl.client_ovpn_path(name)
-    if not path.exists():
+    try:
+        data = pivpn_ctl.read_client_ovpn(name)
+    except FileNotFoundError:
         abort(404)
     _audit("client_download", name)
-    return send_file(path, as_attachment=True, download_name=f"{name}.ovpn")
+    return Response(
+        data,
+        mimetype="application/x-openvpn-profile",
+        headers={"Content-Disposition": f'attachment; filename="{name}.ovpn"'},
+    )
 
 
 @bp.route("/clients/<name>")
 @login_required
-@admin_required
 def client_detail(name):
     """One client's own page — status/session at a glance, plus exactly
     the firewall rules that apply to it (reusing firewall.rule_client_name,
     the same IP-based match the main Firewall Rules page already computes
     for its own Client column) and a form to add a new one, instead of
-    hunting through the full flat rules list. Admin-only, same as the
-    Firewall page itself — the whole point of this page beyond the plain
-    Clients list is firewall rule management, which moderators don't get
-    elsewhere either."""
+    hunting through the full flat rules list. Unlike the main Firewall
+    page (still admin-only — system-wide rule management), a moderator
+    gets full rule management here too, scoped to one client — same
+    "client control" territory as the Clients list' own renew/block/
+    remove actions, which are already login_required-only."""
     try:
         name = pivpn_ctl.validate_name(name)
     except pivpn_ctl.PivpnError:
@@ -368,7 +382,6 @@ def client_detail(name):
 
 @bp.route("/clients/<name>/rules/add", methods=["POST"])
 @login_required
-@admin_required
 def client_add_rule(name):
     """The client detail page's own "add a rule for this client" form —
     a separate route from the Firewall page's /firewall/forward
@@ -423,7 +436,6 @@ def client_add_rule(name):
 
 @bp.route("/clients/<name>/rules/<int:rule_id>/toggle", methods=["POST"])
 @login_required
-@admin_required
 def client_toggle_rule(name, rule_id):
     """Same as /firewall/<id>/toggle, kept as its own route (see
     client_add_rule's docstring) purely so its redirect target can differ
@@ -446,7 +458,6 @@ def client_toggle_rule(name, rule_id):
 
 @bp.route("/clients/<name>/rules/<int:rule_id>/delete", methods=["POST"])
 @login_required
-@admin_required
 def client_delete_rule(name, rule_id):
     """Same as /firewall/<id>/delete, kept as its own route (see
     client_add_rule's docstring) purely so its redirect target can differ
@@ -470,7 +481,6 @@ def client_delete_rule(name, rule_id):
 
 @bp.route("/clients/<name>/rules/resync", methods=["POST"])
 @login_required
-@admin_required
 def client_resync_rules(name):
     """Same as /firewall/resync, kept as its own route (see
     client_add_rule's docstring) purely so its redirect target can differ
@@ -491,7 +501,6 @@ def client_resync_rules(name):
 
 @bp.route("/clients/<name>/rules/persist", methods=["POST"])
 @login_required
-@admin_required
 def client_persist_rules(name):
     """Same as /firewall/persist, kept as its own route (see
     client_add_rule's docstring) purely so its redirect target can differ
@@ -512,7 +521,6 @@ def client_persist_rules(name):
 
 @bp.route("/clients/<name>/rules/bulk-disable", methods=["POST"])
 @login_required
-@admin_required
 def client_bulk_disable_rules(name):
     """Same as /firewall/bulk-disable, kept as its own route (see
     client_add_rule's docstring) so the redirect target can differ — also
@@ -529,7 +537,6 @@ def client_bulk_disable_rules(name):
 
 @bp.route("/clients/<name>/rules/bulk-delete", methods=["POST"])
 @login_required
-@admin_required
 def client_bulk_delete_rules(name):
     """Same as /firewall/bulk-delete, kept as its own route (see
     client_add_rule's docstring) so the redirect target can differ — also
@@ -621,10 +628,24 @@ def block_client(name):
 @login_required
 @admin_required
 def firewall_rules():
+    missing_ids: set[int] = set()
     try:
-        imported = firewall.discover_cli_rules()
+        imported, missing = firewall.discover_cli_rules()
         if imported:
             _audit("firewall_discover", f"{imported} rule(s) imported from CLI")
+        if missing:
+            missing_ids = {r["id"] for r in missing}
+            details = "; ".join(f"#{r['id']} ({r['kind']}: {firewall.describe_rule(r)})" for r in missing)
+            flash(
+                f"{len(missing)} tracked rule(s) no longer found live — possibly removed directly "
+                f"via iptables instead of through this app: {details}. If that's correct, use "
+                "Delete on the highlighted row(s) below to remove them from tracking too.",
+                "warning",
+            )
+            _audit(
+                "firewall_discover", f"{len(missing)} rule(s) missing live", "error",
+                ", ".join(f"#{r['id']}" for r in missing),
+            )
     except PrivilegedCommandError as exc:
         _audit("firewall_discover", "", "error", str(exc))
     client_ips = pivpn_ctl.list_client_ips()
@@ -635,7 +656,14 @@ def firewall_rules():
         r["persisted"] = str(r["id"]) in persisted_ids
         r["detail"] = firewall.describe_rule(r)
         r["client_name"] = firewall.rule_client_name(r, ip_to_name)
+        r["missing_live"] = r["id"] in missing_ids
     has_unsaved = any(not r["persisted"] for r in rules)
+    # Display grouping only (list.sort is stable, so each kind's own
+    # relative order — real `position`/id order, what actually controls
+    # live iptables order — is preserved within its group) — see
+    # firewall.KIND_DISPLAY_ORDER's own comment for why the raw combined
+    # order isn't already grouped like this on its own.
+    rules.sort(key=lambda r: firewall.KIND_DISPLAY_ORDER.get(r["kind"], 99))
 
     try:
         valid_clients = [c for c in pivpn_ctl.list_clients() if c["status"].lower() == "valid"]
@@ -970,7 +998,7 @@ AUTH_ACTIONS = ("login", "logout")
 
 
 ALL_LOG_TABS = ("sessions", "client_sessions", "traffic", "system", "activity", "auth")
-MODERATOR_LOG_TABS = ("client_sessions", "auth")
+MODERATOR_LOG_TABS = ("client_sessions", "traffic", "auth")
 
 # Time-range filter for the three DB-backed tabs (Sessions/Client Sessions/
 # Traffic). Ordered for the <select> — 1h first/default, since selecting
@@ -1069,11 +1097,7 @@ def logs():
             traffic_flows = []
             flash(str(exc), "error")
     elif tab == "system":
-        try:
-            system_log = vpnlog.list_system_log(log_range=log_range)
-        except PrivilegedCommandError as exc:
-            system_log = []
-            flash(str(exc), "error")
+        system_log, total = vpnlog.list_system_log(q=q, page=page, page_size=page_size, since=since)
     elif tab == "activity":
         # Unfiltered — every audited action, not just login/logout (see
         # AUTH_ACTIONS below). This is the only place any of that ever
@@ -1117,6 +1141,7 @@ def logs_refresh():
     try:
         ingest_logs.ingest_vpn_events()
         ingest_logs.ingest_traffic_flows()
+        ingest_logs.ingest_system_log()
         db.prune_old_logs(ingest_logs.RETENTION_DAYS)
     except PrivilegedCommandError as exc:
         flash(str(exc), "error")

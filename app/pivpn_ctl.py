@@ -21,6 +21,7 @@ Still worth a sanity check on a different install: PiVPN's scripts have
 drifted across releases/forks before. If something here doesn't match,
 `pivpn -h` and `pivpn add -h` on the box will show the current syntax.
 """
+import base64
 import contextlib
 import fcntl
 import re
@@ -30,6 +31,7 @@ import subprocess
 from pathlib import Path
 
 import config
+from app import hub_client
 from app.privileged import PrivilegedCommandError, run_root
 
 CLIENT_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
@@ -95,11 +97,22 @@ _validate_name = validate_name  # internal alias, kept short at call sites below
 
 
 def _require_pivpn_binary() -> None:
+    """In HUB_MODE, `pivpn` living on PATH is the *agent's* box's problem,
+    not this (hub) process's — checking the hub's own PATH here would
+    reject every add/remove_client call before the request ever reaches
+    the agent. _run_pivpn's local-execution branch (which is what
+    actually runs on the agent) already raises the equivalent PivpnError
+    itself if the binary is genuinely missing there — see its
+    FileNotFoundError handling."""
+    if config.HUB_MODE:
+        return
     if shutil.which("pivpn") is None:
         raise PivpnError("`pivpn` command not found on PATH. Is PiVPN installed?")
 
 
 def _run_pivpn(argv: list[str], timeout: int = 30) -> subprocess.CompletedProcess:
+    if config.HUB_MODE:
+        return _run_pivpn_remote(argv, timeout)
     try:
         return subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
     except FileNotFoundError as exc:
@@ -110,8 +123,51 @@ def _run_pivpn(argv: list[str], timeout: int = 30) -> subprocess.CompletedProces
         raise PivpnError(f"Failed to run `{' '.join(argv)}`: {exc}") from exc
 
 
+def _run_pivpn_remote(argv: list[str], timeout: int) -> subprocess.CompletedProcess:
+    """Same contract as the local branch above (a CompletedProcess, even
+    for a nonzero `pivpn` exit — only an infrastructure-level failure
+    raises PivpnError), but the subprocess actually runs on agent.py, on
+    config.DEFAULT_SERVER_ID's box."""
+    try:
+        response = hub_client.call(config.DEFAULT_SERVER_ID, "run_pivpn", argv=argv, timeout=timeout)
+    except hub_client.HubClientError as exc:
+        raise PivpnError(str(exc)) from exc
+    if not response.get("ok"):
+        raise PivpnError(response.get("error") or "remote pivpn call failed")
+    return subprocess.CompletedProcess(
+        argv, response.get("returncode", 1), response.get("stdout", ""), response.get("stderr", "")
+    )
+
+
 def client_ovpn_path(name: str) -> Path:
     return Path(config.OVPN_DIR).expanduser() / f"{name}.ovpn"
+
+
+def read_client_ovpn(name: str) -> bytes:
+    """The .ovpn file's raw bytes, for routes.py's download route.
+    Raises FileNotFoundError (never PivpnError) specifically when the
+    file just doesn't exist — routes.py maps that to a 404, same as its
+    old direct path.exists() check did."""
+    if config.HUB_MODE:
+        return _read_client_ovpn_remote(name)
+    path = client_ovpn_path(name)
+    if not path.exists():
+        raise FileNotFoundError(str(path))
+    return path.read_bytes()
+
+
+def _read_client_ovpn_remote(name: str) -> bytes:
+    """Sends just `name`, not a path — agent.py resolves its own
+    client_ovpn_path(name) against its own config.OVPN_DIR and calls this
+    same function locally (see agent.py's dispatch table), rather than
+    trusting an absolute path handed to it over the wire."""
+    try:
+        response = hub_client.call(config.DEFAULT_SERVER_ID, "read_client_ovpn", name=name)
+    except hub_client.HubClientError as exc:
+        raise PivpnError(str(exc)) from exc
+    if not response.get("ok"):
+        raise FileNotFoundError(response.get("error") or name)
+    return base64.b64decode(response["result"])
 
 
 def list_clients() -> list[dict]:
@@ -151,11 +207,27 @@ def list_clients() -> list[dict]:
     return rows[1:]
 
 
-def add_client(name: str, passphrase: str | None = None) -> Path:
+def _client_ovpn_exists(name: str) -> bool:
+    """Works unmodified in both modes — read_client_ovpn already knows
+    whether to check this box's own disk or ask the agent."""
+    try:
+        read_client_ovpn(name)
+        return True
+    except FileNotFoundError:
+        return False
+
+
+def add_client(name: str, passphrase: str | None = None) -> Path | None:
+    """Returns the new .ovpn's local path — except in HUB_MODE, where the
+    file lives on the agent's disk, not this (hub) machine's, so
+    client_ovpn_path(name) would just be a path to nothing here; callers
+    that actually need the bytes must go through read_client_ovpn(name)
+    instead, which already knows to ask the agent. Returns None in that
+    case rather than a Path that merely looks valid."""
     name = _validate_name(name)
     _require_pivpn_binary()
     with _add_client_lock():
-        if client_ovpn_path(name).exists():
+        if _client_ovpn_exists(name):
             raise PivpnError(f"A client named '{name}' already exists.")
 
         if passphrase:
@@ -167,12 +239,12 @@ def add_client(name: str, passphrase: str | None = None) -> Path:
         if result.returncode != 0:
             raise PivpnError((result.stdout + result.stderr).strip() or "pivpn add failed")
 
-        if not client_ovpn_path(name).exists():
+        if not _client_ovpn_exists(name):
             raise PivpnError(
-                f"pivpn add reported success but {client_ovpn_path(name)} was not found — "
-                "check PIVPN_OVPN_DIR in your .env."
+                f"pivpn add reported success but {name}.ovpn was not found — "
+                "check PIVPN_OVPN_DIR in the agent's .env."
             )
-        return client_ovpn_path(name)
+        return None if config.HUB_MODE else client_ovpn_path(name)
 
 
 def import_clients(text: str) -> tuple[int, list[str]]:
@@ -217,8 +289,10 @@ def remove_client(name: str) -> None:
         raise PivpnError((result.stdout + result.stderr).strip() or "pivpn revoke failed")
 
 
-def renew_client(name: str) -> Path:
-    """Revoke + reissue under the same name (see module docstring).
+def renew_client(name: str) -> Path | None:
+    """Revoke + reissue under the same name (see module docstring). Same
+    HUB_MODE caveat as add_client's return value — None there, not a
+    hub-local path to a file that isn't on the hub.
 
     Not atomic: if add_client fails after remove_client already succeeded,
     the client is left with zero valid access rather than just stuck on

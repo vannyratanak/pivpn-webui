@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Run this on the server PiVPN is installed on, as the same non-root user
-# that installed PiVPN. Sets up the venv, generates admin credentials,
-# installs the root-helper script + sudoers rule + systemd unit.
+# that installed PiVPN. Sets up the venv, provisions PostgreSQL, generates
+# admin credentials, installs the root-helper scripts + sudoers rule +
+# systemd unit.
 set -euo pipefail
 
 if [[ $EUID -eq 0 ]]; then
@@ -23,6 +24,39 @@ python3 -m venv venv
 source venv/bin/activate
 pip install --upgrade pip
 pip install -r requirements.txt
+
+echo "== Setting up PostgreSQL (requires sudo) =="
+# The app has required a real Postgres connection since the SQLite ->
+# Postgres migration — config.py's require_secrets() refuses to start
+# without PIVPN_WEBUI_DB_HOST/PASSWORD set. This installs/starts a local
+# Postgres server and provisions this app's own role + database, so a
+# fresh clone of this repo produces a working install again instead of
+# failing at startup with that error.
+if ! command -v psql >/dev/null 2>&1; then
+  echo "Installing PostgreSQL..."
+  sudo apt-get update -y
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y postgresql
+fi
+sudo systemctl enable --now postgresql
+
+DB_HOST="localhost"
+DB_NAME="pivpn_webui"
+DB_USER="pivpn_webui_app"
+DB_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"
+
+# Re-running this script always issues a fresh DB password here, same as
+# it always regenerates SECRET_KEY/admin credentials below — ALTER ROLE
+# if this role already exists (a previous run of this same script),
+# CREATE ROLE if it doesn't (first run), so .env's value is guaranteed
+# correct either way without needing to know which case this is first.
+sudo -u postgres psql -v ON_ERROR_STOP=1 -c \
+  "ALTER ROLE ${DB_USER} WITH LOGIN PASSWORD '${DB_PASSWORD}';" >/dev/null 2>&1 || \
+  sudo -u postgres psql -v ON_ERROR_STOP=1 -c \
+  "CREATE ROLE ${DB_USER} WITH LOGIN PASSWORD '${DB_PASSWORD}';" >/dev/null
+sudo -u postgres createdb -O "${DB_USER}" "${DB_NAME}" 2>/dev/null || true
+# Table creation itself (CREATE TABLE IF NOT EXISTS) happens automatically
+# the first time the app starts — see app/db.py's init_db(), called from
+# create_app(). Nothing left to do here beyond role + database existing.
 
 SECRET_KEY="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
 
@@ -59,6 +93,10 @@ cat > .env <<EOF
 SECRET_KEY=${SECRET_KEY}
 ADMIN_USERNAME=${ADMIN_USERNAME}
 ADMIN_PASSWORD_HASH=${ADMIN_PASSWORD_HASH}
+PIVPN_WEBUI_DB_HOST=${DB_HOST}
+PIVPN_WEBUI_DB_NAME=${DB_NAME}
+PIVPN_WEBUI_DB_USER=${DB_USER}
+PIVPN_WEBUI_DB_PASSWORD=${DB_PASSWORD}
 PIVPN_OVPN_DIR=${OVPN_DIR}
 OPENVPN_CCD_DIR=/etc/openvpn/ccd
 OPENVPN_SUBNET_BASE=${SUBNET_BASE}
@@ -68,6 +106,7 @@ BIND_HOST=127.0.0.1
 BIND_PORT=${BIND_PORT}
 EOF
 chmod 600 .env
+unset DB_PASSWORD
 
 echo "== Installing privileged helper scripts (requires sudo) =="
 sudo install -m 0750 -o root -g root deploy/pivpn-webui-ccd-helper.sh /usr/local/sbin/pivpn-webui-ccd-helper.sh

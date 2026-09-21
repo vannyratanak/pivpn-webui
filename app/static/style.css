@@ -25,6 +25,7 @@
   --ok: #3ecf8e;
   --ok-rgb: 62, 207, 142;
   --warn: #f5a623;
+  --warn-rgb: 245, 166, 35;
   --danger: #f0556c;
   --danger-rgb: 240, 85, 108;
 }
@@ -61,6 +62,7 @@
   --ok: #15803d;
   --ok-rgb: 21, 128, 61;
   --warn: #b45309;
+  --warn-rgb: 180, 83, 9;
   --danger: #dc2626;
   --danger-rgb: 220, 38, 38;
 }
@@ -1498,11 +1500,39 @@ th {
 }
 
 .blocked-row { background: rgba(var(--danger-rgb), 0.08); }
+/* A DB-tracked rule discover_cli_rules() couldn't find live anymore (see
+   routes.py's firewall_rules() and the flash-warning it raises) —
+   highlights the specific row(s) the warning is talking about, since the
+   warning text alone (a bare rule id) gives no visual way to tell which
+   row that is, especially among visually-identical duplicates. */
+.missing-live-row { background: rgba(var(--warn-rgb), 0.08); }
+.missing-live-badge {
+  display: inline-block;
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--warn);
+}
 /* Dim only the data cells, not the whole row — opacity on the <tr> itself
    would also fade the Enable/Delete buttons in the last cell, since opacity
    compounds through descendants and can't be un-done by a child's own
    opacity:1. */
 .disabled-row td:not(:last-child) { opacity: 0.5; }
+
+/* Kind-grouping header row on the Firewall Rules table (see
+   firewall.html) — visually distinct from a real rule row (no hover
+   state, no checkbox/actions) but still a plain <tr>/<td> so it lines up
+   with the real columns underneath it without a separate colgroup. */
+.kind-divider-row td {
+  background: var(--panel-2);
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
 
 .saved-yes { color: var(--ok); font-weight: 600; }
 
@@ -1758,23 +1788,6 @@ dialog.modal code {
   box-shadow: none;
 }
 
-.log-pre {
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 12px;
-  max-height: 480px;
-  overflow-y: auto;
-  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  color: var(--text);
-  margin: 0;
-}
-
-.log-line {
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-
 .log-filter-input {
   width: 100%;
   margin: 10px 0;
@@ -1851,6 +1864,7 @@ input[type="text"].filter-input-inline {
 }
 
 .flash-success { background: rgba(var(--ok-rgb), 0.15); border: 1px solid var(--ok); color: var(--ok); }
+.flash-warning { background: rgba(var(--warn-rgb), 0.15); border: 1px solid var(--warn); color: var(--warn); }
 .flash-error { background: rgba(var(--danger-rgb), 0.15); border: 1px solid var(--danger); color: var(--danger); }
 
 /* Auto-dismissing toast stack (base.html + flash-toasts.js) — everywhere
@@ -1859,18 +1873,21 @@ input[type="text"].filter-input-inline {
    per DESIGN.md's Toasts / Floating Alerts entry it takes the Card/Modal
    treatment (solid --panel background, 10px radius, a single 1px border
    carrying the semantic color) instead of .flash's translucent wash —
-   same reasoning and the same top offset (clears .topbar) as
-   .reorder-error-toast, just stacked in the corner instead of centered,
-   since more than one of these can be visible at once. */
+   same position (centered, clears .topbar) as .reorder-error-toast, so
+   every alert in the app appears in the same spot; stacks downward when
+   more than one is visible at once instead of side by side. */
 .flash-toasts {
   position: fixed;
   top: 82px;
-  right: 16px;
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 1300;
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 10px;
-  max-width: 360px;
+  width: calc(100% - 32px);
+  max-width: 420px;
 }
 
 .flash-toast {
@@ -1886,18 +1903,19 @@ input[type="text"].filter-input-inline {
 }
 
 .flash-toast.flash-success { border-color: var(--ok); color: var(--ok); }
+.flash-toast.flash-warning { border-color: var(--warn); color: var(--warn); }
 .flash-toast.flash-error { border-color: var(--danger); color: var(--danger); }
 
 .flash-toast.closing { animation: flash-toast-out 0.2s ease-in forwards; }
 
 @keyframes flash-toast-in {
-  from { opacity: 0; transform: translateX(16px); }
-  to { opacity: 1; transform: translateX(0); }
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes flash-toast-out {
-  from { opacity: 1; transform: translateX(0); }
-  to { opacity: 0; transform: translateX(16px); }
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(-8px); }
 }
 
 @media (prefers-reduced-motion: reduce) {

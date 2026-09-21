@@ -333,6 +333,15 @@ def test_client_block_self_lockout_no_admin_ip_skips_check():
     _check_client_block_self_lockout(None, "10.202.226.21")  # no raise
 
 
+def test_client_block_self_lockout_skipped_in_hub_mode(monkeypatch):
+    # Same IPs that raise in test_client_block_self_lockout_same_ip_raises
+    # above — the only difference is HUB_MODE, confirming that alone is
+    # what suppresses it (admin_ip is the hub's own idea of who's asking,
+    # not something the agent's box can act on).
+    monkeypatch.setattr(config, "HUB_MODE", True)
+    _check_client_block_self_lockout("10.202.226.21", "10.202.226.21")  # no raise
+
+
 def _setup_client_block_db(tmp_path, monkeypatch):
     _configure_test_db(monkeypatch)
     applied = []
@@ -470,6 +479,25 @@ def test_add_input_rule_no_client_ip_skips_guard(tmp_path, monkeypatch):
     assert len(applied) == 1
 
 
+def test_add_input_rule_self_lockout_skipped_in_hub_mode(tmp_path, monkeypatch):
+    # Scoped (src + dport set) so this isolates self-lockout specifically,
+    # same reasoning as test_add_input_rule_allowed_when_earlier_accept_
+    # still_covers_caller above — an unrestricted DROP would also trip the
+    # separate _check_not_unrestricted_input_drop guard, which isn't
+    # HUB_MODE-aware and would raise regardless, muddying what's under
+    # test here. Without HUB_MODE this exact rule (DROPping the caller's
+    # own subnet on 443, nothing else in the chain yet) is the same shape
+    # that raises in test_add_input_rule_self_lockout_raises_and_never_
+    # applies; the only difference here is HUB_MODE.
+    applied = _setup_input_rules(tmp_path, monkeypatch, existing_input=[])
+    monkeypatch.setattr(config, "HUB_MODE", True)
+    add_input_rule(
+        action="DROP", protocol="tcp", src="203.0.113.0/24", dport="443", client_ip="203.0.113.9"
+    )
+    assert len(db.list_rules()) == 1
+    assert len(applied) == 1
+
+
 # --- _check_not_unrestricted_input_drop: a DROP INPUT rule with no source
 # and no port has no notion of "who," unlike self-lockout — it can't be
 # bypassed just because the caller's own IP happens to already be
@@ -590,6 +618,7 @@ def test_toggle_rule_disable_of_unrestricted_drop_is_unaffected(tmp_path, monkey
     applied = _setup_toggle_rule(tmp_path, monkeypatch, rule, other_input_rules=[])
     toggle_rule(1, client_ip=None)
     assert db.get_rule(1)["enabled"] == 0
+    assert applied  # actually reconciled iptables — not silently short-circuited
 
 
 def test_delete_rule_self_lockout_raises_and_never_deletes(tmp_path, monkeypatch):
@@ -621,6 +650,39 @@ def test_delete_rule_no_client_ip_skips_guard(tmp_path, monkeypatch):
     _setup_toggle_rule(tmp_path, monkeypatch, rule, other_input_rules=[])
     delete_rule(1, client_ip=None)
     assert db.get_rule(1) is None
+
+
+def test_disable_rule_swallows_unapply_failure_db_still_disabled(tmp_path, monkeypatch):
+    # Regression test: disable_rule's own _unapply call had no try/except
+    # around it (unlike delete_rule's identical situation, already
+    # handled) — a rule that wasn't actually live (e.g. -D finds nothing
+    # to remove) raised PrivilegedCommandError straight out of
+    # disable_rule. Worse than one confusing error for a single rule:
+    # _bulk_disable_or_delete's own except only catches FirewallError, so
+    # this escaped that loop entirely and aborted the whole bulk-disable
+    # batch mid-way, leaving every rule after the failing one untouched.
+    rule = {**_rule(1, "DROP", src=None, position=1.0), "kind": "input", "enabled": 1}
+    _setup_toggle_rule(tmp_path, monkeypatch, rule, other_input_rules=[])
+
+    def _run_root_raises(argv):
+        raise PrivilegedCommandError("no matching rule")
+
+    monkeypatch.setattr("app.firewall.run_root", _run_root_raises)
+    disable_rule(1, client_ip=None)  # must not raise
+    assert db.get_rule(1)["enabled"] == 0  # DB is still the source of truth
+
+
+def test_toggle_rule_disable_direction_swallows_unapply_failure(tmp_path, monkeypatch):
+    # Same gap, same fix, in toggle_rule's own disable branch.
+    rule = {**_rule(1, "DROP", src=None, position=1.0), "kind": "input", "enabled": 1}
+    _setup_toggle_rule(tmp_path, monkeypatch, rule, other_input_rules=[])
+
+    def _run_root_raises(argv):
+        raise PrivilegedCommandError("no matching rule")
+
+    monkeypatch.setattr("app.firewall.run_root", _run_root_raises)
+    toggle_rule(1, client_ip=None)  # must not raise
+    assert db.get_rule(1)["enabled"] == 0
 
 
 def test_disable_and_enable_race_never_locks_out_admin(tmp_path, monkeypatch):
@@ -798,6 +860,34 @@ def test_import_rules_raw_input_line_no_longer_crashes(tmp_path, monkeypatch):
     assert added == 1
 
 
+def test_import_rules_flags_a_client_import_file_uploaded_here_by_mistake(tmp_path, monkeypatch):
+    # The Clients page's own "Import Clients" dialog uses the same
+    # "name=foo passphrase=bar" per-line format and the same "Import ...
+    # from file" phrasing as this one — an easy file to upload to the
+    # wrong page. Multi-field line: never satisfies the variable-
+    # definition check below (more than one token), so this always worked.
+    _setup_input_rules(tmp_path, monkeypatch, existing_input=[])
+    added, errors = import_rules("name=nurak passphrase=hunter2\n")
+    assert added == 0
+    assert len(errors) == 1
+    assert "Clients page's Import Client dialog" in errors[0]
+
+
+def test_import_rules_flags_a_client_import_file_with_no_passphrase_field(tmp_path, monkeypatch):
+    # Regression test: pivpn_ctl.import_clients's own passphrase field is
+    # optional, so a lone "name=foo" line is still a complete, valid
+    # client-import line — but on its own it's also a single token with an
+    # '=' and an identifier key, which used to satisfy the (then-earlier)
+    # variable-definition check first and get silently absorbed as an
+    # unused $name variable instead of ever reaching this check, defeating
+    # it entirely for exactly this common single-field shape.
+    _setup_input_rules(tmp_path, monkeypatch, existing_input=[])
+    added, errors = import_rules("name=nurak\n")
+    assert added == 0
+    assert len(errors) == 1
+    assert "Clients page's Import Client dialog" in errors[0]
+
+
 # --- _parse_rule_spec: every recognized flag used to assume a following
 # value existed (tokens[i + 1] with no bounds check) — fine for live `-S`
 # output (iptables itself rejects a flag with no value at insert time),
@@ -869,6 +959,22 @@ def test_rule_client_name_forward_matches_dst_when_src_unmatched():
 def test_rule_client_name_portforward_uses_target_ip():
     rule = {"kind": "portforward", "target_ip": "10.202.226.4", "target_port": "80"}
     assert rule_client_name(rule, {"10.202.226.4": "macbook-phanne"}) == "macbook-phanne"
+
+
+def test_rule_client_name_matches_src_with_host_suffix():
+    # iptables' own -S output normalizes a single-host address to
+    # '<ip>/32' (see discover_cli_rules) — client_names never has that
+    # suffix, so this must still match.
+    rule = {"kind": "forward", "src": "10.202.226.4/32", "dst": "0.0.0.0/0"}
+    assert rule_client_name(rule, {"10.202.226.4": "macbook-phanne"}) == "macbook-phanne"
+
+
+def test_rule_client_name_subnet_suffix_is_not_a_match():
+    # Unlike /32, a real subnet isn't one client's single address —
+    # stripping it would wrongly match a client whose IP merely falls
+    # inside the subnet.
+    rule = {"kind": "forward", "src": "10.202.226.0/24", "dst": None}
+    assert rule_client_name(rule, {"10.202.226.4": "macbook-phanne"}) == ""
 
 
 def test_rule_client_name_no_match_returns_empty_string():
@@ -1070,6 +1176,98 @@ def _stateful_fake_iptables(initial_input_specs):
             return ""
 
     return state, run
+
+
+# --- discover_cli_rules' reverse direction: a DB-tracked rule whose live
+# copy is gone (most likely `iptables -D`'d directly, bypassing this app's
+# own Delete button) gets *flagged*, never silently auto-deleted — see
+# discover_cli_rules' own docstring for why auto-deleting would be
+# dangerous (a chain that merely failed to scan looks identical to one
+# that's genuinely empty, and misreading the first as the second could
+# flag/delete every tracked rule in it after a single transient failure).
+
+def test_discover_cli_rules_flags_a_removed_tracked_rule_as_missing(monkeypatch):
+    _configure_test_db(monkeypatch)
+    rule_id = db.insert_rule({
+        "kind": "input", "action": "ACCEPT", "protocol": "tcp",
+        "src": "10.0.0.1/32", "dport": "443", "enabled": 1, "position": 1.0,
+    })
+    state, fake_run = _stateful_fake_iptables([])  # nothing live — removed via CLI
+    monkeypatch.setattr("app.firewall.run_root", fake_run)
+
+    imported, missing = discover_cli_rules()
+
+    assert imported == 0
+    assert [r["id"] for r in missing] == [rule_id]
+
+
+def test_discover_cli_rules_does_not_flag_a_rule_that_is_still_live(monkeypatch):
+    _configure_test_db(monkeypatch)
+    rule_id = db.insert_rule({
+        "kind": "input", "action": "ACCEPT", "protocol": "tcp",
+        "src": "10.0.0.1/32", "dport": "443", "enabled": 1, "position": 1.0,
+    })
+    live_spec = [
+        "-s", "10.0.0.1/32", "-p", "tcp", "--dport", "443",
+        "-m", "comment", "--comment", f"pivpn-webui:{rule_id}", "-j", "ACCEPT",
+    ]
+    state, fake_run = _stateful_fake_iptables([live_spec])
+    monkeypatch.setattr("app.firewall.run_root", fake_run)
+
+    imported, missing = discover_cli_rules()
+
+    assert imported == 0
+    assert missing == []
+
+
+def test_discover_cli_rules_does_not_flag_a_disabled_rule(monkeypatch):
+    _configure_test_db(monkeypatch)
+    db.insert_rule({
+        "kind": "input", "action": "ACCEPT", "protocol": "tcp",
+        "src": "10.0.0.1/32", "dport": "443", "enabled": 0, "position": 1.0,
+    })
+    state, fake_run = _stateful_fake_iptables([])  # a disabled rule is *expected* to be absent live
+    monkeypatch.setattr("app.firewall.run_root", fake_run)
+
+    _, missing = discover_cli_rules()
+
+    assert missing == []
+
+
+def test_discover_cli_rules_does_not_flag_rules_in_a_chain_that_failed_to_scan(monkeypatch):
+    # The critical safety property: "couldn't check" must never be treated
+    # the same as "confirmed absent" — a transient failure here must never
+    # look like every tracked rule in that chain just vanished.
+    _configure_test_db(monkeypatch)
+    db.insert_rule({
+        "kind": "input", "action": "ACCEPT", "protocol": "tcp",
+        "src": "10.0.0.1/32", "dport": "443", "enabled": 1, "position": 1.0,
+    })
+
+    def failing_run(argv):
+        raise PrivilegedCommandError("box unreachable")
+
+    monkeypatch.setattr("app.firewall.run_root", failing_run)
+
+    imported, missing = discover_cli_rules()
+
+    assert imported == 0
+    assert missing == []
+
+
+def test_discover_cli_rules_does_not_flag_client_block_rules(monkeypatch):
+    _configure_test_db(monkeypatch)
+    db.insert_rule({
+        "kind": "client_block", "action": "DROP", "protocol": "all",
+        "client_name": "nurak", "client_ip": "10.202.226.21",
+        "comment": "Block nurak", "enabled": 1, "position": 1.0,
+    })
+    state, fake_run = _stateful_fake_iptables([])  # its live half is gone too, but not our call to make
+    monkeypatch.setattr("app.firewall.run_root", fake_run)
+
+    _, missing = discover_cli_rules()
+
+    assert missing == []
 
 
 def test_concurrent_rebuild_chain_never_duplicates_live_rules(tmp_path, monkeypatch):

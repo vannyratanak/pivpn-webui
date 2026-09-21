@@ -20,6 +20,20 @@ ADMIN_PASSWORD_HASH = os.environ.get("ADMIN_PASSWORD_HASH")
 # "N hours since your *last* request," not "N hours since you logged in."
 SESSION_LIFETIME_HOURS = int(os.environ.get("SESSION_LIFETIME_HOURS", "8"))
 
+# JWT for the API (app/api.py) — a separate credential from the browser's
+# session cookie above, for scripts/other systems calling this app without
+# logging in through a browser. Deliberately its own secret, not a reuse of
+# SECRET_KEY: SECRET_KEY also signs the session cookie and CSRF tokens, so
+# rotating it (e.g. after a suspected leak of one) would otherwise force
+# rotating the other too, for no real reason — they protect different
+# things. Falls back to SECRET_KEY only if JWT_SECRET_KEY was never set,
+# so this stays a zero-config addition for anyone not using the API yet.
+JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY") or SECRET_KEY
+# Short-lived on purpose — a leaked API token (logged by some intermediary,
+# committed to a script by accident) self-expires quickly. 15 minutes is
+# Flask-JWT-Extended's own conventional default for access tokens.
+JWT_ACCESS_TOKEN_MINUTES = int(os.environ.get("JWT_ACCESS_TOKEN_MINUTES", "15"))
+
 # A browser only ever sends a "Secure" cookie back over HTTPS — without
 # it, the session cookie would still be sent in plaintext over any HTTP
 # connection that reaches this app. Defaults on because the two primary
@@ -55,6 +69,15 @@ DB_PASSWORD = os.environ.get("PIVPN_WEBUI_DB_PASSWORD")
 
 BIND_HOST = os.environ.get("BIND_HOST", "127.0.0.1")
 BIND_PORT = int(os.environ.get("BIND_PORT", "8443"))
+# Optional — lets wsgi.py's own dev-server invocation (python3 wsgi.py)
+# terminate TLS itself with a self-signed cert, for quickly reaching this
+# app from another device (e.g. a phone/tablet on the LAN) without setting
+# up nginx (setup-nginx.sh) first. Both unset (the default) means plain
+# HTTP, same as always. Not how a real deployment should serve TLS long
+# term — nginx in front is still the documented path for that — this is
+# just the dev server's own ssl_context, off by default.
+BIND_TLS_CERT = os.environ.get("BIND_TLS_CERT")
+BIND_TLS_KEY = os.environ.get("BIND_TLS_KEY")
 
 CCD_HELPER = os.environ.get("CCD_HELPER", "/usr/local/sbin/pivpn-webui-ccd-helper.sh")
 LOG_HELPER = os.environ.get("LOG_HELPER", "/usr/local/sbin/pivpn-webui-log-helper.sh")
@@ -76,6 +99,46 @@ NETFILTER_PERSISTENT_BIN = os.environ.get("NETFILTER_PERSISTENT_BIN", "/usr/sbin
 CAT_BIN = os.environ.get("CAT_BIN", "/bin/cat")
 PERSISTED_RULES_PATH = os.environ.get("PERSISTED_RULES_PATH", "/etc/iptables/rules.v4")
 
+# Hub/agent split — lets this app run with the PiVPN box's own kernel/CLI
+# operations (run_root/_run_pivpn/read_client_ovpn) executed on a remote
+# box over a socket instead of locally. Off by default: every existing
+# single-box deployment (e.g. .10) is untouched by this, since HUB_MODE
+# unset makes every branch point in app/privileged.py and app/pivpn_ctl.py
+# fall through to the same local-subprocess code that's always run there.
+HUB_MODE = os.environ.get("HUB_MODE", "false").lower() == "true"
+DEFAULT_SERVER_ID = int(os.environ.get("DEFAULT_SERVER_ID", "0")) or None
+GATEWAY_SOCKET_PATH = os.environ.get(
+    "GATEWAY_SOCKET_PATH", str(BASE_DIR / "instance" / "gateway.sock")
+)
+
+# hub_gateway.py side only — TLS for the agent-facing WebSocket (the one
+# thing on this whole hub<->agent path that was ever unencrypted: the
+# Unix socket to Flask never leaves this machine, and the agent's own
+# outbound `sudo` calls are local to it). Both unset (the default) means
+# hub_gateway.py serves plain ws:// exactly as before — nothing about an
+# existing HUB_MODE=false or already-deployed agent breaks by upgrading
+# this code. Set both to turn a real cert+key on; there's no "cert but no
+# key" half-state, hub_gateway.py refuses to start with just one set.
+GATEWAY_TLS_CERT = os.environ.get("GATEWAY_TLS_CERT")
+GATEWAY_TLS_KEY = os.environ.get("GATEWAY_TLS_KEY")
+
+# Agent-side only (agent.py) — which hub to dial out to and how to
+# authenticate as this particular box. HUB_URL/AGENT_SERVER_ID/AGENT_TOKEN
+# are all required for the agent to run at all; irrelevant to the main
+# Flask app/hub_gateway.py.
+HUB_URL = os.environ.get("HUB_URL")
+AGENT_SERVER_ID = int(os.environ["AGENT_SERVER_ID"]) if os.environ.get("AGENT_SERVER_ID") else None
+AGENT_TOKEN = os.environ.get("AGENT_TOKEN")
+# Only meaningful (and only read) when HUB_URL starts with wss:// — the
+# hub_gateway.py cert is self-signed (see setup-hub-tls.sh), so it isn't
+# signed by anything in the system's default trust store the way a real
+# CA-issued cert would be. This tells agent.py to trust that one specific
+# cert instead, the same "pin the exact file, not a CA" approach
+# resolve_real_address's own forced-command SSH key already uses. Left
+# unset, a wss:// HUB_URL falls back to the system trust store, which is
+# the right behavior once hub_gateway.py ever gets a real CA-signed cert.
+HUB_TLS_CERT = os.environ.get("HUB_TLS_CERT")
+
 # Only enforced when this module is actually imported by the running app
 # (wsgi.py / app factory), not by setup.sh or other tooling that imports
 # config for its defaults before the .env file exists.
@@ -89,4 +152,8 @@ def require_secrets():
         raise RuntimeError(
             "PIVPN_WEBUI_DB_HOST and PIVPN_WEBUI_DB_PASSWORD must be set in the environment (.env) "
             "— the app now requires a Postgres connection, not just the SQLite file path."
+        )
+    if HUB_MODE and not DEFAULT_SERVER_ID:
+        raise RuntimeError(
+            "DEFAULT_SERVER_ID must be set in the environment (.env) when HUB_MODE=true."
         )

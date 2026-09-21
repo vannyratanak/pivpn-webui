@@ -1,19 +1,24 @@
 """Read access for the Logs page's tabs.
 
-System/WebUI service logs go straight through the pivpn-webui-log-helper.sh
-root helper (see deploy/ and app/privileged.py) on every request — fixed
-journalctl invocations, no user input reaches the shell, and never
-regex-parsed (just displayed as raw text), so a live fetch stays cheap even
-over a 7-day window.
+WebUI service logs (a small, single-unit tail) still go straight through
+the pivpn-webui-log-helper.sh root helper (see deploy/ and
+app/privileged.py) on every request — fixed journalctl invocations, no
+user input reaches the shell.
 
-VPN Sessions/Client Sessions/Traffic instead read from the database
-(db.list_vpn_events / db.list_traffic_flows) — deploy/ingest_logs.py
-populates those tables periodically via the same root helper's
-openvpn-tail/flow-tail actions, off any request path. That split exists
-because those three *are* regex-parsed/paired/WHOIS-resolved, and doing
-that per page load stopped being cheap once a week of history (not the
-original 3-day/6-hour windows) was wanted — see ingest_logs.py's own
-docstring for the real numbers.
+VPN Sessions/Client Sessions/Traffic/System instead read from the database
+(db.list_vpn_events / db.list_traffic_flows / db.list_system_log_page) —
+deploy/ingest_logs.py populates those tables periodically via the same
+root helper's openvpn-tail/flow-tail/system-tail actions, off any request
+path. VPN Sessions/Client Sessions/Traffic moved off live fetching because
+those three are regex-parsed/paired/WHOIS-resolved, and doing that per
+page load stopped being cheap once a week of history (not the original
+3-day/6-hour windows) was wanted — see ingest_logs.py's own docstring for
+the real numbers. System moved for a related but distinct reason: a real
+7-day/60k-line pull is itself fast to *run* (~1.5s), but the several-MB
+payload that produces was cheap only as long as this process and the box
+being queried were the same one — once this app started reaching the box
+over a socket instead (see the hub/agent work), transferring that payload
+on every single page view stopped being free.
 
 IMPORTANT — verify before relying on this in production: OpenVPN's log
 line format isn't strictly standardized across versions/configs. The
@@ -29,8 +34,7 @@ import subprocess
 from datetime import datetime
 
 import config
-from app import db, pivpn_ctl
-from app.privileged import run_root
+from app import db, hub_client, pivpn_ctl
 
 # Bounds how many resolve_real_address SSH calls a single ingest tick can
 # have in flight at once — same reasoning as iplookup._MAX_CONCURRENT_WHOIS:
@@ -48,6 +52,9 @@ DISCONNECT_RE = re.compile(
 
 # journalctl -o short-iso lines look like: "2026-08-17T10:22:31+0700 host proc[pid]: message"
 JOURNAL_LINE_RE = re.compile(r"^(?P<ts>\S+)\s+\S+\s+\S+?(?:\[\d+\])?:\s?(?P<msg>.*)$")
+# Same shape as JOURNAL_LINE_RE, but with the process-name group also
+# named/captured — see _split_journal_line_with_process.
+JOURNAL_LINE_WITH_PROCESS_RE = re.compile(r"^(?P<ts>\S+)\s+\S+\s+(?P<process>\S+?)(?:\[\d+\])?:\s?(?P<msg>.*)$")
 
 # One line per new connection from the kernel's netfilter LOG target (see
 # deploy/setup-traffic-log.sh's mangle-table FORWARD rule) — the standard
@@ -77,6 +84,23 @@ def _split_journal_line(raw_line: str) -> tuple[str, str]:
     if not m:
         return "", raw_line
     return _format_ts(m.group("ts")), m.group("msg")
+
+
+def _split_journal_line_with_process(raw_line: str) -> tuple[str, str, str]:
+    """Like _split_journal_line, but also captures the process name (e.g.
+    'sudo', 'sshd', 'gunicorn') as its own field, for system_log_lines'
+    Process column — a raw whole-system line is far noisier than
+    OpenVPN's own (every sudo call, every systemd unit transition, every
+    ssh login), so surfacing *what* logged each line, scannable/
+    searchable on its own instead of buried in free text, matters more
+    here than it did for the single-source OpenVPN/flow ingestion
+    _split_journal_line already serves. A separate function/regex rather
+    than changing _split_journal_line itself, which openvpn-tail/flow-tail
+    ingestion (and its own tests) already depend on returning a 2-tuple."""
+    m = JOURNAL_LINE_WITH_PROCESS_RE.match(raw_line)
+    if not m:
+        return "", "", raw_line
+    return _format_ts(m.group("ts")), m.group("process"), m.group("msg")
 
 
 def _parse_openvpn_events() -> list[dict]:
@@ -137,7 +161,22 @@ def resolve_real_address(address: str) -> str | None:
     relay, the SSH call itself fails, or the connection has since ended
     (conntrack forgets it the moment a client disconnects) — a disabled
     or temporarily-unreachable relay should never break the Logs page,
-    only silently fall back to showing the relabeled address as before."""
+    only silently fall back to showing the relabeled address as before.
+
+    In HUB_MODE this box's own SSH keys are irrelevant — the relay only
+    trusts a dedicated, forced-command key generated specifically for
+    (and living only on) the box actually running the relay tunnel, i.e.
+    the *agent's* box (see README's "Real client IPs behind a relay"
+    section: `ssh-keygen ... -C 'thisserver-to-relay-real-ip'`, installed
+    to that one box's ~/.ssh only). Same bug class as _server_ip/
+    _iface_ip/list_interfaces — found the same way, by reasoning through
+    what a hub-mode run of each locally-scoped helper would actually see."""
+    if config.HUB_MODE:
+        return _resolve_real_address_remote(address)
+    return _resolve_real_address_local(address)
+
+
+def _resolve_real_address_local(address: str) -> str | None:
     if not config.RELAY_HOST or not config.RELAY_TUNNEL_IP:
         return None
     ip, _, port = address.rpartition(":")
@@ -157,6 +196,16 @@ def resolve_real_address(address: str) -> str | None:
         return None
     out = result.stdout.strip()
     return out if result.returncode == 0 and out else None
+
+
+def _resolve_real_address_remote(address: str) -> str | None:
+    try:
+        response = hub_client.call(config.DEFAULT_SERVER_ID, "resolve_real_address", address=address, timeout=8)
+    except hub_client.HubClientError:
+        return None
+    if not response.get("ok"):
+        return None
+    return response.get("result")
 
 
 def resolve_real_addresses_bulk(addresses: list[str]) -> dict[str, str | None]:
@@ -366,8 +415,22 @@ def list_traffic_flows(
     return flows, total
 
 
-def list_system_log(log_range: str = "7d", limit: int = 300) -> list[str]:
-    out = run_root([config.LOG_HELPER, "system", log_range])
-    lines = [ln for ln in out.splitlines() if ln.strip()]
-    lines.reverse()
-    return lines[:limit]
+def list_system_log(
+    q: str | None = None, page: int = 1, page_size: int = 50, since: str | None = None
+) -> tuple[list[dict], int]:
+    """Whole-system journal lines, most recent first, server-side
+    paginated and searched over the full retained history — same
+    conventions as list_traffic_flows above. Reads from the
+    system_log_lines table (populated periodically by
+    deploy/ingest_logs.py's system-tail ingestion, not on any request
+    path) rather than live-fetching journalctl on every request: a real
+    7-day/60k-line pull is itself fast (~1.5s on this app's real box),
+    but the resulting several-MB payload was what actually caused
+    timeouts once this app started running with the box it's controlling
+    over a socket instead of always being the same process — see the
+    hub/agent work. Best-effort, same as the rest of this module: the
+    `system` fixed-window helper action is still there for a manual/
+    diagnostic pull (see deploy/pivpn-webui-log-helper.sh), this function
+    just isn't what the live page uses anymore."""
+    rows, total = db.list_system_log_page(q=q, page=page, page_size=page_size, since=since)
+    return [{"ts": r["ts"], "process": r["process"], "message": r["message"]} for r in rows], total

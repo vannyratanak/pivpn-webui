@@ -31,20 +31,27 @@ def test_login_with_wrong_credentials_reshows_form(client):
     assert b"Invalid username or password" in resp.data
 
 
-def test_successful_login_issues_a_session_cookie_with_an_expiry(client):
-    # A plain Flask session cookie has no Max-Age/Expires at all (it dies
-    # with the browser) unless the session is explicitly marked
-    # permanent — this confirms login() actually does that, not just that
-    # PERMANENT_SESSION_LIFETIME is configured somewhere and unused.
+def test_successful_login_issues_an_html_jwt_cookie_with_an_expiry(client):
+    # Identity lives in a JWT cookie (auth.py's issue_html_jwt_cookie),
+    # not Flask's own session — this confirms login() actually sets one,
+    # with a real Max-Age (a JWT's expiry is fixed at issuance, unlike a
+    # plain Flask session cookie, which has none unless marked permanent).
     resp = client.post("/login", data={"username": "admin", "password": TEST_PASSWORD})
-    set_cookie = resp.headers.get("Set-Cookie", "")
+    set_cookie = next(c for c in resp.headers.getlist("Set-Cookie") if c.startswith("html_jwt="))
     assert "Max-Age" in set_cookie or "Expires" in set_cookie
+    assert "HttpOnly" in set_cookie
 
 
-def test_session_lifetime_matches_configured_hours(client):
+def test_html_jwt_cookie_lifetime_matches_configured_hours(client):
     import config
-    from datetime import timedelta
-    assert client.application.config["PERMANENT_SESSION_LIFETIME"] == timedelta(hours=config.SESSION_LIFETIME_HOURS)
+    from flask_jwt_extended import decode_token
+
+    client.post("/login", data={"username": "admin", "password": TEST_PASSWORD})
+    token = client.get_cookie("html_jwt").value
+    with client.application.app_context():
+        claims = decode_token(token)
+    lifetime_seconds = claims["exp"] - claims["iat"]
+    assert lifetime_seconds == config.SESSION_LIFETIME_HOURS * 3600
 
 
 def test_session_cookie_secure_defaults_on(client):
@@ -57,6 +64,22 @@ def test_session_cookie_secure_defaults_on(client):
 
 def test_logout_requires_login(client):
     resp = client.get("/logout")
+    assert resp.status_code == 302
+    assert "/login" in resp.headers["Location"]
+
+
+def test_logout_actually_clears_access_regression(client):
+    # Regression test for a real bug caught by live testing: the
+    # after_request sliding-refresh hook (see __init__.py) re-issues a
+    # fresh html_jwt cookie on every authenticated response, including
+    # logout()'s own — silently overwriting its cookie-clear with a
+    # brand new valid one, so a client following the exact same cookie
+    # jar could still load a protected page right after "logging out".
+    client.post("/login", data={"username": "admin", "password": TEST_PASSWORD})
+    assert client.get("/clients").status_code == 200
+
+    client.get("/logout")
+    resp = client.get("/clients")
     assert resp.status_code == 302
     assert "/login" in resp.headers["Location"]
 
@@ -648,6 +671,7 @@ def test_logs_refresh_calls_ingestion_and_redirects_to_requested_tab(client, mon
     calls = []
     monkeypatch.setattr(ingest_logs, "ingest_vpn_events", lambda: calls.append("events") or 1)
     monkeypatch.setattr(ingest_logs, "ingest_traffic_flows", lambda: calls.append("flows") or 2)
+    monkeypatch.setattr(ingest_logs, "ingest_system_log", lambda: calls.append("system") or 3)
     pruned = []
     monkeypatch.setattr(db, "prune_old_logs", lambda days: pruned.append(days))
 
@@ -656,7 +680,7 @@ def test_logs_refresh_calls_ingestion_and_redirects_to_requested_tab(client, mon
 
     assert resp.status_code == 302
     assert "/logs?tab=traffic" in resp.headers["Location"]
-    assert calls == ["events", "flows"]
+    assert calls == ["events", "flows", "system"]
     assert pruned == [ingest_logs.RETENTION_DAYS]
 
 
@@ -746,10 +770,14 @@ def test_client_detail_requires_login(client):
     assert "/login" in resp.headers["Location"]
 
 
-def test_client_detail_requires_admin(client):
+def test_client_detail_allows_moderator(client, monkeypatch):
+    # Unlike the main Firewall page (still admin-only), a moderator gets
+    # full rule management scoped to one client here — same "client
+    # control" territory as the Clients list' own renew/block/remove.
+    _stub_single_client(monkeypatch, name="laptop-anna")
     _add_moderator()
     _login_moderator(client)
-    assert client.get("/clients/laptop-anna").status_code == 403
+    assert client.get("/clients/laptop-anna").status_code == 200
 
 
 def test_client_detail_unknown_client_404s(client, monkeypatch):
@@ -852,11 +880,17 @@ def test_delete_rule_always_redirects_to_firewall_page(client):
 # redirect back to that client's page without the Firewall page's own
 # routes ever needing to vary.
 
-def test_client_add_rule_requires_admin(client):
+def test_client_add_rule_allows_moderator(client, monkeypatch):
+    monkeypatch.setattr("app.routes.pivpn_ctl.list_client_ips", lambda: {"laptop-anna": "10.202.226.2"})
+    monkeypatch.setattr("app.firewall.run_root", lambda argv, **kwargs: "")
     _add_moderator()
     _login_moderator(client)
-    resp = client.post("/clients/laptop-anna/rules/add", data={"action": "DROP", "protocol": "tcp"})
-    assert resp.status_code == 403
+    resp = client.post("/clients/laptop-anna/rules/add", data={
+        "action": "DROP", "protocol": "tcp", "dst": "", "dport": "",
+    })
+    assert resp.status_code == 302
+    assert resp.headers["Location"] == "/clients/laptop-anna"
+    assert len(db.list_rules()) == 1
 
 
 def test_client_add_rule_redirects_back_to_client_page(client, monkeypatch):
@@ -913,11 +947,16 @@ def _stub_two_clients(monkeypatch):
     )
 
 
-def test_client_bulk_disable_requires_admin(client):
+def test_client_bulk_disable_allows_moderator(client, monkeypatch):
+    _stub_two_clients(monkeypatch)
+    monkeypatch.setattr("app.firewall.run_root", lambda argv, **kwargs: "")
     _add_moderator()
     _login_moderator(client)
-    resp = client.post("/clients/laptop-anna/rules/bulk-disable", data={"rule_ids": ["1"]})
-    assert resp.status_code == 403
+    anna_rule = db.insert_rule({"kind": "forward", "action": "DROP", "protocol": "tcp", "src": "10.202.226.2"})
+    resp = client.post("/clients/laptop-anna/rules/bulk-disable", data={"rule_ids": [str(anna_rule)]})
+    assert resp.status_code == 302
+    assert resp.headers["Location"] == "/clients/laptop-anna"
+    assert db.get_rule(anna_rule)["enabled"] == 0
 
 
 def test_client_bulk_disable_only_affects_this_clients_rules(client, monkeypatch):
@@ -961,11 +1000,12 @@ def test_client_bulk_delete_invalid_name_404s(client):
 # /firewall/persist, kept as their own routes purely so the redirect
 # target can differ (see client_add_rule's docstring).
 
-def test_client_resync_rules_requires_admin(client):
+def test_client_resync_rules_allows_moderator(client):
     _add_moderator()
     _login_moderator(client)
     resp = client.post("/clients/laptop-anna/rules/resync")
-    assert resp.status_code == 403
+    assert resp.status_code == 302
+    assert resp.headers["Location"] == "/clients/laptop-anna"
 
 
 def test_client_resync_rules_redirects_back_to_client_page(client):
@@ -981,11 +1021,13 @@ def test_client_resync_rules_invalid_name_404s(client):
     assert resp.status_code == 404
 
 
-def test_client_persist_rules_requires_admin(client):
+def test_client_persist_rules_allows_moderator(client, monkeypatch):
+    monkeypatch.setattr("app.firewall.run_root", lambda argv, **kwargs: "")
     _add_moderator()
     _login_moderator(client)
     resp = client.post("/clients/laptop-anna/rules/persist")
-    assert resp.status_code == 403
+    assert resp.status_code == 302
+    assert resp.headers["Location"] == "/clients/laptop-anna"
 
 
 def test_client_persist_rules_redirects_back_to_client_page(client, monkeypatch):

@@ -1,0 +1,21 @@
+[Unit]
+Description=PiVPN Web UI hub gateway (holds the WebSocket to every agent)
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__APP_DIR__
+EnvironmentFile=__APP_DIR__/.env
+ExecStart=__APP_DIR__/venv/bin/python3 __APP_DIR__/hub_gateway.py
+Restart=on-failure
+RestartSec=5
+# Separate process from the Flask app (pivpn-webui.service) on purpose —
+# gunicorn's own worker processes come and go independently, but the live
+# WebSocket connection to each agent has to survive that; this one process
+# holds it, Flask talks to it over the local Unix socket
+# (GATEWAY_SOCKET_PATH) instead. Only relevant on a HUB_MODE=true (hub)
+# deployment — a standalone install never needs this unit at all.
+
+[Install]
+WantedBy=multi-user.target

@@ -22,10 +22,15 @@ function attachFirewallReorder(tbodySelector) {
   // nextElementSibling would walk straight through a hidden row into
   // whatever's beyond it — silently reordering a rule relative to one the
   // admin can't currently see. Skip anything hidden so "next/previous row"
-  // always means the next/previous *visible* one.
+  // always means the next/previous *visible* one. Also skips kind-divider
+  // rows (see firewall.html) the same way — they're a pure grouping
+  // label, never draggable and never a valid target_id, so a rule
+  // dropped right next to one must look past it to the real neighbor on
+  // the other side instead of sending the server a divider's (nonexistent)
+  // rule id.
   function visibleSibling(row, prop) {
     let el = row[prop];
-    while (el && el.style.display === 'none') el = el[prop];
+    while (el && (el.style.display === 'none' || el.classList.contains('kind-divider-row'))) el = el[prop];
     return el;
   }
 

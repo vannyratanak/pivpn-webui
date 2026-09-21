@@ -198,7 +198,7 @@ def test_insert_duplicate_username_raises(tmp_path, monkeypatch):
     db.insert_user("alice", "hash123")
     try:
         db.insert_user("alice", "hash456")
-        assert False, "expected ValueError"
+        raise AssertionError("expected ValueError")
     except ValueError:
         pass
     assert db.count_users() == 1  # the failed insert never landed

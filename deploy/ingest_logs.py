@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Pulls new OpenVPN connect/disconnect events and Traffic-tab flow lines
-since the last run, and stores them as structured rows in the app's own
-database (app/db.py's vpn_events/traffic_flows tables) — so the Sessions,
-Client Sessions, and Traffic tabs can read instantly instead of re-parsing
-raw journal text on every single page load.
+"""Pulls new OpenVPN connect/disconnect events, Traffic-tab flow lines, and
+whole-system journal lines since the last run, and stores them as
+structured rows in the app's own database (app/db.py's
+vpn_events/traffic_flows/system_log_lines tables) — so the Sessions,
+Client Sessions, Traffic, and System tabs can read instantly instead of
+re-parsing/re-fetching raw journal text on every single page load.
 
 Why this exists: regex-parsing a real week's worth of raw journal lines on
 every request was measured at ~1.5s (OpenVPN events, ~13k lines/week) to
@@ -40,6 +41,7 @@ from app.vpnlog import (
     FLOW_RE,
     _client_ip_map,
     _split_journal_line,
+    _split_journal_line_with_process,
     resolve_real_addresses_bulk,
 )
 
@@ -132,11 +134,29 @@ def ingest_traffic_flows() -> int:
     return len(rows)
 
 
+def ingest_system_log() -> int:
+    """Unlike the other two, this isn't filtered to any particular pattern
+    at all — it's the *entire* journal (every sudo call, every systemd
+    unit transition, every ssh login), so it's a genuinely higher volume
+    than vpn_events/traffic_flows. No WHOIS/pairing work needed though,
+    just a straight parse-and-insert."""
+    out = run_root([config.LOG_HELPER, "system-tail"], timeout=FETCH_TIMEOUT_SECONDS)
+    rows = []
+    for raw_line in out.splitlines():
+        ts, process, msg = _split_journal_line_with_process(raw_line.strip())
+        if not ts:
+            continue
+        rows.append((ts, process, msg))
+    db.insert_system_log_lines(rows)
+    return len(rows)
+
+
 def main():
     n_events = ingest_vpn_events()
     n_flows = ingest_traffic_flows()
+    n_system = ingest_system_log()
     db.prune_old_logs(RETENTION_DAYS)
-    print(f"ingested {n_events} vpn event(s), {n_flows} traffic flow(s)")
+    print(f"ingested {n_events} vpn event(s), {n_flows} traffic flow(s), {n_system} system log line(s)")
 
 
 if __name__ == "__main__":

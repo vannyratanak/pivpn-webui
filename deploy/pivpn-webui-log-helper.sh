@@ -82,6 +82,7 @@ FLOW_LOG_PREFIX="VPNFLOW"
 STATE_DIR="/var/lib/pivpn-webui"
 OPENVPN_CURSOR="$STATE_DIR/openvpn.cursor"
 FLOW_CURSOR="$STATE_DIR/flow.cursor"
+SYSTEM_CURSOR="$STATE_DIR/system.cursor"
 # Only takes effect on each cursor file's very first-ever use (no cursor
 # yet to resume from) — a real backfill of history that already exists in
 # the journal, not an ongoing limit. Once a cursor exists, it's always more
@@ -92,7 +93,7 @@ FLOW_CURSOR="$STATE_DIR/flow.cursor"
 BACKFILL_SINCE="7 days ago"
 
 usage() {
-  echo "usage: $0 openvpn | webui [range] | system [range] | flow | openvpn-tail | flow-tail" >&2
+  echo "usage: $0 openvpn | webui [range] | system [range] | flow | openvpn-tail | flow-tail | system-tail" >&2
   echo "  range (webui/system only): 1h | 6h | 12h | 1d | 7d (default 7d)" >&2
   exit 1
 }
@@ -132,6 +133,13 @@ case "$action" in
   openvpn-tail)
     mkdir -p "$STATE_DIR"
     journalctl -u "$OPENVPN_UNIT" --cursor-file="$OPENVPN_CURSOR" --since "$BACKFILL_SINCE" --no-pager -o short-iso
+    ;;
+  system-tail)
+    # Same incremental-fetch shape as openvpn-tail — no -g/grep filter
+    # (same as the fixed-window `system` action above), so no special
+    # exit-1-means-no-matches handling needed either.
+    mkdir -p "$STATE_DIR"
+    journalctl --cursor-file="$SYSTEM_CURSOR" --since "$BACKFILL_SINCE" --no-pager -o short-iso
     ;;
   flow-tail)
     # Same benign-exit-1 handling as `flow` above — an incremental fetch

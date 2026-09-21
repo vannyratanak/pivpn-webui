@@ -8,12 +8,16 @@
        that one JSON endpoint has no form to carry a hidden field. -->
   <meta name="csrf-token" content="{{ csrf_token() }}">
   <title>{% block title %}PiVPN Web UI{% endblock %}</title>
-  <!-- Sets data-theme before the stylesheet paints, so a saved "light"
-       choice never flashes dark-then-light on load. Must be inline (not
-       an external src=) and this early in <head> — an external script
-       loads/runs too late to beat first paint. -->
+  <!-- Sets data-theme before the stylesheet paints, so a saved choice (or
+       the light default, for a first-time visitor with nothing saved yet)
+       never flashes dark-then-light on load. Must be inline (not an
+       external src=) and this early in <head> — an external script
+       loads/runs too late to beat first paint. Light is the default:
+       only an explicit 'dark' in localStorage (set by theme-toggle.js
+       the first time someone switches) keeps the unstyled (dark) root
+       tokens instead of the [data-theme="light"] override. -->
   <script>
-    if (localStorage.getItem('pivpn-webui-theme') === 'light') {
+    if (localStorage.getItem('pivpn-webui-theme') !== 'dark') {
       document.documentElement.setAttribute('data-theme', 'light');
     }
   </script>

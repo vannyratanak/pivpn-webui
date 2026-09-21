@@ -1,5 +1,6 @@
 import subprocess
 
+import config
 import app.pivpn_ctl as pivpn_ctl
 
 # Real captured `pivpn list` output (ANSI codes included) from the actual
@@ -46,7 +47,7 @@ def test_list_clients_raises_on_nonzero_exit(monkeypatch):
                          lambda argv, timeout=30: _fake_completed("", returncode=1))
     try:
         pivpn_ctl.list_clients()
-        assert False, "expected PivpnError"
+        raise AssertionError("expected PivpnError")
     except pivpn_ctl.PivpnError:
         pass
 
@@ -58,14 +59,19 @@ def test_list_clients_raises_on_nonzero_exit(monkeypatch):
 
 class _FakeOvpnPath:
     """Stands in for client_ovpn_path(name)'s return value: add_client
-    checks .exists() before running 'pivpn add' (must be False so the
+    (via _client_ovpn_exists -> read_client_ovpn) checks .exists() then
+    .read_bytes() before running 'pivpn add' (must raise/be False so the
     "already exists" guard doesn't fire) and again after (must flip to
-    True only once a simulated add actually 'succeeds')."""
+    True, with real bytes to read, only once a simulated add actually
+    'succeeds')."""
     def __init__(self):
         self.created = False
 
     def exists(self):
         return self.created
+
+    def read_bytes(self):
+        return b"fake ovpn contents"
 
 
 def _renew_run_pivpn(fake_path, revoke_rc=0, add_rc=0, add_stdout="boom"):
@@ -86,6 +92,23 @@ def test_renew_client_success_returns_new_path(monkeypatch):
     assert pivpn_ctl.renew_client("renewtest") is fake_path
 
 
+def test_add_client_returns_none_in_hub_mode_not_a_hub_local_path(monkeypatch):
+    # client_ovpn_path(name) computes a path on whichever machine calls
+    # it — in HUB_MODE that's the hub, not the agent that actually has the
+    # file, so it must never be handed back as if it were real. Only
+    # _client_ovpn_exists (via read_client_ovpn, already HUB_MODE-aware)
+    # decides whether the file exists; client_ovpn_path itself is never
+    # called on this path once HUB_MODE is on.
+    monkeypatch.setattr(config, "HUB_MODE", True)
+    monkeypatch.setattr(pivpn_ctl, "_require_pivpn_binary", lambda: None)
+    exists_calls = iter([False, True])  # pre-check: not yet: post-check: now it is
+    monkeypatch.setattr(pivpn_ctl, "_client_ovpn_exists", lambda name: next(exists_calls))
+    monkeypatch.setattr(pivpn_ctl, "client_ovpn_path",
+                         lambda name: (_ for _ in ()).throw(AssertionError("must not be called in hub mode")))
+    monkeypatch.setattr(pivpn_ctl, "_run_pivpn", lambda argv, timeout=30: _fake_completed(""))
+    assert pivpn_ctl.add_client("hubtest") is None
+
+
 def test_renew_client_partial_failure_raises_distinct_error(monkeypatch):
     # revoke succeeds, the re-add then fails — this is the case that used
     # to surface as an ordinary-looking PivpnError, no different from any
@@ -97,7 +120,7 @@ def test_renew_client_partial_failure_raises_distinct_error(monkeypatch):
     monkeypatch.setattr(pivpn_ctl, "_run_pivpn", _renew_run_pivpn(fake_path, revoke_rc=0, add_rc=1))
     try:
         pivpn_ctl.renew_client("renewtest")
-        assert False, "expected PivpnRenewPartialFailure"
+        raise AssertionError("expected PivpnRenewPartialFailure")
     except pivpn_ctl.PivpnRenewPartialFailure as exc:
         assert "NO valid VPN access" in str(exc)
         assert "boom" in str(exc)  # underlying pivpn add error still surfaced
@@ -113,9 +136,9 @@ def test_renew_client_revoke_failure_is_plain_pivpn_error_not_partial(monkeypatc
     monkeypatch.setattr(pivpn_ctl, "_run_pivpn", _renew_run_pivpn(fake_path, revoke_rc=1))
     try:
         pivpn_ctl.renew_client("renewtest")
-        assert False, "expected PivpnError"
+        raise AssertionError("expected PivpnError")
     except pivpn_ctl.PivpnRenewPartialFailure:
-        assert False, "revoke never succeeded — must not report itself as a partial failure"
+        raise AssertionError("revoke never succeeded — must not report itself as a partial failure") from None
     except pivpn_ctl.PivpnError:
         pass
 

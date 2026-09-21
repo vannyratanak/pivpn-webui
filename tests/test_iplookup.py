@@ -1,7 +1,6 @@
 import subprocess
 import threading
 
-import config
 from app import db, iplookup
 from tests.conftest import _configure_test_db
 
