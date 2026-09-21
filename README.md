@@ -53,8 +53,8 @@ addresses are blurred.
     shows as blockable once it has a ccd entry, which PiVPN assigns at
     creation time.
 
-- **Firewall** page manages several independent things, all stored in a
-  local SQLite DB so they survive reapplication after reboot or an
+- **Firewall** page manages several independent things, all stored in the
+  Postgres database so they survive reapplication after reboot or an
   `iptables -F`:
   - General `FORWARD`-chain rules (protocol/source/dest/port → ACCEPT or DROP).
   - `INPUT`-chain rules — what's allowed to reach the server itself (the
@@ -181,8 +181,18 @@ firewall logic) is independent of it.
   `journalctl`) go through this app's own `sudo -n` calls against the same
   explicit allowlist — see `app/privileged.py`. Nothing is ever
   shell-interpolated; all commands are built as argument lists.
-- Firewall/port-forward rules live in `instance/pivpn_webui.db` (SQLite) —
-  the DB is the source of truth, iptables is just where it gets applied.
+- All state (firewall/port-forward rules, users, logs) lives in a
+  **PostgreSQL** database — the DB is the source of truth, iptables is just
+  where the firewall rules get applied. `setup.sh` provisions this
+  automatically (installs PostgreSQL if missing, creates a dedicated role +
+  database) — see Step 2 below.
+- Can run two ways: **standalone** (this app + Postgres + PiVPN all on the
+  same box, the original/default mode) or **hub + agent**, where the app
+  and database run on a separate central machine and a small `agent.py`
+  process on the PiVPN box dials out to it over an encrypted WebSocket —
+  see [Hub/agent deployment](#hubagent-deployment-managing-the-vpn-server-remotely)
+  below. `HUB_MODE=false` (unset, the default) is standalone; nothing about
+  that mode changes by this feature existing.
 
 ## Complete setup, start to finish
 
@@ -212,10 +222,14 @@ cd pivpn-webui
 ./setup.sh
 ```
 
-Creates `venv/`, installs Python deps, prompts for admin username/password
-×2/ovpn dir/OpenVPN subnet base, writes `.env` (chmod 600), sudo-installs
-the 4 helper scripts + sudoers rule + systemd unit, and installs+starts
-the CRL permission watcher (see below) — which starts running immediately,
+Creates `venv/`, installs Python deps, **installs PostgreSQL if missing and
+provisions a dedicated database + role for this app** (re-running the
+script rotates that role's password and updates `.env` to match — same
+"re-running this script means starting fresh" behavior as the admin
+credentials below), prompts for admin username/password ×2/ovpn dir/
+OpenVPN subnet base, writes `.env` (chmod 600), sudo-installs the 4 helper
+scripts + sudoers rule + systemd unit, and installs+starts the CRL
+permission watcher (see below) — which starts running immediately,
 protecting against a real PiVPN bug even before the webui itself starts.
 Touches nothing PiVPN owns otherwise, no iptables, no VPN impact.
 
@@ -242,9 +256,10 @@ sudo install -m 0750 -o root -g root deploy/pivpn-webui-log-helper.sh /usr/local
 sudo systemctl enable --now pivpn-webui
 ```
 
-gunicorn starts, binds `127.0.0.1:8443` only; creates
-`instance/pivpn_webui.db` (empty tables); `sync_all()` runs but the DB is
-empty so it does nothing. Still zero iptables rules at this point.
+gunicorn starts, binds `127.0.0.1:8443` only; creates every table in the
+Postgres database Step 2 provisioned (`CREATE TABLE IF NOT EXISTS`, so this
+is also what a later restart safely no-ops against); `sync_all()` runs but
+the DB is empty so it does nothing. Still zero iptables rules at this point.
 
 **Step 4 — put nginx + TLS in front of it** `[sudo password: 1x]`
 
@@ -289,6 +304,160 @@ live journalctl fetch — see
 below. Until `./setup-log-ingest.sh` has been run at least once, those
 three tabs show "no events found," same as any other not-yet-configured
 feature in this app — nothing breaks, they're just empty.
+
+## Hub/agent deployment (managing the VPN server remotely)
+
+Everything above describes **standalone** mode: this app, its database, and
+PiVPN all live on the same box. **Hub/agent** mode splits that in two — the
+app + database run on a separate machine (the **hub**, e.g. a dedicated
+server or your own laptop for testing), and a small, dependency-light
+`agent.py` process runs on the actual PiVPN box (the **agent**) and dials
+*out* to the hub over an encrypted WebSocket. Nothing on the agent box ever
+needs an inbound port opened for this to work. This is the foundation for
+eventually managing more than one PiVPN box from a single dashboard — today
+it still only talks to one (`DEFAULT_SERVER_ID`), but the split itself is
+what makes adding a second one later just a matter of registering it, not a
+rearchitecture.
+
+Every domain module (`app/firewall.py`, `app/pivpn_ctl.py`, ...) is written
+as if it always runs locally — only a handful of primitives
+(`app/privileged.py`'s `run_root`, `app/pivpn_ctl.py`'s `_run_pivpn`/
+`read_client_ovpn`) know or care whether "locally" means this machine or
+relayed to the agent. `HUB_MODE=false` (unset, the default) is standalone
+mode and is completely unaffected by any of this.
+
+### 1. On the hub — set up the app as normal, then add hub-specific config
+
+Run `./setup.sh` on the hub machine exactly as in
+[Complete setup](#complete-setup-start-to-finish) above (this provisions
+its own Postgres — the hub's database, not the agent box's). Then add to
+its `.env`:
+
+```
+HUB_MODE=true
+DEFAULT_SERVER_ID=1          # matches the id manage_servers.py prints below
+```
+
+### 2. On the hub — turn on TLS for the agent-facing connection
+
+```bash
+./setup-hub-tls.sh
+```
+
+Generates a self-signed certificate (with a proper `IP:`/`DNS:` Subject
+Alternative Name — a CN-only cert fails modern TLS hostname verification
+even when the name is right) for `instance/hub-gateway.crt`/`.key`, and
+prints the exact `.env` lines to add on the hub (`GATEWAY_TLS_CERT`/
+`GATEWAY_TLS_KEY`) and on every agent (`HUB_URL=wss://...`,
+`HUB_TLS_CERT=<path to the copied .crt>`). Only the `.crt` (public half)
+ever needs to leave the hub — never copy the `.key` anywhere.
+
+### 3. On the hub — register the agent box
+
+```bash
+python3 manage_servers.py register <name-for-this-box>
+```
+
+Prints a `server_id` and a one-time `token`. The raw token is shown exactly
+once and only its hash is ever stored — write both down now, paste them
+into the agent's own `.env` below. Lost the token? There's no recovery;
+just register again under a new name.
+
+### 4. On the hub — start both hub processes
+
+Two separate long-running processes, not one — `hub_gateway.py` holds the
+live WebSocket to every agent; the Flask app (gunicorn) talks to it over a
+local Unix socket per request, not directly:
+
+```bash
+sed -e "s#__APP_DIR__#$(pwd)#g" -e "s/__USER__/$(whoami)/g" \
+  deploy/pivpn-webui-hub-gateway.service.template | sudo tee /etc/systemd/system/pivpn-webui-hub-gateway.service >/dev/null
+sudo systemctl daemon-reload
+sudo systemctl enable --now pivpn-webui-hub-gateway
+sudo systemctl enable --now pivpn-webui   # the normal Flask/gunicorn service from setup.sh
+```
+
+### 5. On the agent (the actual PiVPN box) — minimal install, no Postgres/nginx needed
+
+The agent only ever needs `agent.py`, `config.py`, and the `app/` package
+(for `pivpn_ctl.py`/`privileged.py`) — not the rest of the app, and
+critically **not** its own Postgres:
+
+```bash
+git clone https://github.com/vannyratanak/pivpn-webui.git
+cd pivpn-webui
+python3 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt   # yes, the full list — `from app import pivpn_ctl` runs
+                                   # app/__init__.py first (Flask, psycopg2 and all), even
+                                   # though agent.py itself never uses most of it at runtime
+```
+
+Copy the hub's cert (from step 2) to this box, then write this box's own
+`.env` (**not** the hub's — different values entirely on this side):
+
+```
+HUB_URL=wss://<hub's address>:8765
+AGENT_SERVER_ID=<the id manage_servers.py printed>
+AGENT_TOKEN=<the token manage_servers.py printed>
+HUB_TLS_CERT=<path where you copied the hub's .crt>
+PIVPN_OVPN_DIR=/home/<user>/ovpns
+```
+
+The agent needs its own, narrower sudoers grant — just what `agent.py`
+itself calls, none of the standalone/hub template's CD-deploy-specific
+lines (there's no Flask service on this box to restart). Validate before
+installing, same as `setup.sh` does for the standalone case, not after —
+a syntax error caught only once the file is already live in
+`/etc/sudoers.d/` is a much worse time to find it:
+
+```bash
+SUDOERS_TMP="$(mktemp)"
+sed -e "s/__USER__/$(whoami)/g" deploy/sudoers-pivpn-webui-agent.template > "$SUDOERS_TMP"
+sudo visudo -cf "$SUDOERS_TMP"
+sudo install -m 0440 -o root -g root "$SUDOERS_TMP" /etc/sudoers.d/pivpn-webui-agent
+rm -f "$SUDOERS_TMP"
+```
+
+Then install it as a service and start it:
+
+```bash
+sed -e "s/__USER__/$(whoami)/g" -e "s#__APP_DIR__#$(pwd)#g" \
+  deploy/pivpn-webui-agent.service.template | sudo tee /etc/systemd/system/pivpn-webui-agent.service >/dev/null
+sudo systemctl daemon-reload
+sudo systemctl enable --now pivpn-webui-agent
+```
+
+**Verify**: `sudo journalctl -u pivpn-webui-agent -n 20` should show
+`connected to hub as server #<id>`; the hub's own
+`sudo journalctl -u pivpn-webui-hub-gateway -n 20` should show the matching
+`agent for server #<id> connected`. Then log into the hub's web UI and
+visit Clients — it should show this box's real clients.
+
+### Reaching the hub's web UI itself
+
+The hub's Flask app still only speaks plain HTTP on its own
+(`gunicorn`/`wsgi.py` never terminate TLS by default) — see
+[Accessing it remotely](#accessing-it-remotely) below for the normal
+nginx-in-front option. For quickly reaching it from a phone/tablet on the
+same network without setting up nginx first, `wsgi.py` (the plain
+`python3 wsgi.py` dev-server path, not gunicorn) can terminate TLS itself
+with a self-signed cert:
+
+```
+BIND_HOST=0.0.0.0
+BIND_TLS_CERT=/path/to/instance/webui.crt
+BIND_TLS_KEY=/path/to/instance/webui.key
+```
+
+Generate that cert the same way as `setup-hub-tls.sh` does (see that
+script), just for the hub's own LAN address instead of the agent
+connection. For anything beyond quick testing, prefer gunicorn +
+`--certfile`/`--keyfile` (or nginx) over the plain dev server — see
+[Database concurrency and gunicorn workers](#database-concurrency-and-gunicorn-workers)
+for why the dev server alone doesn't hold up under more than one client at
+a time even with `threaded=True`: it does each new connection's TLS
+handshake in its single accept loop, before handing off to a thread, so
+one slow/incomplete handshake blocks every other client until it resolves.
 
 ## Accessing it remotely
 
@@ -501,16 +670,14 @@ those specifically.
 
 ## Database concurrency and gunicorn workers
 
-Two small changes, made together since they both target the same
-question — "does this hold up once traffic grows a lot?":
+**PostgreSQL handles concurrent reads/writes natively** (MVCC — a write in
+progress, e.g. the ingestion job running every 10s, never makes a
+concurrent read wait its turn, and vice versa) — nothing app-side to
+configure for that, unlike the SQLite-era `WAL` pragma this section used to
+describe before the Postgres migration.
 
-- **SQLite runs in WAL mode** (`PRAGMA journal_mode=WAL` +
-  `synchronous=NORMAL`, both set once in `db.init_db()` — WAL is sticky,
-  persisted in the database file itself, so every later connection picks
-  it up automatically). Without this, a write in progress (the ingestion
-  job, every 10s) can make a concurrent page read wait its turn, and vice
-  versa — the default rollback-journal mode takes turns instead of
-  allowing both at once.
+One change still matters for throughput under load:
+
 - **gunicorn runs threaded workers**: `-w 2 --worker-class gthread
   --threads 4` (was `-w 2` alone) in `pivpn-webui.service.template` — still
   2 separate worker *processes* (same crash/fault isolation as before),
@@ -520,10 +687,12 @@ question — "does this hold up once traffic grows a lot?":
   release Python's GIL while waiting), which is exactly the case threads
   help with.
 
-**Real numbers, not estimates** — measured live against an isolated
-throwaway database on a real install (never the production DB; deleted
-after), simulating a steady-state, heavily-loaded scenario (100 clients,
-~4,880 flow rows/hour each, 7-day retention → ~4.88M rows):
+**Real numbers, not estimates** (⚠️ measured before the SQLite→PostgreSQL
+migration — directionally still useful, not re-measured against Postgres
+yet) — measured live against an isolated throwaway database on a real
+install (never the production DB; deleted after), simulating a
+steady-state, heavily-loaded scenario (100 clients, ~4,880 flow rows/hour
+each, 7-day retention → ~4.88M rows):
 
 | Operation | Time |
 |---|---|
