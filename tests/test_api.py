@@ -176,6 +176,21 @@ def test_firewall_rules_endpoint_does_not_run_cli_discovery(client, monkeypatch)
     assert resp.status_code == 200
 
 
+def test_firewall_options_endpoint_supplies_dropdown_data_via_api(client, monkeypatch):
+    token = _admin_token(client)
+    monkeypatch.setattr("app.api.firewall.discover_cli_rules", lambda: (0, []))
+    monkeypatch.setattr("app.api.pivpn_ctl.list_client_ips", lambda: {"mobile": "10.8.0.2"})
+    monkeypatch.setattr("app.api.pivpn_ctl.list_clients", lambda: [{"name": "mobile", "status": "Valid"}])
+    monkeypatch.setattr("app.api.firewall.list_interfaces", lambda: ["ens18", "ens19"])
+    resp = client.get("/api/firewall/options", headers=_auth_header(token))
+    assert resp.status_code == 200
+    assert resp.json == {
+        "clients": [{"name": "mobile", "ip": "10.8.0.2"}],
+        "interfaces": ["ens18", "ens19"],
+        "warnings": [],
+    }
+
+
 # --- client lifecycle: create/renew/remove/download/block, mirroring
 # routes.py's own add_client/renew_client/remove_client/download_client/
 # block_client views, JSON in and out instead of a form+redirect.

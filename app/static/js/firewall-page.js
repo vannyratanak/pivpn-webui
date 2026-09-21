@@ -143,6 +143,30 @@ document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => notice.remove(), 3200);
   }
 
+  function loadOptions() {
+    return ApiClient.call('/api/firewall/options')
+      .then(async (resp) => {
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || 'Could not load firewall options.');
+        const clients = data.clients || [];
+        const filter = document.getElementById('rules-client-filter');
+        clients.forEach((c) => {
+          const option = new Option(`${c.name} (${c.ip})`, c.ip);
+          filter && filter.appendChild(option);
+        });
+        ['fwd-src-select', 'input-src-select'].forEach((id) => {
+          const select = document.getElementById(id);
+          if (!select) return;
+          const custom = select.querySelector('option[value="__custom__"]');
+          clients.forEach((c) => select.insertBefore(new Option(`${c.name} (${c.ip})`, c.ip), custom));
+          select.dispatchEvent(new Event('change'));
+        });
+        const iface = document.querySelector('#add-snat-form select[name="out_iface"]');
+        (data.interfaces || []).forEach((name) => iface && iface.appendChild(new Option(name, name)));
+        (data.warnings || []).forEach((warning) => showRowError(tbody, warning));
+      });
+  }
+
   tbody.addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-action]');
     if (!btn) return;
@@ -237,7 +261,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  loadRules(true).catch((error) => {
+  Promise.all([loadRules(true), loadOptions()]).catch((error) => {
     tbody.innerHTML = '<tr class="empty-row"><td colspan="10" class="empty">Could not load rules. Reload to retry.</td></tr>';
     showRowError(tbody, error.message);
   });

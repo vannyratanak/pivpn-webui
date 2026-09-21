@@ -10,18 +10,13 @@
   <div class="card-header-row firewall-rules-header">
     <div class="header-col">
       <h2>Active rules</h2>
-      {% if vpn_clients %}
       <div class="pagination-size rule-client-filter">
         <label>Filter by client
           <select id="rules-client-filter">
             <option value="">All Rules</option>
-            {% for c in vpn_clients %}
-            <option value="{{ c.ip }}">{{ c.name }} ({{ c.ip }})</option>
-            {% endfor %}
           </select>
         </label>
       </div>
-      {% endif %}
     </div>
     <div class="btn-group-stack">
       <div class="btn-group">
@@ -85,9 +80,6 @@
         <label>Source
           <select id="fwd-src-select">
             <option value="">Any (0.0.0.0/0)</option>
-            {% for c in vpn_clients %}
-            <option value="{{ c.ip }}">{{ c.name }} ({{ c.ip }})</option>
-            {% endfor %}
             <option value="__custom__">Custom IP/CIDR…</option>
           </select>
         </label>
@@ -130,9 +122,6 @@
         <label>Source
           <select id="input-src-select">
             <option value="">Any (0.0.0.0/0)</option>
-            {% for c in vpn_clients %}
-            <option value="{{ c.ip }}">{{ c.name }} ({{ c.ip }})</option>
-            {% endfor %}
             <option value="__custom__">Custom IP/CIDR…</option>
           </select>
         </label>
@@ -196,9 +185,6 @@
         <label>Outgoing interface <span class="hint">(optional — omit to use the server's default route)</span>
           <select name="out_iface">
             <option value="">Not set</option>
-            {% for i in interfaces %}
-            <option value="{{ i }}">{{ i }}</option>
-            {% endfor %}
           </select>
         </label>
         <label>Comment

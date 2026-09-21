@@ -639,46 +639,9 @@ def block_client(name):
 @login_required
 @admin_required
 def firewall_rules():
-    # Reconciliation against live iptables state still happens here, on
-    # page load, exactly as before — nothing else in the app triggers
-    # discover_cli_rules() (resync_rules()/"Apply Rules" pushes the
-    # opposite direction, DB -> iptables). Its DB writes land before the
-    # page is even sent back, so firewall-page.js's own
-    # GET /api/firewall/rules fetch (which deliberately skips this same
-    # reconciliation — see that endpoint's own docstring) still sees the
-    # result. The one visible difference: the per-row "not found live"
-    # badge this used to add is gone from the JS-rendered table — the
-    # flash message below still surfaces it, just not inline per-row.
-    try:
-        imported, missing = firewall.discover_cli_rules()
-        if imported:
-            _audit("firewall_discover", f"{imported} rule(s) imported from CLI")
-        if missing:
-            details = "; ".join(f"#{r['id']} ({r['kind']}: {firewall.describe_rule(r)})" for r in missing)
-            flash(
-                f"{len(missing)} tracked rule(s) no longer found live — possibly removed directly "
-                f"via iptables instead of through this app: {details}. If that's correct, use "
-                "Delete on the highlighted row(s) below to remove them from tracking too.",
-                "warning",
-            )
-            _audit(
-                "firewall_discover", f"{len(missing)} rule(s) missing live", "error",
-                ", ".join(f"#{r['id']}" for r in missing),
-            )
-    except PrivilegedCommandError as exc:
-        _audit("firewall_discover", "", "error", str(exc))
-
-    client_ips = pivpn_ctl.list_client_ips()
-    try:
-        valid_clients = [c for c in pivpn_ctl.list_clients() if c["status"].lower() == "valid"]
-    except pivpn_ctl.PivpnError:
-        valid_clients = []
-    vpn_clients = [
-        {"name": c["name"], "ip": client_ips[c["name"]]}
-        for c in valid_clients if client_ips.get(c["name"])
-    ]
-
-    return render_template("firewall.html", vpn_clients=vpn_clients, interfaces=firewall.list_interfaces())
+    # Data and live reconciliation are loaded by firewall-page.js through
+    # /api/firewall/rules and /api/firewall/options after this shell loads.
+    return render_template("firewall.html")
 
 
 @bp.route("/firewall/import", methods=["POST"])

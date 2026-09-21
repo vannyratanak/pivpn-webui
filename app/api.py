@@ -160,6 +160,41 @@ def firewall_rules():
     return jsonify({"rules": rules})
 
 
+@bp.route("/firewall/options", methods=["GET"])
+@jwt_required()
+def firewall_options():
+    """Return the live client/interface choices used by Firewall forms.
+    Discovery belongs here with the rest of the page data, so opening the
+    HTML shell never executes a privileged/remote lookup or renders stale
+    dropdown values server-side."""
+    err = _require_admin()
+    if err:
+        return err
+    warnings = []
+    try:
+        imported, missing = firewall.discover_cli_rules()
+        if imported:
+            _audit("firewall_discover", f"{imported} rule(s) imported from CLI")
+        if missing:
+            warnings.append(
+                f"{len(missing)} tracked rule(s) no longer found live: "
+                + ", ".join(f"#{r['id']}" for r in missing)
+            )
+    except PrivilegedCommandError as exc:
+        warnings.append(str(exc))
+    client_ips = pivpn_ctl.list_client_ips()
+    clients = []
+    try:
+        valid = [c for c in pivpn_ctl.list_clients() if c["status"].lower() == "valid"]
+        clients = [
+            {"name": c["name"], "ip": client_ips[c["name"]]}
+            for c in valid if client_ips.get(c["name"])
+        ]
+    except pivpn_ctl.PivpnError as exc:
+        warnings.append(str(exc))
+    return jsonify({"clients": clients, "interfaces": firewall.list_interfaces(), "warnings": warnings})
+
+
 @bp.route("/clients", methods=["POST"])
 @jwt_required()
 def add_client():

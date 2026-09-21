@@ -878,7 +878,7 @@ Endpoints mirror the browser pages 1:1, with the same role gating
 | Auth | `POST /api/login` |
 | Clients | `GET/POST /api/clients`, `GET /api/clients/<name>`, `POST /api/clients/<name>/renew`, `DELETE /api/clients/<name>`, `GET /api/clients/<name>/download`, `POST /api/clients/<name>/block`, `POST /api/clients/import`, `POST /api/clients/bulk-remove` |
 | Per-client rules | `GET/POST /api/clients/<name>/rules`, `POST .../rules/<id>/toggle`, `DELETE .../rules/<id>`, `POST .../rules/resync\|persist\|bulk-disable\|bulk-delete` |
-| Firewall (admin) | `GET /api/firewall/rules`, `POST /api/firewall/forward\|input\|snat\|portforward`, `POST /api/firewall/rules/<id>/toggle`, `DELETE /api/firewall/rules/<id>`, `POST /api/firewall/rules/<id>/reorder`, `POST /api/firewall/import\|resync\|persist\|bulk-disable\|bulk-delete` |
+| Firewall (admin) | `GET /api/firewall/rules`, `GET /api/firewall/options`, `POST /api/firewall/forward\|input\|snat\|portforward`, `POST /api/firewall/rules/<id>/toggle`, `DELETE /api/firewall/rules/<id>`, `POST /api/firewall/rules/<id>/reorder`, `POST /api/firewall/import\|resync\|persist\|bulk-disable\|bulk-delete` |
 | VPN Routes (admin) | `GET/POST/DELETE /api/vpn-routes` |
 | Logs | `GET /api/logs?tab=...`, `POST /api/logs/refresh` |
 | Users | `GET/POST /api/users`, `DELETE /api/users/<id>`, `POST /api/users/<id>/reset-password` (admin except list/your own password), `POST /api/account/password` |
