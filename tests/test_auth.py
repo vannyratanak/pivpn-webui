@@ -1,9 +1,11 @@
+import time
+
 import pytest
 from werkzeug.security import generate_password_hash
 
 import config
 from app import db
-from app.auth import User, verify_credentials
+from app.auth import User, idle_timed_out, verify_credentials
 from tests.conftest import _configure_test_db
 
 
@@ -43,3 +45,22 @@ def test_role_carried_through(_db):
     user = verify_credentials("mod", "secret123")
     assert user.role == "moderator"
     assert user.is_admin is False
+
+
+def test_idle_timed_out_false_for_recent_activity(monkeypatch):
+    monkeypatch.setattr(config, "IDLE_TIMEOUT_MINUTES", 15)
+    assert idle_timed_out({"la": int(time.time())}) is False
+
+
+def test_idle_timed_out_true_past_the_configured_window(monkeypatch):
+    monkeypatch.setattr(config, "IDLE_TIMEOUT_MINUTES", 15)
+    stale = int(time.time()) - (16 * 60)
+    assert idle_timed_out({"la": stale}) is True
+
+
+def test_idle_timed_out_true_for_a_token_with_no_la_claim(monkeypatch):
+    # Same precedent as token_superseded's handling of a missing "gen"
+    # claim — a token issued before this feature existed forces one
+    # re-login rather than being silently trusted as "never idle".
+    monkeypatch.setattr(config, "IDLE_TIMEOUT_MINUTES", 15)
+    assert idle_timed_out({}) is True

@@ -55,6 +55,31 @@
   </form>
 </dialog>
 
+{% if current_user.is_admin %}
+<!-- One shared dialog, reused for whichever row's "Reset password" button
+     was clicked (see users-page.js) — rows are rendered dynamically from
+     GET /api/users now, so a per-row <dialog> generated at Jinja-render
+     time can't exist for data that doesn't arrive until after the page
+     loads. Matches #confirm-modal's own shared-singleton precedent in
+     base.html. -->
+<dialog id="reset-pw-dialog" class="modal" onclick="closeDialogIfClickedOutside(event, this)">
+  <button type="button" class="modal-close-btn" onclick="document.getElementById('reset-pw-dialog').close()" aria-label="Close">&times;</button>
+  <h2 data-reset-heading>Reset password</h2>
+  <form class="inline-form">
+    <label><span class="label-text">New password<span class="required-star" aria-hidden="true">*</span></span>
+      <input type="password" name="password" required autocomplete="new-password">
+    </label>
+    <label><span class="label-text">Confirm<span class="required-star" aria-hidden="true">*</span></span>
+      <input type="password" name="confirm" required autocomplete="new-password">
+    </label>
+    <div class="btn-group">
+      <button type="submit">Set password</button>
+      <button type="button" class="btn" onclick="document.getElementById('reset-pw-dialog').close()">Cancel</button>
+    </div>
+  </form>
+</dialog>
+{% endif %}
+
 <section class="card">
   <div class="card-header-row">
     <h2>Existing users</h2>
@@ -67,7 +92,7 @@
   </div>
 
   <div class="table-scroll">
-  <table id="users-table">
+  <table id="users-table" data-is-admin="{{ 'true' if current_user.is_admin else 'false' }}" data-current-user-id="{{ current_user.id }}">
     <thead>
       <tr>
         <th scope="col">Username</th>
@@ -77,47 +102,9 @@
       </tr>
     </thead>
     <tbody id="users-tbody">
-      {% if not users %}
-      <tr class="empty-row"><td colspan="{{ 4 if current_user.is_admin else 3 }}" class="empty">No users found.</td></tr>
-      {% endif %}
-      {% for u in users %}
-      <tr>
-        <td>{{ u.username }}{% if u.id == current_user.id | int %} <span class="hint">(you)</span>{% endif %}</td>
-        <td><span class="badge badge-role {{ 'badge-role-moderator' if u.role != 'admin' }}">{{ u.role }}</span></td>
-        <td>{{ u.created_at }}</td>
-        {% if current_user.is_admin %}
-        <td>
-          <div class="actions">
-          <button type="button" class="btn btn-sm btn-secondary" onclick="document.getElementById('reset-pw-{{ u.id }}').showModal()">Reset password</button>
-          <dialog id="reset-pw-{{ u.id }}" class="modal" onclick="closeDialogIfClickedOutside(event, this)">
-            <button type="button" class="modal-close-btn" onclick="document.getElementById('reset-pw-{{ u.id }}').close()" aria-label="Close">&times;</button>
-            <h2>Reset password for {{ u.username }}</h2>
-            <form method="post" action="{{ url_for('main.reset_user_password', user_id=u.id) }}" class="inline-form">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <label><span class="label-text">New password<span class="required-star" aria-hidden="true">*</span></span>
-                <input type="password" name="password" required autocomplete="new-password">
-              </label>
-              <label><span class="label-text">Confirm<span class="required-star" aria-hidden="true">*</span></span>
-                <input type="password" name="confirm" required autocomplete="new-password">
-              </label>
-              <div class="btn-group">
-                <button type="submit">Set password</button>
-                <button type="button" class="btn" onclick="document.getElementById('reset-pw-{{ u.id }}').close()">Cancel</button>
-              </div>
-            </form>
-          </dialog>
-
-          <form method="post" action="{{ url_for('main.delete_user', user_id=u.id) }}" class="btn-form"
-                data-confirm="Permanently remove {{ u.username }}? This cannot be undone."
-                data-confirm-label="Delete">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button type="submit" class="btn btn-sm btn-danger">Delete</button>
-          </form>
-          </div>
-        </td>
-        {% endif %}
-      </tr>
-      {% endfor %}
+      <!-- Populated by users-page.js via GET /api/users — this page's data
+           (and its row actions: reset-password/delete) comes from the
+           JSON API, not server-rendered Jinja, matching clients.html. -->
     </tbody>
   </table>
   </div>
@@ -136,9 +123,7 @@
       <button type="button" class="btn btn-sm" data-page-next>Next</button>
     </div>
   </div>
-  <script>
-    const usersPager = attachPagination('#users-tbody', 'tr:not(.empty-row)', 'users-page-size', 'users-pagination');
-    attachLogFilter('users-filter', '#users-tbody', 'tr:not(.empty-row)', '#users-table thead th:not(:last-child)', () => usersPager && usersPager.refresh());
-  </script>
+  <script src="{{ url_for('static', filename='js/api-client.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/users-page.js') }}"></script>
 </section>
 {% endblock %}

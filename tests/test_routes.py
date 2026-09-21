@@ -84,6 +84,83 @@ def test_logout_actually_clears_access_regression(client):
     assert "/login" in resp.headers["Location"]
 
 
+def test_second_login_invalidates_the_first_browser_session(client):
+    # Single-active-session: logging in from a second "browser" (a
+    # second test client, its own separate cookie jar, same account)
+    # must immediately invalidate the first one's session — its very
+    # next request should be treated as logged out, not still valid.
+    #
+    # Both clients are created fresh here rather than using the `client`
+    # fixture object directly for either one — that fixture holds its
+    # client open inside a `with` block for the whole test (so
+    # flask.session/etc. stay inspectable afterward), and mixing that
+    # preserved-context client with a second independent one in the same
+    # test produces bogus results (confirmed live: current_user resolved
+    # incorrectly for the second client's own request). Two fresh clients
+    # off the same app avoids that entirely.
+    session_a = client.application.test_client()
+    session_b = client.application.test_client()
+
+    session_a.post("/login", data={"username": "admin", "password": TEST_PASSWORD})
+    assert session_a.get("/clients").status_code == 200
+
+    session_b.post("/login", data={"username": "admin", "password": TEST_PASSWORD})
+    assert session_b.get("/clients").status_code == 200
+
+    resp = session_a.get("/clients")
+    assert resp.status_code == 302
+    assert "/login" in resp.headers["Location"]
+
+
+def test_idle_timeout_forces_relogin_after_the_configured_window(client, monkeypatch):
+    # idle_timed_out (see auth.py) reads config.IDLE_TIMEOUT_MINUTES fresh
+    # on every check, so simulating "the window already elapsed" doesn't
+    # need to actually sleep or mock time.time() — a threshold that's
+    # already negative is guaranteed to be exceeded by any real elapsed
+    # time, however small.
+    client.post("/login", data={"username": "admin", "password": TEST_PASSWORD})
+    assert client.get("/clients").status_code == 200
+
+    monkeypatch.setattr(config, "IDLE_TIMEOUT_MINUTES", -1)
+    resp = client.get("/clients")
+    assert resp.status_code == 302
+    assert "/login" in resp.headers["Location"]
+
+
+def test_heartbeat_requires_login(client):
+    resp = client.post("/account/heartbeat")
+    assert resp.status_code == 302
+    assert "/login" in resp.headers["Location"]
+
+
+def test_heartbeat_returns_no_content_when_logged_in(client):
+    client.post("/login", data={"username": "admin", "password": TEST_PASSWORD})
+    resp = client.post("/account/heartbeat")
+    assert resp.status_code == 204
+
+
+def test_heartbeat_keeps_the_session_alive_within_the_idle_window(client, monkeypatch):
+    # The scenario idle-timeout.js exists for: a page that only talks to
+    # /api/... (never touching this cookie-authenticated blueprint again)
+    # still needs *something* to keep the cookie's "la" claim fresh during
+    # real use, or genuinely-active users would get idle-logged-out anyway.
+    client.post("/login", data={"username": "admin", "password": TEST_PASSWORD})
+    monkeypatch.setattr(config, "IDLE_TIMEOUT_MINUTES", 15)
+    assert client.post("/account/heartbeat").status_code == 204
+    assert client.get("/clients").status_code == 200
+
+
+def test_idle_timeout_meta_present_only_when_logged_in(client):
+    client.post("/login", data={"username": "admin", "password": TEST_PASSWORD})
+    resp = client.get("/clients")
+    assert b'meta name="idle-timeout-minutes"' in resp.data
+    assert f'content="{config.IDLE_TIMEOUT_MINUTES}"'.encode() in resp.data
+
+    client.get("/logout")
+    resp = client.get("/login")
+    assert b'meta name="idle-timeout-minutes"' not in resp.data
+
+
 # --- _client_ip: X-Real-IP is only trustworthy when BIND_HOST=127.0.0.1
 # guarantees nginx is the sole caller (nginx's vhost always overwrites
 # that header with the real source). In the README's documented LAN-only
@@ -231,10 +308,13 @@ def test_users_page_requires_login(client):
 
 
 def test_users_page_loads_for_admin(client):
+    # Row data (and the actual username check) now comes from GET
+    # /api/users (see tests/test_api.py's test_list_users_excludes_
+    # password_hash and friends) — this view only renders the shell now,
+    # same as /clients.
     _login_admin(client)
     resp = client.get("/users")
     assert resp.status_code == 200
-    assert b"admin" in resp.data
 
 
 def test_add_user_creates_moderator(client):
@@ -452,17 +532,14 @@ def test_moderator_cannot_reach_activity_tab(client):
     assert b"Every audited action" not in resp.data
 
 
-def test_admin_activity_tab_shows_full_unfiltered_log(client):
+def test_admin_activity_tab_loads(client):
+    # Real content (a non-auth action showing up here, unlike Auth) is
+    # covered by tests/test_api.py's test_activity_tab_range_and_search_
+    # filter now — this view only renders the shell (see main.logs's own
+    # comment), same as /clients.
     _login_admin(client)
-    # A non-auth action (login/logout are the only things the old Auth
-    # tab ever showed) — Activity is the only place this should surface.
-    client.post("/users/add", data={
-        "username": "activitytest", "password": "x", "confirm": "x", "role": "moderator",
-    })
     resp = client.get("/logs?tab=activity")
     assert resp.status_code == 200
-    assert b"user_add" in resp.data
-    assert b"activitytest" in resp.data
 
 
 def test_admin_still_has_full_firewall_access(client):
@@ -471,177 +548,31 @@ def test_admin_still_has_full_firewall_access(client):
     assert client.get("/vpn-routes").status_code == 200
 
 
-def test_client_sessions_relabeled_ended_session_resorts_below_more_recent_ones(client, monkeypatch):
-    # Regression test: a session the log parser thinks is still "ongoing"
-    # (no matching disconnect ever logged — e.g. a killed process/unclean
-    # drop) gets correctly relabeled "Ended (exact time unknown)" once this
-    # route's live-connected-clients check confirms it's not actually
-    # connected — but it used to keep the top-pinned position it only ever
-    # earned by looking ongoing at sort time, even after being relabeled,
-    # burying a genuinely more recent (and fully closed) session below it.
-    #
-    # Seeds app/db.py's vpn_events table directly (via the `client`
-    # fixture's own temp DB) — list_client_sessions reads from there now,
-    # not a live journalctl fetch (see app/vpnlog.py's module docstring).
-    db.insert_vpn_events([
-        ("2026-09-15 09:46:39", "connected", "staleclient", "10.66.66.1:1", "", None),
-        ("2026-09-15 13:30:30", "connected", "recentclient", "10.66.66.1:2", "", None),
-        ("2026-09-15 13:30:48", "disconnected", "recentclient", "10.66.66.1:2", "", None),
-    ])
-    # Neither client is actually connected right now — this is what makes
-    # "staleclient" (log-ongoing but not live-connected) get relabeled.
-    monkeypatch.setattr("app.routes.pivpn_ctl.list_connected_clients", lambda: {})
-
+def test_logs_tab_loads(client):
+    # Real search/range/pagination/relabeling behavior all moved to
+    # tests/test_api.py (GET /api/logs) along with the DB queries
+    # themselves — this view only renders the shell now (see main.logs's
+    # own comment), same as /clients. Covers every tab loading + the
+    # search/range widgets echoing back the requested query params.
     _login_admin(client)
-    resp = client.get("/logs?tab=client_sessions&range=7d")
-    assert resp.status_code == 200
-    assert b"Ended (exact time unknown)" in resp.data
-
-    body = resp.data.decode()
-    # recentclient's session both started and ended later than staleclient's
-    # sole (stale) connect — it must render first now that staleclient has
-    # been correctly recognized as not actually ongoing anymore.
-    assert body.index("recentclient") < body.index("staleclient")
+    for tab in ("sessions", "client_sessions", "traffic", "system", "activity", "auth"):
+        resp = client.get(f"/logs?tab={tab}")
+        assert resp.status_code == 200, tab
 
 
-def test_traffic_tab_search_matches_across_full_history(client, monkeypatch):
-    db.insert_traffic_flows([
-        ("2026-09-16 10:00:00", "10.202.226.2", "1.1.1.1", None, "mobile",
-         "TCP", "1234", "443", "tun0", "ens18"),
-        ("2026-09-16 10:00:05", "10.202.226.3", "2.2.2.2", None, "laptop",
-         "TCP", "1235", "443", "tun0", "ens18"),
-    ])
-    _login_admin(client)
-    resp = client.get("/logs?tab=traffic&q=laptop&range=7d")
-    assert resp.status_code == 200
-    assert b"laptop" in resp.data
-    assert b"mobile" not in resp.data
-    assert b"1 total" in resp.data
-
-
-def test_traffic_tab_pagination_reaches_rows_past_the_old_300_cap(client, monkeypatch):
-    # The actual regression this exists for: with the old fixed limit=300,
-    # anything past the 300th-most-recent row was simply unreachable from
-    # the UI, no matter what. Seeds 21 rows at page_size=10 (a real,
-    # supported option) to prove page 3 reaches the oldest, distinct row
-    # in a genuine partial last page -- real pagination, not just "shows
-    # some rows".
-    db.insert_traffic_flows([
-        (f"2026-09-16 10:{i:02d}:00", "10.202.226.2", "1.1.1.1", None, f"client{i}",
-         "TCP", "1234", "443", "tun0", "ens18")
-        for i in range(21)
-    ])
-    _login_admin(client)
-    resp = client.get("/logs?tab=traffic&page=3&page_size=10&range=7d")
-    assert resp.status_code == 200
-    body = resp.data.decode()
-    assert "client0" in body  # most recent first -> last (partial) page has the oldest
-    assert "client1<" not in body  # client1..client9 belong on earlier pages
-    assert "Page 3 of 3" in body
-
-
-def test_sessions_tab_pagination_and_search(client, monkeypatch):
-    db.insert_vpn_events([
-        ("2026-09-16 10:00:00", "connected", "mobile", "10.66.66.1:1", "", None),
-        ("2026-09-16 10:00:05", "connected", "laptop", "10.66.66.1:2", "", None),
-    ])
-    _login_admin(client)
-    resp = client.get("/logs?tab=sessions&q=laptop")
-    assert resp.status_code == 200
-    assert b"laptop" in resp.data
-    assert b"mobile" not in resp.data
-
-
-def test_client_sessions_tab_search(client, monkeypatch):
-    db.insert_vpn_events([
-        ("2026-09-16 10:00:00", "connected", "mobile", "10.66.66.1:1", "", None),
-        ("2026-09-16 10:00:05", "connected", "laptop", "10.66.66.1:2", "", None),
-    ])
-    monkeypatch.setattr(
-        "app.routes.pivpn_ctl.list_connected_clients",
-        lambda: {"mobile": {}, "laptop": {}},
-    )
-    _login_admin(client)
-    resp = client.get("/logs?tab=client_sessions&q=laptop")
-    assert resp.status_code == 200
-    assert b"laptop" in resp.data
-    assert b"mobile" not in resp.data
-
-
-def test_logs_range_filters_out_events_older_than_the_window(client, monkeypatch):
-    from datetime import datetime, timedelta
-    now = datetime.now()
-    recent_ts = now.strftime("%Y-%m-%d %H:%M:%S")
-    old_ts = (now - timedelta(days=2)).strftime("%Y-%m-%d %H:%M:%S")
-    db.insert_vpn_events([
-        (old_ts, "connected", "old-client", "10.66.66.1:1", "", None),
-        (recent_ts, "connected", "recent-client", "10.66.66.1:2", "", None),
-    ])
-    _login_admin(client)
-    resp = client.get("/logs?tab=sessions&range=1h")
-    assert resp.status_code == 200
-    assert b"recent-client" in resp.data
-    assert b"old-client" not in resp.data
-
-
-def test_logs_invalid_range_value_falls_back_to_default(client, monkeypatch):
-    db.insert_vpn_events([
-        ("2020-01-01 00:00:00", "connected", "ancient-client", "10.66.66.1:1", "", None),
-    ])
-    _login_admin(client)
-    resp = client.get("/logs?tab=sessions&range=bogus")
-    assert resp.status_code == 200
+def test_logs_invalid_range_value_falls_back_to_default_in_the_shell(client):
     # An unrecognized ?range= falls back to the same default (1h) as no
-    # range at all — not "no cutoff" — so a 2020 event stays filtered out.
-    assert b"ancient-client" not in resp.data
-    assert b'value="1h" selected' in resp.data
-
-
-def test_logs_no_range_param_defaults_to_1h(client, monkeypatch):
-    db.insert_vpn_events([
-        ("2020-01-01 00:00:00", "connected", "ancient-client", "10.66.66.1:1", "", None),
-    ])
+    # range at all — not "no cutoff". The actual filtering behavior this
+    # implies is tested against real data in test_api.py; this only checks
+    # that the shell's own range <select> reflects the resolved value.
     _login_admin(client)
-    resp = client.get("/logs?tab=sessions")
-    assert resp.status_code == 200
-    assert b"ancient-client" not in resp.data
-    assert b'value="1h" selected' in resp.data
+    resp_bogus = client.get("/logs?tab=sessions&range=bogus")
+    assert resp_bogus.status_code == 200
+    assert b'value="1h" selected' in resp_bogus.data
 
-
-def test_activity_tab_range_and_search_filter_via_the_route(client, monkeypatch):
-    # Activity/User Auth read audit_log directly (no separate ingestion
-    # table), but go through the exact same q/range/page parsing in
-    # logs() as Sessions/Client Sessions/Traffic — this locks that in.
-    from datetime import datetime, timedelta
-    conn = db.get_conn()
-    old_ts = (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%d %H:%M:%S")
-    conn.execute(
-        "INSERT INTO audit_log (ts, actor, action, target, result) VALUES (%s, %s, %s, %s, %s)",
-        (old_ts, "admin", "client_add", "old-client", "ok"),
-    )
-    conn.commit()
-    conn.close()
-    _login_admin(client)
-    db.add_audit("admin", "client_add", target="fresh-client", result="ok")
-
-    resp = client.get("/logs?tab=activity")
-    assert resp.status_code == 200
-    assert b"fresh-client" in resp.data
-    assert b"old-client" not in resp.data  # default 1h range excludes a 3-day-old entry
-
-    resp = client.get("/logs?tab=activity&range=7d&q=old")
-    assert resp.status_code == 200
-    assert b"old-client" in resp.data
-    assert b"fresh-client" not in resp.data
-
-
-def test_auth_tab_only_shows_login_logout_actions(client, monkeypatch):
-    _login_admin(client)
-    db.add_audit("admin", "client_add", target="laptop-anna", result="ok")
-    resp = client.get("/logs?tab=auth&range=7d")
-    assert resp.status_code == 200
-    assert b"login" in resp.data  # this test's own _login_admin call
-    assert b"laptop-anna" not in resp.data
+    resp_missing = client.get("/logs?tab=sessions")
+    assert resp_missing.status_code == 200
+    assert b'value="1h" selected' in resp_missing.data
 
 
 def test_logs_refresh_requires_login(client):
@@ -727,42 +658,35 @@ def test_reorder_route_degrades_cleanly_on_privileged_command_error(client, monk
 def test_delete_user_form_survives_a_quote_in_the_username(client):
     # Regression test for a real bug: usernames have no character-set
     # validation (unlike client names, which are regex-restricted), and
-    # the Delete button's confirmation used an inline
+    # the Delete button's confirmation used to use an inline
     # onsubmit="return confirm('...{{ username }}...');" — a username
-    # containing a single quote breaks that embedded JS string. Live-
-    # verified in a real browser: the browser decodes the HTML entity back
-    # to a literal ' before compiling the onsubmit attribute as JS, so the
-    # confirm() call's string literal gets cut short — a syntax error that
-    # silently no-ops the whole handler instead of throwing, meaning the
-    # form submits with NO confirmation prompt at all. Fixed by moving to
-    # a data-confirm="..." attribute read via JS's .dataset (a real
-    # string value, never compiled as JS source) instead of an inline
-    # onsubmit with embedded dynamic content — this test locks in that the
-    # vulnerable pattern doesn't reappear for a username containing a
-    # quote (or any other character that could break embedded JS).
+    # containing a single quote breaks that embedded JS string. Fixed
+    # originally by moving to a data-confirm="..." attribute read via
+    # JS's .dataset instead of an inline onsubmit with embedded dynamic
+    # content.
+    #
+    # Post-JWT-conversion, user rows (and the Delete button's confirm
+    # message) are built entirely client-side by users-page.js from GET
+    # /api/users JSON — via escapeHtml() + a data-username attribute +
+    # window.askConfirm's own template literal, never an inline onsubmit
+    # with embedded content — so this vulnerability class can't reappear
+    # here regardless of what characters a username contains. That part
+    # only runs in a real browser (no JS executes in this test client);
+    # what's left to check at this layer is that the static shell never
+    # regains the old vulnerable pattern.
     _login_admin(client)
     db.insert_user("O'Brien", generate_password_hash(MOD_PASSWORD), "moderator")
     resp = client.get("/users")
-    html = resp.data.decode()
-    assert "onsubmit" not in html
-    assert 'data-confirm="Permanently remove O&#39;Brien? This cannot be undone."' in html
+    assert "onsubmit" not in resp.data.decode()
 
 
-# --- client_detail: per-client status/session summary plus exactly the
-# firewall rules scoped to that client (via firewall.rule_client_name), and
-# the shared _redirect_after_rule_change() next= behavior its "add a rule"
-# form (and the Firewall page's own toggle/delete forms) rely on.
-
-def _stub_single_client(monkeypatch, name="laptop-anna", ip="10.202.226.2", session=None):
-    monkeypatch.setattr("app.routes.pivpn_ctl.list_clients", lambda: [
-        {"status": "Valid", "name": name, "expiration": "2027-01-01", "raw": ""},
-    ])
-    monkeypatch.setattr("app.routes.pivpn_ctl.list_client_ips", lambda: {name: ip})
-    monkeypatch.setattr(
-        "app.routes.pivpn_ctl.list_connected_clients",
-        lambda: ({name: session} if session else {}),
-    )
-
+# --- client_detail: a shell page now (see clients()'s own precedent) —
+# status/session/rules all come from client-detail-page.js's own fetch()
+# calls against /api/clients/<name> and /api/clients/<name>/rules after
+# this loads, so "does this client actually exist"/"what does its status
+# look like"/"which rules are scoped to it" moved to test_api.py's
+# coverage of those endpoints. Only the syntactic name check and the
+# login/role gate still happen at this route.
 
 def test_client_detail_requires_login(client):
     resp = client.get("/clients/laptop-anna")
@@ -770,78 +694,20 @@ def test_client_detail_requires_login(client):
     assert "/login" in resp.headers["Location"]
 
 
-def test_client_detail_allows_moderator(client, monkeypatch):
+def test_client_detail_allows_moderator(client):
     # Unlike the main Firewall page (still admin-only), a moderator gets
     # full rule management scoped to one client here — same "client
     # control" territory as the Clients list' own renew/block/remove.
-    _stub_single_client(monkeypatch, name="laptop-anna")
     _add_moderator()
     _login_moderator(client)
     assert client.get("/clients/laptop-anna").status_code == 200
 
 
-def test_client_detail_unknown_client_404s(client, monkeypatch):
+def test_client_detail_invalid_name_format_404s(client):
+    # validate_name (letters/digits/-/_ only) rejects this before the
+    # page even renders — the one check still done server-side here.
     _login_admin(client)
-    _stub_single_client(monkeypatch, name="laptop-anna")
-    assert client.get("/clients/someone-else").status_code == 404
-
-
-def test_client_detail_invalid_name_format_404s(client, monkeypatch):
-    # validate_name (letters/digits/-/_ only) rejects this before it ever
-    # gets to the pivpn_ctl lookup — same 404 either way.
-    _login_admin(client)
-    _stub_single_client(monkeypatch, name="laptop-anna")
     assert client.get("/clients/not a valid name!").status_code == 404
-
-
-def test_client_detail_shows_status_and_ip(client, monkeypatch):
-    _login_admin(client)
-    _stub_single_client(
-        monkeypatch, name="laptop-anna", ip="10.202.226.2",
-        session={"real_address": "203.0.113.9:5000", "virtual_address": "10.202.226.2",
-                 "bytes_recv": "1000", "bytes_sent": "2000", "since": "2026-09-16 10:00:00"},
-    )
-    resp = client.get("/clients/laptop-anna")
-    assert resp.status_code == 200
-    html = resp.data.decode()
-    assert "laptop-anna" in html
-    assert "10.202.226.2" in html
-    assert "Connected since 2026-09-16 10:00:00" in html
-
-
-def test_client_detail_shows_only_this_clients_rules(client, monkeypatch):
-    monkeypatch.setattr("app.routes.pivpn_ctl.list_clients", lambda: [
-        {"status": "Valid", "name": "laptop-anna", "expiration": "", "raw": ""},
-    ])
-    monkeypatch.setattr(
-        "app.routes.pivpn_ctl.list_client_ips",
-        lambda: {"laptop-anna": "10.202.226.2", "phone-bob": "10.202.226.3"},
-    )
-    monkeypatch.setattr("app.routes.pivpn_ctl.list_connected_clients", lambda: {})
-    _login_admin(client)
-
-    db.insert_rule({
-        "kind": "forward", "action": "DROP", "protocol": "tcp",
-        "src": "10.202.226.2", "dst": "1.2.3.4", "dport": "443",
-        "comment": "annas-rule",
-    })
-    db.insert_rule({
-        "kind": "forward", "action": "DROP", "protocol": "tcp",
-        "src": "10.202.226.3", "dst": "1.2.3.4", "dport": "443",
-        "comment": "bobs-rule",
-    })
-    db.insert_rule({
-        "kind": "client_block", "action": "DROP",
-        "client_name": "laptop-anna", "client_ip": "10.202.226.2",
-        "comment": "annas-block",
-    })
-
-    resp = client.get("/clients/laptop-anna")
-    html = resp.data.decode()
-    assert resp.status_code == 200
-    assert "annas-rule" in html
-    assert "annas-block" in html
-    assert "bobs-rule" not in html
 
 
 # --- /firewall/forward, /firewall/<id>/toggle, /firewall/<id>/delete
@@ -1042,4 +908,13 @@ def test_client_persist_rules_invalid_name_404s(client):
     _login_admin(client)
     resp = client.post("/clients/not a valid name!/rules/persist")
     assert resp.status_code == 404
+
+
+
+def test_logout_revokes_the_browser_bearer_token(client):
+    client.post('/login', data={'username': 'admin', 'password': TEST_PASSWORD})
+    token = client.post('/account/api-token').json['access_token']
+    client.get('/logout')
+    resp = client.get('/api/clients', headers={'Authorization': f'Bearer {token}'})
+    assert resp.status_code == 401
 

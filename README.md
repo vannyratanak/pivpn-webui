@@ -876,9 +876,9 @@ Endpoints mirror the browser pages 1:1, with the same role gating
 | Area | Endpoints |
 |---|---|
 | Auth | `POST /api/login` |
-| Clients | `GET/POST /api/clients`, `GET /api/clients/<name>`, `POST /api/clients/<name>/renew`, `DELETE /api/clients/<name>`, `GET /api/clients/<name>/download`, `POST /api/clients/<name>/block` |
-| Per-client rules | `POST /api/clients/<name>/rules`, `POST .../rules/<id>/toggle`, `DELETE .../rules/<id>` |
-| Firewall (admin) | `GET /api/firewall/rules`, `POST /api/firewall/forward\|input\|snat\|portforward`, `POST /api/firewall/rules/<id>/toggle`, `DELETE /api/firewall/rules/<id>` |
+| Clients | `GET/POST /api/clients`, `GET /api/clients/<name>`, `POST /api/clients/<name>/renew`, `DELETE /api/clients/<name>`, `GET /api/clients/<name>/download`, `POST /api/clients/<name>/block`, `POST /api/clients/import`, `POST /api/clients/bulk-remove` |
+| Per-client rules | `GET/POST /api/clients/<name>/rules`, `POST .../rules/<id>/toggle`, `DELETE .../rules/<id>`, `POST .../rules/resync\|persist\|bulk-disable\|bulk-delete` |
+| Firewall (admin) | `GET /api/firewall/rules`, `POST /api/firewall/forward\|input\|snat\|portforward`, `POST /api/firewall/rules/<id>/toggle`, `DELETE /api/firewall/rules/<id>`, `POST /api/firewall/rules/<id>/reorder`, `POST /api/firewall/import\|resync\|persist\|bulk-disable\|bulk-delete` |
 | VPN Routes (admin) | `GET/POST/DELETE /api/vpn-routes` |
 | Logs | `GET /api/logs?tab=...`, `POST /api/logs/refresh` |
 | Users | `GET/POST /api/users`, `DELETE /api/users/<id>`, `POST /api/users/<id>/reset-password` (admin except list/your own password), `POST /api/account/password` |
@@ -886,12 +886,27 @@ Endpoints mirror the browser pages 1:1, with the same role gating
 `app/api.py` is the source of truth for exact request/response shapes —
 each endpoint's docstring says which browser view it mirrors.
 
-**The browser UI itself also runs on a JWT**, not Flask's session cookie
-— `app/auth.py` issues one as an httpOnly cookie on login, invisible to
-page JavaScript, refreshed on every request so a login still lasts the
-usual idle window (`SESSION_LIFETIME_HOURS`). This is separate from the
-bearer-token flow above and not something you interact with directly;
-CSRF protection (the hidden token in every form) is unchanged.
+The browser loads page data and submits management actions through the
+same bearer API, including imports, bulk actions, downloads, and firewall
+reordering. Tables show loading skeletons while fetching data. Import
+endpoints accept multipart files and return JSON, including individual
+failures when only part of an import succeeds.
+
+Login issues an HttpOnly JWT cookie for page navigation. JavaScript obtains
+its bearer token from the cookie- and CSRF-protected `/account/api-token`
+endpoint and stores it in localStorage. An expired bearer token is refreshed
+once and the request retried while the browser session is still valid.
+Because localStorage is accessible to page scripts, protecting against XSS
+remains essential. A new login invalidates earlier tokens for that account; logging out also
+revokes the bearer tokens issued during that session.
+
+After **90 seconds without activity** (`IDLE_TIMEOUT_MINUTES=1.5`), the browser
+returns to login. Activity extends that deadline through CSRF-protected
+heartbeats, and activity in another tab counts too. A countdown appears in
+the last 10 seconds before idle logout; ordinary bearer-token refresh does not
+trigger a logout warning. The server also rejects browser cookies whose
+last recorded activity has exceeded the idle window. `SESSION_LIFETIME_HOURS`
+controls the cookie's longer sliding expiry.
 
 ## Known limitations / things to check
 

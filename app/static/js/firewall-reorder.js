@@ -4,17 +4,10 @@
 // the keyboard (drag-and-drop has no keyboard equivalent of its own —
 // found by an /impeccable audit, since without this the whole feature was
 // mouse-only). Both send which rule it landed before/after to POST
-// /firewall/<id>/reorder via fetch. Unlike every other mutation in this
-// app (see nav-loading.js's comment on why: plain form posts, no AJAX page
-// loads), this one deliberately doesn't redirect/reload — the row is
-// already in its new spot in the DOM the moment it's dropped/moved, so a
-// full reload would just be flicker and a scroll-position jump for a
-// change that's already visible.
+// /api/firewall/rules/<id>/reorder using the shared bearer token.
 function attachFirewallReorder(tbodySelector) {
   const tbody = document.querySelector(tbodySelector);
   if (!tbody) return;
-  const csrfMeta = document.querySelector('meta[name="csrf-token"]');
-  const csrfToken = csrfMeta ? csrfMeta.content : '';
   let draggingRow = null;
 
   // Pagination (pagination.js) hides off-page rows via style.display
@@ -51,9 +44,9 @@ function attachFirewallReorder(tbodySelector) {
   // both just need "tell the server the new before/after, then recover if
   // it disagrees."
   function sendReorder(ruleId, body, onSuccess) {
-    fetch(`/firewall/${ruleId}/reorder`, {
+    ApiClient.call(`/api/firewall/rules/${ruleId}/reorder`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
       .then((resp) => resp.ok ? resp.json() : Promise.reject(resp))

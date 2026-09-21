@@ -20,6 +20,17 @@ ADMIN_PASSWORD_HASH = os.environ.get("ADMIN_PASSWORD_HASH")
 # "N hours since your *last* request," not "N hours since you logged in."
 SESSION_LIFETIME_HOURS = int(os.environ.get("SESSION_LIFETIME_HOURS", "8"))
 
+# A second, much shorter clock layered on top of SESSION_LIFETIME_HOURS —
+# that one tracks "N hours since your last *request*", this one tracks "N
+# minutes since your last real *activity* in the browser" (see the "la"
+# claim in auth.py's issue_html_jwt_cookie and the JS heartbeat in
+# static/js/idle-timeout.js). A request alone no longer proves activity
+# now that most pages fetch their data via JS instead of full navigations.
+# Browser inactivity window. A fractional minute is allowed so installations
+# can use short policies such as 90 seconds without a separate unit or timer.
+# The default is 90 seconds; API JWT expiry remains independent below.
+IDLE_TIMEOUT_MINUTES = float(os.environ.get("IDLE_TIMEOUT_MINUTES", "1.5"))
+
 # JWT for the API (app/api.py) — a separate credential from the browser's
 # session cookie above, for scripts/other systems calling this app without
 # logging in through a browser. Deliberately its own secret, not a reuse of
@@ -161,6 +172,16 @@ AGENT_TLS_KEY = os.environ.get("AGENT_TLS_KEY")
 # GATEWAY_TLS_CERT/KEY (mTLS needs the base TLS connection to exist
 # first).
 GATEWAY_CLIENT_CA = os.environ.get("GATEWAY_CLIENT_CA")
+
+# How long a freshly-issued agent token stays valid (manage_servers.py's
+# register()/rotate_token()) before verify_server_token starts rejecting
+# it — bounds how long a leaked token stays useful, same reasoning as the
+# browser/API JWTs' own short expiry, just on a much longer timescale
+# since this gates a long-lived background connection rather than a
+# per-request credential. Existing tokens issued before this existed have
+# no expiry at all (NULL in the db) until rotated — see db.py's
+# _MIGRATIONS entry for servers.token_expires_at.
+AGENT_TOKEN_TTL_DAYS = int(os.environ.get("AGENT_TOKEN_TTL_DAYS", "365"))
 
 # Only enforced when this module is actually imported by the running app
 # (wsgi.py / app factory), not by setup.sh or other tooling that imports

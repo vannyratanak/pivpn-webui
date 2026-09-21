@@ -51,6 +51,32 @@ live_agents: dict[int, "websockets.WebSocketServerProtocol"] = {}
 pending: dict[str, asyncio.Future] = {}
 
 
+def _peer_cert_cn(websocket) -> str | None:
+    """The verified TLS client certificate's Common Name, or None when
+    mutual TLS is off (GATEWAY_CLIENT_CA unset — no client cert was ever
+    required or requested) or the connection somehow has no cert. Unlike
+    the hello message's fields, this can't be lied about — the transport
+    already cryptographically verified whoever's holding this connection
+    really does possess the private key matching a cert this hub's own
+    CA signed, before this function ever runs."""
+    transport = getattr(websocket, "transport", None)
+    peercert = transport.get_extra_info("peercert") if transport else None
+    if not peercert:
+        return None
+    for rdn in peercert.get("subject", ()):
+        for key, value in rdn:
+            if key == "commonName":
+                return value
+    return None
+
+
+async def _reject_hello(websocket, actor: str, server_id, reason: str, detail: str):
+    log.warning("agent hello rejected (server_id=%s): %s", server_id, detail)
+    await asyncio.to_thread(db.add_audit, actor, "agent_hello_rejected", f"server_id={server_id}", "error", detail)
+    await websocket.send(json.dumps({"type": "hello_ack", "ok": False, "error": reason}))
+    await websocket.close(code=4001, reason="unauthorized")
+
+
 async def handle_agent(websocket):
     try:
         hello_raw = await asyncio.wait_for(websocket.recv(), timeout=HELLO_TIMEOUT)
@@ -65,11 +91,31 @@ async def handle_agent(websocket):
         await websocket.close(code=4000, reason="malformed hello")
         return
 
-    valid = await asyncio.to_thread(db.verify_server_token, server_id, token)
-    if not valid:
-        log.warning("agent for server #%s rejected: bad token", server_id)
-        await websocket.send(json.dumps({"type": "hello_ack", "ok": False, "error": "invalid server_id/token"}))
-        await websocket.close(code=4001, reason="unauthorized")
+    # Cross-check the certificate's identity (proven by the TLS handshake
+    # itself) against what the hello *claims* to be — without this, mTLS
+    # and the token check are two independent locks that happen to both
+    # need to pass, but nothing ties them to the *same* claimed identity.
+    # A cert for agent A plus a leaked token for agent B, presented
+    # together, would otherwise still get through. Only runs at all when
+    # mTLS is actually on (cert_cn is None otherwise, same as before this
+    # existed).
+    cert_cn = _peer_cert_cn(websocket)
+    actor = cert_cn or f"server_id={server_id}"
+    if cert_cn:
+        cert_server = await asyncio.to_thread(db.get_server_by_name, cert_cn)
+        if not cert_server or cert_server["id"] != server_id:
+            await _reject_hello(
+                websocket, actor, server_id, "identity mismatch",
+                f"cert CN {cert_cn!r} doesn't match claimed server_id {server_id}",
+            )
+            return
+
+    status = await asyncio.to_thread(db.verify_server_token, server_id, token)
+    if status != "ok":
+        await _reject_hello(
+            websocket, actor, server_id, f"invalid server_id/token ({status})",
+            f"{status} token",
+        )
         return
 
     live_agents[server_id] = websocket

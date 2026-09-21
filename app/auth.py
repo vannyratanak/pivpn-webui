@@ -1,3 +1,4 @@
+import time
 from datetime import timedelta
 from functools import wraps
 
@@ -28,10 +29,15 @@ class User(UserMixin):
     view-only on the Users list) — see admin_required and routes.py's
     per-route/per-tab gating."""
 
-    def __init__(self, id, username, role):
+    def __init__(self, id, username, role, session_generation=0):
         self.id = str(id)
         self.username = username
         self.role = role
+        # Carried through so __init__.py's sliding-refresh hook can
+        # re-embed the *same* generation on every reissued cookie without
+        # a second database write — see issue_html_jwt_cookie below and
+        # the users.session_generation column's own comment.
+        self.session_generation = session_generation
 
     @property
     def is_admin(self):
@@ -55,7 +61,11 @@ def issue_html_jwt_cookie(response, user):
     this is defense in depth, not a replacement for it."""
     token = create_access_token(
         identity=user.username,
-        additional_claims={"role": user.role},
+        # "la" = last-active-at (unix seconds). Stamped fresh every time
+        # this function runs — see IDLE_TIMEOUT_MINUTES's own comment for
+        # why a request reaching here at all counts as real activity, and
+        # load_user_from_jwt_cookie for where this claim is enforced.
+        additional_claims={"role": user.role, "gen": user.session_generation, "la": int(time.time())},
         expires_delta=timedelta(hours=config.SESSION_LIFETIME_HOURS),
     )
     response.set_cookie(
@@ -67,6 +77,23 @@ def issue_html_jwt_cookie(response, user):
 
 def clear_html_jwt_cookie(response):
     response.delete_cookie(HTML_JWT_COOKIE_NAME)
+
+
+def token_superseded(claims: dict, row: dict) -> bool:
+    """True if `claims` belongs to a login that's since been superseded by
+    a newer one for the same account — the single-active-session check.
+    Every login (browser or API, see routes.py's/api.py's login())
+    bumps users.session_generation and embeds the new value as this
+    token's "gen" claim; a token whose "gen" no longer matches the
+    account's *current* value was issued by an earlier login that a later
+    one has since displaced, so it's treated as logged out from here on
+    — without ever having to reach out and kill that other session
+    directly. A token with no "gen" claim at all (issued before this
+    feature existed) never matches a real generation number (0 is a
+    valid starting value, but the claim itself is simply absent), so
+    existing sessions are naturally treated as superseded the first time
+    this check runs — a one-time forced re-login, not a bug."""
+    return claims.get("gen") != row.get("session_generation")
 
 
 @login_manager.request_loader
@@ -91,14 +118,30 @@ def load_user_from_jwt_cookie(req):
         # this is untrusted client input by definition.
         return None
     row = db.get_user_by_username(claims.get("sub", ""))
-    return User(row["id"], row["username"], row["role"]) if row else None
+    if not row or token_superseded(claims, row):
+        return None
+    if idle_timed_out(claims):
+        return None
+    return User(row["id"], row["username"], row["role"], row["session_generation"])
+
+
+def idle_timed_out(claims: dict) -> bool:
+    """True if `claims`' last recorded activity is older than
+    IDLE_TIMEOUT_MINUTES — see that setting's own comment in config.py.
+    A token with no "la" claim (issued before this feature existed) is
+    treated as timed out, same precedent as token_superseded's handling
+    of a missing "gen" claim: a one-time forced re-login, not a bug."""
+    last_active = claims.get("la")
+    if last_active is None:
+        return True
+    return time.time() - last_active > config.IDLE_TIMEOUT_MINUTES * 60
 
 
 def verify_credentials(username: str, password: str) -> User | None:
     row = db.get_user_by_username(username)
     if not row or not check_password_hash(row["password_hash"], password):
         return None
-    return User(row["id"], row["username"], row["role"])
+    return User(row["id"], row["username"], row["role"], row["session_generation"])
 
 
 def hash_password(password: str) -> str:

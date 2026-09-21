@@ -89,6 +89,10 @@ document.addEventListener('DOMContentLoaded', () => {
     confirmBtn.addEventListener('click', confirmHandler, { once: true });
     confirmModal.showModal();
   }
+  // Exposed globally so fetch()-driven scripts outside this closure
+  // (e.g. clients-page.js's Renew/Remove buttons) can reuse the same
+  // styled confirm dialog instead of each reimplementing one.
+  window.askConfirm = askConfirm;
 
   document.addEventListener('submit', (e) => {
     if (e.defaultPrevented) return;

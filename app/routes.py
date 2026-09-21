@@ -1,13 +1,11 @@
-import math
-from datetime import datetime, timedelta
-
 import psycopg2.errors
 
 from flask import Blueprint, Response, abort, flash, g, jsonify, redirect, render_template, request, url_for
+from flask_jwt_extended import create_access_token
 from flask_login import current_user, login_required
 
 import config
-from app import db, firewall, pivpn_ctl, vpn_routes, vpnlog
+from app import db, firewall, pivpn_ctl, vpn_routes
 from app.auth import admin_required, clear_html_jwt_cookie, hash_password, issue_html_jwt_cookie, verify_credentials
 from app.privileged import PrivilegedCommandError
 
@@ -82,6 +80,11 @@ def login():
         if user:
             db.clear_login_failures(ip)
             db.add_audit(user.username, "login", detail=f"from {ip}")
+            # Single-active-session: bumping this immediately invalidates
+            # every other browser cookie or API token this account still
+            # has out there (see auth.py's token_superseded) — the next
+            # request any of them makes just gets treated as logged out.
+            user.session_generation = db.bump_session_generation(int(user.id))
             resp = redirect(url_for("main.clients"))
             # Identity now lives in a JWT cookie, not Flask's session —
             # see auth.py's issue_html_jwt_cookie for why, and
@@ -101,6 +104,8 @@ def login():
 @login_required
 def logout():
     _audit("logout")
+    # Invalidate both the browser cookie and the bearer tokens it minted.
+    db.bump_session_generation(int(current_user.id))
     resp = redirect(url_for("main.login"))
     clear_html_jwt_cookie(resp)
     # current_user is still resolved as authenticated for the rest of
@@ -120,10 +125,14 @@ VALID_ROLES = ("admin", "moderator")
 @bp.route("/users")
 @login_required
 def users():
-    # Both roles can view (a moderator sees who else has access), but only
-    # admin_required routes below can actually change anything — the
-    # template hides those controls for a moderator to match.
-    return render_template("users.html", users=db.list_users())
+    # Data (and its row actions — reset-password/delete) now comes from the
+    # browser's own GET /api/users call, made by users-page.js after this
+    # shell loads — see clients()'s own comment for the pattern this
+    # follows. Both roles can still view the resulting page (a moderator
+    # sees who else has access), but only admin_required routes below can
+    # actually change anything — the template hides those controls for a
+    # moderator to match.
+    return render_template("users.html")
 
 
 @bp.route("/users/add", methods=["POST"])
@@ -248,6 +257,41 @@ def change_own_password():
     return redirect(url_for("main.users"))
 
 
+@bp.route("/account/api-token", methods=["POST"])
+@login_required
+def account_api_token():
+    """Mints a Bearer token for this already-logged-in browser's own
+    JavaScript to use against /api/... (see clients.html's own fetch-based
+    rendering) — not a new login: deliberately does NOT call
+    db.bump_session_generation, so getting one of these never invalidates
+    the cookie session (or any other tab/token) that asked for it. Cookie
+    + CSRF protected like any other POST here; the token itself is then
+    just an ordinary Authorization: Bearer credential from that point on,
+    subject to the exact same expiry and single-active-session checks
+    (see app/__init__.py's token_in_blocklist_loader) as one issued by
+    /api/login."""
+    token = create_access_token(
+        identity=current_user.username,
+        additional_claims={"role": current_user.role, "gen": current_user.session_generation},
+    )
+    return jsonify({"access_token": token, "expires_in_minutes": config.JWT_ACCESS_TOKEN_MINUTES})
+
+
+@bp.route("/account/heartbeat", methods=["POST"])
+@login_required
+def account_heartbeat():
+    """Called by static/js/idle-timeout.js while the user is genuinely
+    doing something (click/keypress/scroll) on a fetch()-driven page —
+    those pages talk to /api/... over a Bearer token and otherwise never
+    touch this cookie-authenticated blueprint, so without this ping the
+    "la" (last-active) claim on the browser's own html_jwt cookie would go
+    stale from real use alone. The 204 body carries no data; reaching this
+    view at all is what matters — __init__.py's after_request hook re-
+    issues the cookie with a fresh "la" for any authenticated response,
+    this route included."""
+    return "", 204
+
+
 @bp.route("/")
 @login_required
 def index():
@@ -257,25 +301,12 @@ def index():
 @bp.route("/clients")
 @login_required
 def clients():
-    try:
-        # Revoked certs stay in `pivpn list` forever (PKI audit trail) with
-        # status "Revoked" — they're not actionable clients (no .ovpn file,
-        # no ccd IP), so they don't belong on this page.
-        client_list = [c for c in pivpn_ctl.list_clients() if c["status"].lower() == "valid"]
-    except pivpn_ctl.PivpnError as exc:
-        client_list = []
-        flash(str(exc), "error")
-    connected = pivpn_ctl.list_connected_clients()
-    client_ips = pivpn_ctl.list_client_ips()
-    for c in client_list:
-        c["ip"] = client_ips.get(c["name"])
-        c["blocked"] = db.get_client_block(c["name"]) is not None
-        c["session"] = connected.get(c["name"])
-    connected_count = sum(1 for c in client_list if c["session"])
-    return render_template(
-        "clients.html", clients=client_list,
-        connected_count=connected_count, total_count=len(client_list),
-    )
+    # Unlike every other page in this app, this one's own data (and its
+    # row actions — renew/block/remove/download) comes from the browser's
+    # own GET /api/clients call, made by clients-page.js after this shell
+    # loads — see that file's top comment. Nothing to fetch or enrich
+    # server-side here anymore.
+    return render_template("clients.html")
 
 
 @bp.route("/clients/add", methods=["POST"])
@@ -339,45 +370,25 @@ def download_client(name):
 @bp.route("/clients/<name>")
 @login_required
 def client_detail(name):
-    """One client's own page — status/session at a glance, plus exactly
-    the firewall rules that apply to it (reusing firewall.rule_client_name,
-    the same IP-based match the main Firewall Rules page already computes
-    for its own Client column) and a form to add a new one, instead of
-    hunting through the full flat rules list. Unlike the main Firewall
-    page (still admin-only — system-wide rule management), a moderator
-    gets full rule management here too, scoped to one client — same
-    "client control" territory as the Clients list' own renew/block/
-    remove actions, which are already login_required-only."""
+    """One client's own page — status/session, its scoped firewall rules,
+    and full rule management (add/toggle/delete/resync/persist/bulk),
+    all fetched/mutated by client-detail-page.js via /api/clients/<name>
+    and /api/clients/<name>/rules/... after this shell loads — see
+    clients()'s own comment for the pattern this follows. Unlike the main
+    Firewall page (still admin-only — system-wide rule management), a
+    moderator gets full rule management here too, scoped to one client —
+    same "client control" territory as the Clients list' own renew/
+    block/remove actions, which are already login_required-only.
+
+    Only a syntactic name check happens here (cheap, no CLI/hub round
+    trip) — whether a client by this name actually exists is discovered
+    by the browser's own first GET /api/clients/<name> call, same as any
+    other fetch() error on this page."""
     try:
         name = pivpn_ctl.validate_name(name)
     except pivpn_ctl.PivpnError:
         abort(404)
-    try:
-        valid_clients = [c for c in pivpn_ctl.list_clients() if c["status"].lower() == "valid"]
-    except pivpn_ctl.PivpnError as exc:
-        flash(str(exc), "error")
-        valid_clients = []
-    client = next((c for c in valid_clients if c["name"] == name), None)
-    if not client:
-        abort(404)
-
-    client_ips = pivpn_ctl.list_client_ips()
-    client["ip"] = client_ips.get(name)
-    client["blocked"] = db.get_client_block(name) is not None
-    client["session"] = pivpn_ctl.list_connected_clients().get(name)
-
-    ip_to_name = {ip: n for n, ip in client_ips.items()}
-    persisted_ids = firewall.persisted_rule_ids()
-    client_rules = []
-    for r in db.list_rules():
-        if firewall.rule_client_name(r, ip_to_name) != name:
-            continue
-        r["persisted"] = str(r["id"]) in persisted_ids
-        r["detail"] = firewall.describe_rule(r)
-        client_rules.append(r)
-
-    has_unsaved = any(not r["persisted"] for r in client_rules)
-    return render_template("client_detail.html", client=client, rules=client_rules, has_unsaved=has_unsaved)
+    return render_template("client_detail.html", name=name)
 
 
 @bp.route("/clients/<name>/rules/add", methods=["POST"])
@@ -628,13 +639,21 @@ def block_client(name):
 @login_required
 @admin_required
 def firewall_rules():
-    missing_ids: set[int] = set()
+    # Reconciliation against live iptables state still happens here, on
+    # page load, exactly as before — nothing else in the app triggers
+    # discover_cli_rules() (resync_rules()/"Apply Rules" pushes the
+    # opposite direction, DB -> iptables). Its DB writes land before the
+    # page is even sent back, so firewall-page.js's own
+    # GET /api/firewall/rules fetch (which deliberately skips this same
+    # reconciliation — see that endpoint's own docstring) still sees the
+    # result. The one visible difference: the per-row "not found live"
+    # badge this used to add is gone from the JS-rendered table — the
+    # flash message below still surfaces it, just not inline per-row.
     try:
         imported, missing = firewall.discover_cli_rules()
         if imported:
             _audit("firewall_discover", f"{imported} rule(s) imported from CLI")
         if missing:
-            missing_ids = {r["id"] for r in missing}
             details = "; ".join(f"#{r['id']} ({r['kind']}: {firewall.describe_rule(r)})" for r in missing)
             flash(
                 f"{len(missing)} tracked rule(s) no longer found live — possibly removed directly "
@@ -648,23 +667,8 @@ def firewall_rules():
             )
     except PrivilegedCommandError as exc:
         _audit("firewall_discover", "", "error", str(exc))
-    client_ips = pivpn_ctl.list_client_ips()
-    ip_to_name = {ip: name for name, ip in client_ips.items()}
-    rules = db.list_rules()
-    persisted_ids = firewall.persisted_rule_ids()
-    for r in rules:
-        r["persisted"] = str(r["id"]) in persisted_ids
-        r["detail"] = firewall.describe_rule(r)
-        r["client_name"] = firewall.rule_client_name(r, ip_to_name)
-        r["missing_live"] = r["id"] in missing_ids
-    has_unsaved = any(not r["persisted"] for r in rules)
-    # Display grouping only (list.sort is stable, so each kind's own
-    # relative order — real `position`/id order, what actually controls
-    # live iptables order — is preserved within its group) — see
-    # firewall.KIND_DISPLAY_ORDER's own comment for why the raw combined
-    # order isn't already grouped like this on its own.
-    rules.sort(key=lambda r: firewall.KIND_DISPLAY_ORDER.get(r["kind"], 99))
 
+    client_ips = pivpn_ctl.list_client_ips()
     try:
         valid_clients = [c for c in pivpn_ctl.list_clients() if c["status"].lower() == "valid"]
     except pivpn_ctl.PivpnError:
@@ -674,10 +678,7 @@ def firewall_rules():
         for c in valid_clients if client_ips.get(c["name"])
     ]
 
-    return render_template(
-        "firewall.html", rules=rules, has_unsaved=has_unsaved, vpn_clients=vpn_clients,
-        interfaces=firewall.list_interfaces(),
-    )
+    return render_template("firewall.html", vpn_clients=vpn_clients, interfaces=firewall.list_interfaces())
 
 
 @bp.route("/firewall/import", methods=["POST"])
@@ -715,12 +716,10 @@ def import_rules():
 @login_required
 @admin_required
 def vpn_routes_page():
-    try:
-        routes_ = vpn_routes.list_routes()
-    except vpn_routes.VpnRouteError as exc:
-        flash(str(exc), "error")
-        routes_ = []
-    return render_template("vpn_routes.html", vpn_routes=routes_)
+    # Data comes from the browser's own GET /api/vpn-routes call (made by
+    # vpn-routes-page.js after this shell loads) — see clients()'s own
+    # comment for the pattern this follows.
+    return render_template("vpn_routes.html")
 
 
 @bp.route("/vpn-routes/add", methods=["POST"])
@@ -1019,6 +1018,13 @@ LOG_RANGE_DEFAULT = "1h"
 @bp.route("/logs")
 @login_required
 def logs():
+    # Data (and its search/range/pagination/refresh) now comes from the
+    # browser's own GET /api/logs call, made by logs-page.js after this
+    # shell loads — see clients()'s own comment for the pattern this
+    # follows, and app/api.py's logs() for the tab-allowlist/range/page
+    # validation this used to duplicate here (kept here too, cheaply,
+    # only so the shell renders the right selected tab/search/range/page
+    # values — no DB access happens in this view anymore).
     allowed_tabs = ALL_LOG_TABS if current_user.is_admin else MODERATOR_LOG_TABS
     default_tab = "client_sessions" if current_user.is_admin else MODERATOR_LOG_TABS[0]
     tab = request.args.get("tab", default_tab)
@@ -1030,21 +1036,10 @@ def logs():
     if tab not in allowed_tabs:
         tab = default_tab
 
-    sessions = client_sessions = system_log = auth_entries = activity_entries = None
-    traffic_flows = None
-    # Shared by the five DB-backed tabs below (Sessions/Client Sessions/
-    # Traffic/Activity/User Auth) — real server-side search + pagination
-    # over the *full* retained history (up to 7 days for the VPN-log
-    # tabs; AUDIT_LOG_RETENTION_DAYS for Activity/User Auth), not just a
-    # fixed-size recent slice. See vpnlog.py's list_sessions/
-    # list_client_sessions/list_traffic_flows for why "just raise the old
-    # limit=300" wasn't the right fix: at real traffic volume, even a few
-    # hundred rows can be just the last few minutes.
     q = (request.args.get("q") or "").strip() or None
     log_range = request.args.get("range") or LOG_RANGE_DEFAULT
     if log_range not in LOG_RANGE_HOURS:
         log_range = LOG_RANGE_DEFAULT
-    since = (datetime.now() - timedelta(hours=LOG_RANGE_HOURS[log_range])).strftime("%Y-%m-%d %H:%M:%S")
     try:
         page = max(1, int(request.args.get("page", 1)))
     except ValueError:
@@ -1055,68 +1050,9 @@ def logs():
         page_size = 50
     if page_size not in (10, 25, 50, 100):
         page_size = 50
-    total = 0
-
-    if tab == "sessions":
-        try:
-            sessions, total = vpnlog.list_sessions(q=q, page=page, page_size=page_size, since=since)
-        except PrivilegedCommandError as exc:
-            sessions = []
-            flash(str(exc), "error")
-    elif tab == "client_sessions":
-        try:
-            client_sessions, total = vpnlog.list_client_sessions(q=q, page=page, page_size=page_size, since=since)
-            # "ongoing" only means "no disconnect event matched our known log
-            # patterns" (see DISCONNECT_RE's SIGTERM-only match in vpnlog.py)
-            # — a session that ended via timeout/ping-restart/unclean drop
-            # never logs that pattern and would otherwise show as ongoing
-            # forever. Cross-check against the live status file (the same
-            # source the Clients page uses) and relabel anything not
-            # actually connected right now, rather than show stale data.
-            connected_now = pivpn_ctl.list_connected_clients()
-            relabeled = False
-            for s in client_sessions:
-                if s["ongoing"] and s["client"] not in connected_now:
-                    s["ongoing"] = False
-                    s["status_note"] = "Ended (exact time unknown)"
-                    relabeled = True
-            # A relabeled session was sorted (by list_client_sessions) on
-            # the assumption it was still ongoing, which is exactly what
-            # earned it a top-pinned position — that assumption no longer
-            # holds, so the pinning has to be redone or the row keeps
-            # sitting above sessions that actually ended more recently.
-            if relabeled:
-                vpnlog.sort_client_sessions(client_sessions)
-        except PrivilegedCommandError as exc:
-            client_sessions = []
-            flash(str(exc), "error")
-    elif tab == "traffic":
-        try:
-            traffic_flows, total = vpnlog.list_traffic_flows(q=q, page=page, page_size=page_size, since=since)
-        except PrivilegedCommandError as exc:
-            traffic_flows = []
-            flash(str(exc), "error")
-    elif tab == "system":
-        system_log, total = vpnlog.list_system_log(q=q, page=page, page_size=page_size, since=since)
-    elif tab == "activity":
-        # Unfiltered — every audited action, not just login/logout (see
-        # AUTH_ACTIONS below). This is the only place any of that ever
-        # surfaces in the UI; before this it was write-only, inspectable
-        # only by querying the database directly.
-        activity_entries, total = db.list_audit_page(q=q, page=page, page_size=page_size, since=since)
-    else:
-        auth_entries, total = db.list_audit_page(
-            q=q, page=page, page_size=page_size, since=since, actions=AUTH_ACTIONS
-        )
-
-    total_pages = max(1, math.ceil(total / page_size))
-    page = min(page, total_pages)
 
     return render_template(
-        "logs.html", tab=tab, sessions=sessions, client_sessions=client_sessions,
-        traffic_flows=traffic_flows, system_log=system_log,
-        auth_entries=auth_entries, activity_entries=activity_entries,
-        q=q, page=page, page_size=page_size, total=total, total_pages=total_pages,
+        "logs.html", tab=tab, q=q, page=page, page_size=page_size,
         log_range=log_range, log_range_options=LOG_RANGE_OPTIONS,
     )
 

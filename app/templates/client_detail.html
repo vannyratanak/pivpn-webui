@@ -1,114 +1,63 @@
 {% extends "base.html" %}
-{% block title %}{{ client.name }} — PiVPN Web UI{% endblock %}
+{% block title %}{{ name }} — PiVPN Web UI{% endblock %}
 {% block content %}
 <p class="hint"><a href="{{ url_for('main.clients') }}">&larr; Back to Clients</a></p>
 
 <div class="page-header-row">
   <div class="page-header-title-group">
-    <h1>{{ client.name }}</h1>
+    <h1>{{ name }}</h1>
     <div class="btn-group">
-      <a class="btn btn-icon" href="{{ url_for('main.download_client', name=client.name) }}" title="Download" aria-label="Download">
+      <button type="button" class="btn btn-icon" id="client-download-btn" title="Download" aria-label="Download">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-      </a>
+      </button>
       <div class="dropdown" id="client-actions-dropdown">
         <button type="button" class="btn btn-icon" id="client-actions-btn" aria-haspopup="true" aria-expanded="false" title="Actions" aria-label="Actions">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><circle cx="12" cy="5" r="1.75"/><circle cx="12" cy="12" r="1.75"/><circle cx="12" cy="19" r="1.75"/></svg>
         </button>
         <div class="dropdown-menu" id="client-actions-menu" role="menu" aria-labelledby="client-actions-btn" hidden>
-          <form method="post" action="{{ url_for('main.renew_client', name=client.name) }}" class="dropdown-item-form"
-                data-confirm="Renew {{ client.name }}? This revokes the current cert and issues a new one — the old .ovpn will stop working immediately."
-                data-confirm-label="Renew">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button type="submit" class="dropdown-item" role="menuitem" data-dropdown-item>Renew</button>
-          </form>
-          <form method="post" action="{{ url_for('main.block_client', name=client.name) }}" class="dropdown-item-form">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <input type="hidden" name="blocked" value="{{ '0' if client.blocked else '1' }}">
-            <button type="submit" class="dropdown-item" role="menuitem" data-dropdown-item>{{ 'Unblock' if client.blocked else 'Block' }}</button>
-          </form>
-          <form method="post" action="{{ url_for('main.remove_client', name=client.name) }}" class="dropdown-item-form"
-                data-confirm="Permanently remove {{ client.name }}? This cannot be undone."
-                data-confirm-label="Remove">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button type="submit" class="dropdown-item dropdown-item-danger" role="menuitem" data-dropdown-item>Remove</button>
-          </form>
+          <button type="button" class="dropdown-item" role="menuitem" data-dropdown-item data-action="renew">Renew</button>
+          <button type="button" class="dropdown-item" role="menuitem" data-dropdown-item data-action="block" id="client-block-toggle-btn">Block</button>
+          <button type="button" class="dropdown-item dropdown-item-danger" role="menuitem" data-dropdown-item data-action="remove">Remove</button>
         </div>
       </div>
     </div>
   </div>
-  <input type="text" id="client-rules-filter" class="log-filter-input filter-input-inline" placeholder="Search…" aria-label="Search firewall rules for {{ client.name }}">
+  <input type="text" id="client-rules-filter" class="log-filter-input filter-input-inline" placeholder="Search…" aria-label="Search firewall rules for {{ name }}">
 </div>
 <script>attachDropdown('client-actions-btn', 'client-actions-menu');</script>
 
-<div class="client-meta-row">
-  <span class="status-indicator {{ 'status-indicator-connected' if client.session else '' }}">
-    <span class="status-dot {{ 'status-dot-connected' if client.session else '' }}" aria-hidden="true"></span>{{ 'Active' if client.session else 'Inactive' }}
-  </span>
-  <span class="meta-sep" aria-hidden="true">&middot;</span>
-  <span class="cert-status">
-    {% if client.blocked %}
-    <svg class="cert-icon cert-icon-blocked" aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><line x1="9.5" y1="9.5" x2="14.5" y2="14.5"/><line x1="14.5" y1="9.5" x2="9.5" y2="14.5"/></svg>
-    {% else %}
-    <svg class="cert-icon cert-icon-valid" aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11.5 14.5 15.5 10"/></svg>
-    {% endif %}
-    {{ client.status }}{{ ' (blocked)' if client.blocked else '' }}
-  </span>
-  <span class="meta-sep" aria-hidden="true">&middot;</span>
-  <span>Expires {{ client.expiration or '—' }}</span>
-  <span class="meta-sep" aria-hidden="true">&middot;</span>
-  <span>{{ client.ip or '—' }}</span>
-  {% if client.session %}
-  <span class="meta-sep" aria-hidden="true">&middot;</span>
-  <span>Connected since {{ client.session.since or '—' }}</span>
-  {% endif %}
+<div class="client-meta-row" id="client-meta-row" data-client-name="{{ name }}">
+  <span class="skeleton-bar"></span>
 </div>
 
 <section class="card">
   <div class="card-header-row">
-    <h2>Firewall rules for {{ client.name }}</h2>
-    {% if client.ip %}
-    <div class="btn-group-stack">
+    <h2>Firewall rules for {{ name }}</h2>
+    <div class="btn-group-stack" id="client-rule-actions" hidden>
       <div class="btn-group">
-        <button type="button" class="btn" onclick="document.getElementById('add-client-rule-dialog').showModal()">Add Rule</button>
-        <form method="post" action="{{ url_for('main.client_resync_rules', name=client.name) }}" class="btn-form">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <button type="submit" class="btn">Apply Rules</button>
-        </form>
-        {% if has_unsaved %}
-        <form method="post" action="{{ url_for('main.client_persist_rules', name=client.name) }}" class="btn-form">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <button type="submit" class="btn btn-warn btn-unsaved-jump">Save Rules</button>
-        </form>
-        {% endif %}
+        <button type="button" class="btn" id="client-add-rule-open-btn">Add Rule</button>
+        <button type="button" class="btn" id="client-apply-rules-btn">Apply Rules</button>
+        <button type="button" class="btn btn-warn btn-unsaved-jump" id="client-save-rules-btn" hidden>Save Rules</button>
       </div>
       <div class="btn-group" id="client-bulk-actions-group" hidden>
-        <form method="post" action="{{ url_for('main.client_bulk_disable_rules', name=client.name) }}" id="client-bulk-disable-form" class="btn-form">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <button type="submit" class="btn btn-warn" id="client-bulk-disable-btn" disabled>Disable (<span id="client-bulk-disable-count">0</span>)</button>
-        </form>
-        <form method="post" action="{{ url_for('main.client_bulk_delete_rules', name=client.name) }}" id="client-bulk-delete-form" class="btn-form">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <button type="submit" class="btn btn-danger" id="client-bulk-delete-btn" disabled>Delete (<span id="client-bulk-delete-count">0</span>)</button>
-        </form>
+        <button type="button" class="btn btn-warn" id="client-bulk-disable-btn" disabled>Disable (<span id="client-bulk-disable-count">0</span>)</button>
+        <button type="button" class="btn btn-danger" id="client-bulk-delete-btn" disabled>Delete (<span id="client-bulk-delete-count">0</span>)</button>
       </div>
     </div>
-    {% endif %}
   </div>
   <p class="hint">Only rules whose source or destination matches this client's VPN IP — for everything else (INPUT/SNAT/port-forward rules, or rules for other clients), see the full <a href="{{ url_for('main.firewall_rules') }}">Firewall Rules</a> page.</p>
-  {% if not client.ip %}
-  <p class="empty">{{ client.name }} has no static VPN IP yet (only assigned once it connects at least once) — rules can't be scoped to it until then. Use the full <a href="{{ url_for('main.firewall_rules') }}">Firewall Rules</a> page in the meantime.</p>
-  {% else %}
+  <p class="empty" id="client-no-ip-message" hidden>{{ name }} has no static VPN IP yet (only assigned once it connects at least once) — rules can't be scoped to it until then. Use the full <a href="{{ url_for('main.firewall_rules') }}">Firewall Rules</a> page in the meantime.</p>
+
   <dialog id="add-client-rule-dialog" class="modal" onclick="closeDialogIfClickedOutside(event, this)">
     <button type="button" class="modal-close-btn" onclick="document.getElementById('add-client-rule-dialog').close()" aria-label="Close">&times;</button>
-    <h2>Add Rule for {{ client.name }}</h2>
+    <h2>Add Rule for {{ name }}</h2>
 
     <div class="tabs" role="tablist" aria-label="Rule type">
       <button type="button" class="active" role="tab" aria-selected="true">Forward / Drop</button>
     </div>
 
-    <p class="hint">Controls what's allowed through the FORWARD chain for {{ client.name }} — e.g. drop a destination, or explicitly accept traffic to a range. For INPUT/port-forward/SNAT rules, use the full <a href="{{ url_for('main.firewall_rules') }}">Firewall Rules</a> page instead.</p>
-    <form method="post" action="{{ url_for('main.client_add_rule', name=client.name) }}" class="inline-form">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <p class="hint">Controls what's allowed through the FORWARD chain for {{ name }} — e.g. drop a destination, or explicitly accept traffic to a range. For INPUT/port-forward/SNAT rules, use the full <a href="{{ url_for('main.firewall_rules') }}">Firewall Rules</a> page instead.</p>
+    <form id="add-client-rule-form" class="inline-form">
       <label>Action
         <select name="action">
           <option value="ACCEPT">Forward (ACCEPT)</option>
@@ -125,7 +74,7 @@
       <div class="client-add-rule-src-dst-grid" id="client-add-rule-dst-fields">
         <label>Source
           <select disabled aria-label="Source (fixed to this client)">
-            <option>{{ client.name }} ({{ client.ip }})</option>
+            <option id="client-add-rule-src-option">{{ name }}</option>
           </select>
         </label>
         <div class="client-add-rule-dst-row">
@@ -179,7 +128,6 @@
       // keyboard should only show up once someone selects it themselves.
     });
   </script>
-  {% endif %}
 
   <div class="table-scroll">
   <table id="client-rules-table">
@@ -194,34 +142,10 @@
         <th scope="col">Actions</th>
       </tr>
     </thead>
-    <tbody id="client-rules-tbody">
-      {% if not rules %}
-      <tr class="empty-row"><td colspan="7" class="empty">No rules scoped to this client yet.</td></tr>
-      {% endif %}
-      {% for r in rules %}
-      <tr class="{{ '' if r.enabled else 'disabled-row' }}">
-        <td><input type="checkbox" class="client-rule-select-checkbox" data-rule-id="{{ r.id }}" aria-label="Select rule {{ r.id }}"></td>
-        <td>{{ r.kind }}</td>
-        <td>{{ r.action }}</td>
-        <td>{{ r.detail }}</td>
-        <td>{{ r.comment or '' }}</td>
-        <td><span class="{{ 'saved-yes' if r.persisted else 'saved-no' }}">{{ 'Saved' if r.persisted else 'Unsaved' }}</span></td>
-        <td>
-          <div class="actions">
-          <form method="post" action="{{ url_for('main.client_toggle_rule', name=client.name, rule_id=r.id) }}" class="btn-form">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button type="submit" class="btn btn-sm {{ 'btn-warn' if r.enabled else 'btn-ok' }}">{{ 'Disable' if r.enabled else 'Enable' }}</button>
-          </form>
-          <form method="post" action="{{ url_for('main.client_delete_rule', name=client.name, rule_id=r.id) }}" class="btn-form"
-                data-confirm="Delete this rule?" data-confirm-label="Delete">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button type="submit" class="btn btn-sm btn-danger">Delete</button>
-          </form>
-          </div>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
+    <!-- Populated by client-detail-page.js's fetch() against
+         /api/clients/{{ name }}/rules — see that file for the
+         skeleton-on-initial-load pattern. -->
+    <tbody id="client-rules-tbody"></tbody>
   </table>
   </div>
   <div class="pagination" id="client-rules-pagination">
@@ -239,69 +163,7 @@
       <button type="button" class="btn btn-sm" data-page-next>Next</button>
     </div>
   </div>
-  <script>
-    const clientRulesPager = attachPagination('#client-rules-tbody', 'tr:not(.empty-row)', 'client-rules-page-size', 'client-rules-pagination');
-    attachLogFilter('client-rules-filter', '#client-rules-tbody', 'tr:not(.empty-row)', null, () => clientRulesPager && clientRulesPager.refresh());
-
-    (function() {
-      const selectAll = document.getElementById('client-rules-select-all');
-      const bulkGroup = document.getElementById('client-bulk-actions-group');
-      const disableBtn = document.getElementById('client-bulk-disable-btn');
-      const disableForm = document.getElementById('client-bulk-disable-form');
-      const disableCount = document.getElementById('client-bulk-disable-count');
-      const deleteBtn = document.getElementById('client-bulk-delete-btn');
-      const deleteForm = document.getElementById('client-bulk-delete-form');
-      const deleteCount = document.getElementById('client-bulk-delete-count');
-      if (!selectAll || !bulkGroup || !disableBtn || !disableForm || !deleteBtn || !deleteForm) return;
-
-      const checkboxes = () => Array.from(document.querySelectorAll('#client-rules-tbody .client-rule-select-checkbox'));
-      const visibleCheckboxes = () => checkboxes().filter((cb) => cb.closest('tr').style.display !== 'none');
-
-      function updateCount() {
-        const checked = checkboxes().filter((cb) => cb.checked).length;
-        bulkGroup.hidden = checked === 0;
-        disableCount.textContent = checked;
-        disableBtn.disabled = checked === 0;
-        deleteCount.textContent = checked;
-        deleteBtn.disabled = checked === 0;
-      }
-
-      // "Select all" only selects currently-visible rows — respects
-      // whatever the search box currently narrowed to.
-      selectAll.addEventListener('change', () => {
-        visibleCheckboxes().forEach((cb) => { cb.checked = selectAll.checked; });
-        updateCount();
-      });
-      checkboxes().forEach((cb) => cb.addEventListener('change', updateCount));
-
-      // Checkboxes aren't nested in either form (they'd need to submit to
-      // both), so on submit each form gets its own hidden rule_ids inputs
-      // built from whatever's checked right now.
-      function injectSelectedIds(form) {
-        form.querySelectorAll('input[name="rule_ids"]').forEach((el) => el.remove());
-        checkboxes().filter((cb) => cb.checked).forEach((cb) => {
-          const hidden = document.createElement('input');
-          hidden.type = 'hidden';
-          hidden.name = 'rule_ids';
-          hidden.value = cb.dataset.ruleId;
-          form.appendChild(hidden);
-        });
-      }
-
-      disableForm.addEventListener('submit', (e) => {
-        const checked = checkboxes().filter((cb) => cb.checked).length;
-        if (checked === 0) { e.preventDefault(); return; }
-        injectSelectedIds(disableForm);
-      });
-
-      deleteForm.addEventListener('submit', (e) => {
-        const checked = checkboxes().filter((cb) => cb.checked).length;
-        if (checked === 0) { e.preventDefault(); return; }
-        injectSelectedIds(deleteForm);
-        deleteForm.dataset.confirm = `Delete ${checked} selected rule(s)? This cannot be undone.`;
-        deleteForm.dataset.confirmLabel = 'Delete';
-      });
-    })();
-  </script>
+  <script src="{{ url_for('static', filename='js/api-client.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/client-detail-page.js') }}"></script>
 </section>
 {% endblock %}

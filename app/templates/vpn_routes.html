@@ -42,32 +42,9 @@
       </tr>
     </thead>
     <tbody id="routes-tbody">
-      {% if not vpn_routes %}
-      <tr class="empty-row"><td colspan="4" class="empty">No extra routes pushed yet (VPN clients only reach the VPN's own subnet).</td></tr>
-      {% endif %}
-      {% for r in vpn_routes %}
-      <tr>
-        <td>{{ r.network }}</td>
-        <td>{{ r.netmask }}</td>
-        <td>{{ "Web UI" if r.managed else "server.conf (unmanaged)" }}</td>
-        <td>
-          <div class="actions">
-          {% if r.managed %}
-          <form method="post" action="{{ url_for('main.remove_vpn_route') }}" class="btn-form"
-                data-confirm="Remove this route? Connected clients will stop routing this network into the tunnel."
-                data-confirm-label="Remove">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <input type="hidden" name="network" value="{{ r.network }}">
-            <input type="hidden" name="netmask" value="{{ r.netmask }}">
-            <button type="submit" class="btn btn-sm btn-danger">Remove</button>
-          </form>
-          {% else %}
-          <span class="hint">Edit server.conf directly to change</span>
-          {% endif %}
-          </div>
-        </td>
-      </tr>
-      {% endfor %}
+      <!-- Populated by vpn-routes-page.js via GET /api/vpn-routes — see
+           clients-page.js's top comment for why this app-wide pattern
+           exists. -->
     </tbody>
   </table>
   </div>
@@ -86,9 +63,7 @@
       <button type="button" class="btn btn-sm" data-page-next>Next</button>
     </div>
   </div>
-  <script>
-    const routesPager = attachPagination('#routes-tbody', 'tr:not(.empty-row)', 'routes-page-size', 'routes-pagination');
-    attachLogFilter('routes-filter', '#routes-tbody', 'tr:not(.empty-row)', '#routes-table thead th:not(:last-child)', () => routesPager && routesPager.refresh());
-  </script>
+  <script src="{{ url_for('static', filename='js/api-client.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/vpn-routes-page.js') }}"></script>
 </section>
 {% endblock %}

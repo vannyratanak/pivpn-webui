@@ -1,6 +1,10 @@
 {% extends "base.html" %}
 {% block title %}Log in — PiVPN Web UI{% endblock %}
 {% block content %}
+<script>
+  localStorage.removeItem('pivpn_webui_api_token');
+  localStorage.removeItem('pivpn_webui_last_activity');
+</script>
 <div class="login-wrap">
   <form class="login-card" method="post">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

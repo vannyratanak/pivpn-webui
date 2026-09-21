@@ -15,6 +15,7 @@ from flask_jwt_extended import create_access_token, get_jwt, get_jwt_identity, j
 import config
 from app import db, firewall, pivpn_ctl
 from app.auth import verify_credentials
+from app.privileged import PrivilegedCommandError
 
 bp = Blueprint("api", __name__, url_prefix="/api")
 
@@ -47,9 +48,18 @@ def login():
     user = verify_credentials(data.get("username", ""), data.get("password", ""))
     if not user:
         return jsonify({"error": "invalid username or password"}), 401
-    # role baked into the token itself, not looked up per-request from the
-    # DB — same tradeoff the session cookie's own identity already makes.
-    token = create_access_token(identity=user.username, additional_claims={"role": user.role})
+    # Single-active-session: this immediately invalidates every other
+    # browser cookie or API token this account still has out there (both
+    # kinds share the same check — see auth.py's token_superseded and
+    # this module's require_current_generation) — same as the browser
+    # login's own call to bump_session_generation.
+    new_gen = db.bump_session_generation(int(user.id))
+    # role + gen baked into the token itself — gen is still checked
+    # against the DB on every use of this token (see __init__.py's
+    # token_in_blocklist_loader, which runs automatically for every
+    # @jwt_required() route below), same generation check the browser
+    # cookie's own request_loader applies.
+    token = create_access_token(identity=user.username, additional_claims={"role": user.role, "gen": new_gen})
     return jsonify({
         "access_token": token,
         "role": user.role,
@@ -66,6 +76,20 @@ def _require_admin():
     if get_jwt().get("role") != "admin":
         return jsonify({"error": "admin role required"}), 403
     return None
+
+
+def _find_valid_client(name):
+    """Return one valid client using the same normalization as the list
+    endpoint. PiVPN output can contain repeated historical certificate
+    names and spacing differences; the detail endpoint must select the
+    current valid row rather than rely on one exact raw comparison."""
+    wanted = name.strip().casefold()
+    matches = [
+        client for client in pivpn_ctl.list_clients()
+        if client.get("name", "").strip().casefold() == wanted
+        and client.get("status", "").strip().casefold() == "valid"
+    ]
+    return matches[-1] if matches else None
 
 
 @bp.route("/clients", methods=["GET"])
@@ -98,10 +122,10 @@ def client_status(name):
     except pivpn_ctl.PivpnError as exc:
         return jsonify({"error": str(exc)}), 400
     try:
-        match = next((c for c in pivpn_ctl.list_clients() if c["name"] == name), None)
+        match = _find_valid_client(name)
     except pivpn_ctl.PivpnError as exc:
         return jsonify({"error": str(exc)}), 502
-    if not match or match["status"].lower() != "valid":
+    if not match:
         return jsonify({"error": f"no valid client named '{name}'"}), 404
     match["ip"] = pivpn_ctl.list_client_ips().get(name)
     match["blocked"] = db.get_client_block(name) is not None
@@ -183,6 +207,42 @@ def remove_client(name):
         return jsonify({"error": str(exc)}), 400
     _audit("client_remove", name)
     return jsonify({"removed": name})
+
+
+@bp.route("/clients/bulk-remove", methods=["POST"])
+@jwt_required()
+def bulk_remove_clients():
+    """Mirrors routes.py's bulk_remove_clients() view. POST {"names": [...]}."""
+    data = request.get_json(silent=True) or {}
+    names = data.get("names") or []
+    removed, errors = [], []
+    for name in names:
+        try:
+            pivpn_ctl.remove_client(name)
+            removed.append(name)
+        except pivpn_ctl.PivpnError as exc:
+            errors.append(f"{name}: {exc}")
+    _audit("client_bulk_remove", f"{len(removed)} removed, {len(errors)} failed")
+    return jsonify({"removed": removed, "errors": errors})
+
+
+@bp.route("/clients/import", methods=["POST"])
+@jwt_required()
+def import_clients():
+    """Mirrors routes.py's import_clients() view — multipart file upload
+    (clients_file), same as the browser form; a JSON-only API can still
+    carry a file via multipart/form-data, this just isn't a JSON body."""
+    upload = request.files.get("clients_file")
+    if not upload or not upload.filename:
+        return jsonify({"error": "choose a file to import"}), 400
+    try:
+        text = upload.read().decode("utf-8")
+    except UnicodeDecodeError:
+        return jsonify({"error": "could not read that file as text (expected UTF-8)"}), 400
+    added, errors = pivpn_ctl.import_clients(text)
+    _audit("client_import", upload.filename, "ok" if not errors else "error",
+           f"{added} added, {len(errors)} failed")
+    return jsonify({"added": added, "errors": errors})
 
 
 @bp.route("/clients/<name>/download", methods=["GET"])
@@ -299,9 +359,235 @@ def client_delete_rule(name, rule_id):
     return jsonify({"deleted": rule_id})
 
 
+def _regenerate_script_for_ip(ip, client_ips=None):
+    """Same as routes.py's own helper of this name — kept as its own copy
+    rather than a cross-import, matching this module's existing precedent
+    (see _client_ip/_audit above) of small helpers duplicated rather than
+    shared between the two blueprints."""
+    if not ip:
+        return
+    from app.privileged import PrivilegedCommandError
+    client_ips = client_ips if client_ips is not None else pivpn_ctl.list_client_ips()
+    for name, client_ip in client_ips.items():
+        if client_ip == ip:
+            try:
+                firewall.regenerate_client_script(name, ip)
+            except PrivilegedCommandError:
+                pass
+            break
+
+
+@bp.route("/clients/<name>/rules", methods=["GET"])
+@jwt_required()
+def client_rules(name):
+    """Mirrors routes.py's client_detail() view's own rule-filtering —
+    only rules whose source/destination matches this client's VPN IP.
+    Any logged-in caller, not admin-only: matches that page's own access
+    model (a moderator gets full rule management scoped to one client)."""
+    try:
+        name = pivpn_ctl.validate_name(name)
+    except pivpn_ctl.PivpnError as exc:
+        return jsonify({"error": str(exc)}), 400
+    client_ips = pivpn_ctl.list_client_ips()
+    ip_to_name = {ip: n for n, ip in client_ips.items()}
+    persisted_ids = firewall.persisted_rule_ids()
+    rules = []
+    for r in db.list_rules():
+        if firewall.rule_client_name(r, ip_to_name) != name:
+            continue
+        r["persisted"] = str(r["id"]) in persisted_ids
+        r["detail"] = firewall.describe_rule(r)
+        rules.append(r)
+    return jsonify({"rules": rules})
+
+
+@bp.route("/clients/<name>/rules/resync", methods=["POST"])
+@jwt_required()
+def client_resync_rules(name):
+    """Mirrors routes.py's client_resync_rules() view. The reconcile
+    itself is still system-wide (firewall.sync_all() has no per-client
+    scope), only who's allowed to trigger it from this page differs from
+    the main Firewall page's admin-only /api/firewall/resync."""
+    try:
+        name = pivpn_ctl.validate_name(name)
+    except pivpn_ctl.PivpnError as exc:
+        return jsonify({"error": str(exc)}), 400
+    firewall.sync_all()
+    _audit("firewall_resync")
+    return jsonify({"resynced": True})
+
+
+@bp.route("/clients/<name>/rules/persist", methods=["POST"])
+@jwt_required()
+def client_persist_rules(name):
+    """Mirrors routes.py's client_persist_rules() view."""
+    try:
+        name = pivpn_ctl.validate_name(name)
+    except pivpn_ctl.PivpnError as exc:
+        return jsonify({"error": str(exc)}), 400
+    try:
+        firewall.save_persistent()
+    except firewall.FirewallError as exc:
+        _audit("firewall_persist", "", "error", str(exc))
+        return jsonify({"error": str(exc)}), 400
+    _audit("firewall_persist")
+    return jsonify({"persisted": True})
+
+
+def _bulk_disable_or_delete(action, ids, *, restrict_to_client=None):
+    """JSON-response equivalent of routes.py's own helper of this name —
+    same rule-by-rule logic (including the restrict_to_client guard, so a
+    submitted rule_id belonging to a different client is silently
+    dropped, never acted on), but returns a result dict instead of
+    calling flash()."""
+    client_ip = _client_ip()
+    client_ips = pivpn_ctl.list_client_ips()
+    ip_to_name = {ip: n for n, ip in client_ips.items()}
+    affected_ips = set()
+    changed = 0
+    skipped = []
+    for id_str in ids:
+        try:
+            rule_id = int(id_str)
+        except (TypeError, ValueError):
+            continue
+        rule = db.get_rule(rule_id)
+        if not rule:
+            continue
+        if restrict_to_client and firewall.rule_client_name(rule, ip_to_name) != restrict_to_client:
+            continue
+        if action == "disable" and not rule["enabled"]:
+            continue
+        try:
+            if action == "disable":
+                firewall.disable_rule(rule_id, client_ip=client_ip)
+            else:
+                firewall.delete_rule(rule_id, client_ip=client_ip)
+        except firewall.FirewallError as exc:
+            skipped.append(f"rule#{rule_id}: {exc}")
+            continue
+        changed += 1
+        if rule["kind"] == "forward" and rule.get("src"):
+            affected_ips.add(rule["src"])
+    for ip in affected_ips:
+        _regenerate_script_for_ip(ip, client_ips=client_ips)
+    _audit(f"firewall_bulk_{action}", f"{changed} rule(s), {len(skipped)} skipped")
+    return {"changed": changed, "skipped": skipped}
+
+
+@bp.route("/clients/<name>/rules/bulk-disable", methods=["POST"])
+@jwt_required()
+def client_bulk_disable_rules(name):
+    """POST {"rule_ids": [1, 2, ...]}. Mirrors routes.py's
+    client_bulk_disable_rules() view."""
+    try:
+        name = pivpn_ctl.validate_name(name)
+    except pivpn_ctl.PivpnError as exc:
+        return jsonify({"error": str(exc)}), 400
+    data = request.get_json(silent=True) or {}
+    result = _bulk_disable_or_delete("disable", data.get("rule_ids") or [], restrict_to_client=name)
+    return jsonify(result)
+
+
+@bp.route("/clients/<name>/rules/bulk-delete", methods=["POST"])
+@jwt_required()
+def client_bulk_delete_rules(name):
+    """POST {"rule_ids": [1, 2, ...]}. Mirrors routes.py's
+    client_bulk_delete_rules() view."""
+    try:
+        name = pivpn_ctl.validate_name(name)
+    except pivpn_ctl.PivpnError as exc:
+        return jsonify({"error": str(exc)}), 400
+    data = request.get_json(silent=True) or {}
+    result = _bulk_disable_or_delete("delete", data.get("rule_ids") or [], restrict_to_client=name)
+    return jsonify(result)
+
+
 # --- global firewall rules (mirrors routes.py's add_forward/add_input/
 # add_snat/add_portforward/toggle_rule/delete_rule) — admin-only, same
 # gating as the browser's Firewall page and GET /api/firewall/rules above.
+
+@bp.route("/firewall/import", methods=["POST"])
+@jwt_required()
+def import_rules():
+    denied = _require_admin()
+    if denied:
+        return denied
+    upload = request.files.get("rules_file")
+    if not upload or not upload.filename:
+        return jsonify(error="Choose a file to import."), 400
+    try:
+        text = upload.read().decode("utf-8")
+    except UnicodeDecodeError:
+        return jsonify(error="Could not read that file as text (expected UTF-8)."), 400
+    client_ips = pivpn_ctl.list_client_ips()
+    added, errors = firewall.import_rules(text, client_ips=client_ips, client_ip=_client_ip())
+    if added:
+        for name, ip in client_ips.items():
+            try:
+                firewall.regenerate_client_script(name, ip)
+            except PrivilegedCommandError:
+                pass
+    _audit("firewall_import", upload.filename, "error" if errors else "ok",
+           f"{added} added, {len(errors)} failed")
+    return jsonify(added=added, errors=errors)
+
+
+@bp.route("/firewall/bulk-disable", methods=["POST"])
+@bp.route("/firewall/bulk-delete", methods=["POST"])
+@jwt_required()
+def bulk_firewall_rules():
+    denied = _require_admin()
+    if denied:
+        return denied
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or not isinstance(data.get("rule_ids"), list):
+        return jsonify(error="rule_ids must be a list."), 400
+    action = "disable" if request.path.endswith("bulk-disable") else "delete"
+    return jsonify(_bulk_disable_or_delete(action, data["rule_ids"]))
+
+
+@bp.route("/firewall/resync", methods=["POST"])
+@bp.route("/firewall/persist", methods=["POST"])
+@jwt_required()
+def apply_firewall_rules():
+    denied = _require_admin()
+    if denied:
+        return denied
+    persist = request.path.endswith("persist")
+    action = "firewall_persist" if persist else "firewall_resync"
+    try:
+        if persist:
+            firewall.save_persistent()
+        else:
+            firewall.sync_all()
+    except (firewall.FirewallError, PrivilegedCommandError) as exc:
+        _audit(action, "", "error", str(exc))
+        return jsonify(error=str(exc)), 400
+    _audit(action)
+    return jsonify({"persisted" if persist else "resynced": True})
+
+
+@bp.route("/firewall/rules/<int:rule_id>/reorder", methods=["POST"])
+@jwt_required()
+def reorder_rule(rule_id):
+    denied = _require_admin()
+    if denied:
+        return denied
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify(ok=False, error="Invalid request."), 400
+    try:
+        target_id = int(data.get("target_id"))
+        place = data.get("place")
+        firewall.reorder_rule(rule_id, target_id, place, client_ip=_client_ip())
+    except (TypeError, ValueError):
+        return jsonify(ok=False, error="Invalid request."), 400
+    except (firewall.FirewallError, PrivilegedCommandError) as exc:
+        _audit("firewall_rule_reorder", f"rule#{rule_id}", "error", str(exc))
+        return jsonify(ok=False, error=str(exc)), 400
+    _audit("firewall_rule_reorder", f"rule#{rule_id} {place} rule#{target_id}")
+    return jsonify(ok=True)
 
 @bp.route("/firewall/forward", methods=["POST"])
 @jwt_required()
@@ -509,6 +795,28 @@ def logs():
             entries, total = vpnlog.list_sessions(q=q, page=page, page_size=page_size, since=since)
         elif tab == "client_sessions":
             entries, total = vpnlog.list_client_sessions(q=q, page=page, page_size=page_size, since=since)
+            # Mirrors routes.py's old browser-only relabeling (now removed
+            # from there — this is the only place this query runs anymore):
+            # "ongoing" only means "no disconnect event matched our known
+            # log patterns" (see DISCONNECT_RE's SIGTERM-only match in
+            # vpnlog.py) — a session that ended via timeout/ping-restart/
+            # unclean drop never logs that pattern and would otherwise show
+            # as ongoing forever. Cross-check against the live status file
+            # (the same source the Clients page uses) and relabel anything
+            # not actually connected right now, rather than show stale
+            # data. A relabeled session was sorted on the assumption it was
+            # still ongoing (that's what earned it a top-pinned position),
+            # so the pinning has to be redone or the row keeps sitting
+            # above sessions that actually ended more recently.
+            connected_now = pivpn_ctl.list_connected_clients()
+            relabeled = False
+            for s in entries:
+                if s["ongoing"] and s["client"] not in connected_now:
+                    s["ongoing"] = False
+                    s["status_note"] = "Ended (exact time unknown)"
+                    relabeled = True
+            if relabeled:
+                vpnlog.sort_client_sessions(entries)
         elif tab == "traffic":
             entries, total = vpnlog.list_traffic_flows(q=q, page=page, page_size=page_size, since=since)
         elif tab == "system":
@@ -547,7 +855,10 @@ def logs_refresh():
 # every write is admin-only except changing your own password.
 
 def _sanitized_user(row):
-    return {k: v for k, v in row.items() if k != "password_hash"}
+    # session_generation is internal auth plumbing (see users table's own
+    # comment) — no API consumer needs it, same reasoning as hiding
+    # password_hash.
+    return {k: v for k, v in row.items() if k not in ("password_hash", "session_generation")}
 
 
 @bp.route("/users", methods=["GET"])

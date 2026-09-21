@@ -314,3 +314,84 @@ def test_delete_user_guarded_closes_the_concurrent_race(tmp_path, monkeypatch):
     assert outcomes.count(None) == 1
     assert outcomes.count("last_admin") == 1
     assert db.count_admins() == 1
+
+
+# --- servers table (hub/agent split) — create_server/verify_server_token/
+# rotate_server_token/get_server_by_name, backing manage_servers.py and
+# hub_gateway.py's hello/mTLS identity checks.
+
+def test_create_server_returns_matching_id_and_working_token(tmp_path, monkeypatch):
+    _use_temp_db(tmp_path, monkeypatch)
+    server_id, token = db.create_server("agent-a")
+    assert db.verify_server_token(server_id, token) == "ok"
+
+
+def test_create_server_rejects_duplicate_name(tmp_path, monkeypatch):
+    _use_temp_db(tmp_path, monkeypatch)
+    db.create_server("agent-a")
+    try:
+        db.create_server("agent-a")
+        assert False, "expected ValueError"
+    except ValueError as exc:
+        assert "already exists" in str(exc)
+
+
+def test_verify_server_token_wrong_token_is_invalid(tmp_path, monkeypatch):
+    _use_temp_db(tmp_path, monkeypatch)
+    server_id, _token = db.create_server("agent-a")
+    assert db.verify_server_token(server_id, "not-the-real-token") == "invalid"
+
+
+def test_verify_server_token_unknown_server_id_is_invalid(tmp_path, monkeypatch):
+    _use_temp_db(tmp_path, monkeypatch)
+    assert db.verify_server_token(999, "anything") == "invalid"
+
+
+def test_verify_server_token_expired_is_rejected(tmp_path, monkeypatch):
+    _use_temp_db(tmp_path, monkeypatch)
+    server_id, token = db.create_server("agent-a")
+    conn = db.get_conn()
+    conn.execute(
+        "UPDATE servers SET token_expires_at = %s WHERE id = %s",
+        ((datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S"), server_id),
+    )
+    conn.commit()
+    conn.close()
+    assert db.verify_server_token(server_id, token) == "expired"
+
+
+def test_verify_server_token_null_expiry_never_expires(tmp_path, monkeypatch):
+    # Migration default for tokens issued before token_expires_at existed
+    # (see db.py's _MIGRATIONS) — NULL must mean "no expiry", not
+    # "already expired".
+    _use_temp_db(tmp_path, monkeypatch)
+    server_id, token = db.create_server("agent-a")
+    conn = db.get_conn()
+    conn.execute("UPDATE servers SET token_expires_at = NULL WHERE id = %s", (server_id,))
+    conn.commit()
+    conn.close()
+    assert db.verify_server_token(server_id, token) == "ok"
+
+
+def test_rotate_server_token_issues_a_working_new_token_and_invalidates_the_old(tmp_path, monkeypatch):
+    _use_temp_db(tmp_path, monkeypatch)
+    server_id, old_token = db.create_server("agent-a")
+    result = db.rotate_server_token("agent-a")
+    assert result is not None
+    rotated_id, new_token = result
+    assert rotated_id == server_id  # same identity, not a new row
+    assert db.verify_server_token(server_id, new_token) == "ok"
+    assert db.verify_server_token(server_id, old_token) == "invalid"
+
+
+def test_rotate_server_token_unknown_name_returns_none(tmp_path, monkeypatch):
+    _use_temp_db(tmp_path, monkeypatch)
+    assert db.rotate_server_token("no-such-agent") is None
+
+
+def test_get_server_by_name(tmp_path, monkeypatch):
+    _use_temp_db(tmp_path, monkeypatch)
+    server_id, _token = db.create_server("agent-a")
+    row = db.get_server_by_name("agent-a")
+    assert row["id"] == server_id
+    assert db.get_server_by_name("no-such-agent") is None

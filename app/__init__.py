@@ -9,10 +9,23 @@ from flask_wtf import CSRFProtect
 
 import config
 from app import db
-from app.auth import issue_html_jwt_cookie, login_manager
+from app.auth import issue_html_jwt_cookie, login_manager, token_superseded
 
 csrf = CSRFProtect()
 jwt = JWTManager()
+
+
+@jwt.token_in_blocklist_loader
+def _api_token_superseded(jwt_header, jwt_payload):
+    """Runs automatically before every @jwt_required()-protected route in
+    app/api.py — the API side of the same single-active-session check
+    the browser cookie's own request_loader applies (see auth.py's
+    token_superseded). A newer login for this account, whether from the
+    browser or another API call, makes every older token here fail on
+    its very next use — Flask-JWT-Extended's own name for this callback
+    is "is this token in the blocklist", so True here means reject."""
+    row = db.get_user_by_username(jwt_payload.get("sub", ""))
+    return not row or token_superseded(jwt_payload, row)
 
 # Holds this worker's lock_file object for the life of the process — see
 # _sync_firewall_once. A function-local variable's refcount hits zero the
@@ -91,6 +104,12 @@ def create_app():
         # session.permanent = True line documented before this switch to
         # JWT-based identity (see auth.py's issue_html_jwt_cookie).
         #
+        # issue_html_jwt_cookie also re-stamps the "la" (last-active)
+        # claim to now on every call, including this one — see
+        # IDLE_TIMEOUT_MINUTES's comment in config.py and auth.py's
+        # idle_timed_out for the shorter, activity-based clock this
+        # layers on top of the N-hours-since-last-request one above.
+        #
         # g.skip_jwt_cookie_refresh: set by logout() — current_user is
         # still "authenticated" for the rest of *this* request (resolved
         # once at request start, before logout's own cookie-clear ran),
@@ -104,6 +123,7 @@ def create_app():
     app.jinja_env.globals["ip_cidr_pattern"] = IP_CIDR_PATTERN
     app.jinja_env.globals["ip_pattern"] = IP_PATTERN
     app.jinja_env.globals["kind_display_label"] = KIND_DISPLAY_LABEL
+    app.jinja_env.globals["idle_timeout_minutes"] = config.IDLE_TIMEOUT_MINUTES
 
     with app.app_context():
         _sync_firewall_once(app)

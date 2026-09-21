@@ -1690,6 +1690,26 @@ dialog.modal code {
 
 .empty { color: var(--muted); }
 
+/* Shown by clients-page.js while GET /api/clients is in flight — that
+   round-trip goes through the hub/agent link in HUB_MODE and can take a
+   few real seconds, long enough that an empty table read as "no clients
+   exist" rather than "still loading" during live testing. --panel-2
+   (not --border/--muted) keeps this readable in both themes without a
+   new pair of light/dark overrides. */
+.skeleton-bar {
+  display: inline-block;
+  height: 0.9em;
+  width: 100%;
+  max-width: 8em;
+  border-radius: 4px;
+  background: var(--panel-2);
+  animation: skeleton-pulse 1.3s ease-in-out infinite;
+}
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
 /* Client detail page's identity strip, right below the page-header-row's
    name + actions — a single wrapping line of status/cert/session facts
    separated by bullets, styled quiet/small like a subtitle rather than a

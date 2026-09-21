@@ -10,7 +10,7 @@
   <div class="card-header-row firewall-rules-header">
     <div class="header-col">
       <h2>Active rules</h2>
-      {% if rules and vpn_clients %}
+      {% if vpn_clients %}
       <div class="pagination-size rule-client-filter">
         <label>Filter by client
           <select id="rules-client-filter">
@@ -31,12 +31,15 @@
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <button type="submit" class="btn">Apply Rules</button>
         </form>
-        {% if has_unsaved %}
-        <form method="post" action="{{ url_for('main.persist_rules') }}" class="btn-form">
+        <!-- Always rendered now (used to be conditional on a server-side
+             "has_unsaved" flag) — that flag came from a server-side rules
+             snapshot that no longer exists here; firewall-page.js toggles
+             the hidden attribute itself once it has fetched the real,
+             current answer from GET /api/firewall/rules. -->
+        <form method="post" action="{{ url_for('main.persist_rules') }}" class="btn-form" hidden>
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <button type="submit" class="btn btn-warn btn-unsaved-jump">Save Rules</button>
         </form>
-        {% endif %}
       </div>
       <div class="btn-group" id="bulk-actions-group" hidden>
         <form method="post" action="{{ url_for('main.bulk_disable_rules') }}" id="bulk-disable-form" class="btn-form">
@@ -182,7 +185,7 @@
 
     <div data-rule-type-panel="snat" hidden>
       <p class="hint">Like the automatic outbound NAT, but with a fixed exit IP instead of whatever address the outgoing interface currently has.</p>
-      <form method="post" action="{{ url_for('main.add_snat') }}" class="inline-form">
+      <form method="post" action="{{ url_for('main.add_snat') }}" class="inline-form" id="add-snat-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <label>Source <span class="hint">(subnet whose outbound traffic gets rewritten)</span>
           <input type="text" name="src" placeholder="10.202.226.0/24" pattern="{{ ip_cidr_pattern }}" title="An IPv4 address, optionally with a /0-32 CIDR suffix, e.g. 192.168.1.0/24">
@@ -253,16 +256,19 @@
         // Drop, everything else left at its default, did exactly this in
         // production. The message is computed at submit time (depends on
         // the current field values, so it can't be a static data-confirm
-        // set at page-render time) and left for nav-loading.js's own
-        // submit listener to pick up and show the modal, same pattern as
-        // the bulk-action forms use.
+        // set at page-render time) — shown via window.askConfirm directly
+        // (see firewall-page.js's window.submitFirewallAddForm for what
+        // actually sends the request once confirmed, or immediately if no
+        // warning applies).
         const form = document.getElementById('add-forward-form');
         const actionSelect = form.querySelector('select[name="action"]');
         const protocolSelect = form.querySelector('select[name="protocol"]');
         const dstInput = form.querySelector('input[name="dst"]');
         const dportInput = form.querySelector('input[name="dport"]');
+        const fieldNames = ['action', 'protocol', 'src', 'dst', 'dport', 'comment'];
 
-        form.addEventListener('submit', () => {
+        form.addEventListener('submit', (e) => {
+          e.preventDefault();
           // Protocol-agnostic — matches _check_not_unrestricted_forward_drop
           // (app/firewall.py), which rejects this shape regardless of
           // protocol. Was previously gated on protocol==='all' only, so a
@@ -276,11 +282,13 @@
             && !dportInput.value.trim();
           if (unrestricted) {
             const proto = protocolSelect.value === 'all' ? 'all' : protocolSelect.value;
-            form.dataset.confirm = `This rule has no source, destination, or port set — it will DROP ALL forwarded ${proto} traffic through this server, for every VPN client, not just one. Are you sure?`;
-            form.dataset.confirmLabel = 'Add anyway';
+            window.askConfirm(
+              `This rule has no source, destination, or port set — it will DROP ALL forwarded ${proto} traffic through this server, for every VPN client, not just one. Are you sure?`,
+              'Add anyway',
+              () => window.submitFirewallAddForm(form, '/api/firewall/forward', fieldNames),
+            );
           } else {
-            delete form.dataset.confirm;
-            delete form.dataset.confirmLabel;
+            window.submitFirewallAddForm(form, '/api/firewall/forward', fieldNames);
           }
         });
       })();
@@ -309,18 +317,22 @@
         const actionSelect = form.querySelector('select[name="action"]');
         const protocolSelect = form.querySelector('select[name="protocol"]');
         const dportInput = form.querySelector('input[name="dport"]');
+        const fieldNames = ['action', 'protocol', 'src', 'dport', 'comment'];
 
-        form.addEventListener('submit', () => {
+        form.addEventListener('submit', (e) => {
+          e.preventDefault();
           const unrestricted = actionSelect.value === 'DROP'
             && !hidden.value.trim()
             && !dportInput.value.trim();
           if (unrestricted) {
             const proto = protocolSelect.value === 'all' ? 'all' : protocolSelect.value;
-            form.dataset.confirm = `This rule has no source or port set — it will DROP ALL incoming ${proto} traffic to this server, from anywhere, not just one address. A rule that would block this page's own access is refused automatically, but that check only looks at port 443 — it won't stop this from silently cutting off something else, like OpenVPN's own port. Are you sure?`;
-            form.dataset.confirmLabel = 'Add anyway';
+            window.askConfirm(
+              `This rule has no source or port set — it will DROP ALL incoming ${proto} traffic to this server, from anywhere, not just one address. A rule that would block this page's own access is refused automatically, but that check only looks at port 443 — it won't stop this from silently cutting off something else, like OpenVPN's own port. Are you sure?`,
+              'Add anyway',
+              () => window.submitFirewallAddForm(form, '/api/firewall/input', fieldNames),
+            );
           } else {
-            delete form.dataset.confirm;
-            delete form.dataset.confirmLabel;
+            window.submitFirewallAddForm(form, '/api/firewall/input', fieldNames);
           }
         });
       })();
@@ -335,16 +347,34 @@
         const RESERVED_PORTS = { '443': "this app's own web UI", '22': 'SSH' };
         const form = document.getElementById('add-portforward-form');
         const extPortInput = form.querySelector('input[name="ext_port"]');
+        const fieldNames = ['ext_port', 'target_ip', 'target_port', 'protocol', 'ext_iface', 'comment'];
 
-        form.addEventListener('submit', () => {
+        form.addEventListener('submit', (e) => {
+          e.preventDefault();
           const reservedFor = RESERVED_PORTS[extPortInput.value.trim()];
           if (reservedFor) {
-            form.dataset.confirm = `Port ${extPortInput.value.trim()} is needed for ${reservedFor} on this server itself — forwarding it elsewhere will make that unreachable instead of reaching this box. Are you sure?`;
-            form.dataset.confirmLabel = 'Add anyway';
+            window.askConfirm(
+              `Port ${extPortInput.value.trim()} is needed for ${reservedFor} on this server itself — forwarding it elsewhere will make that unreachable instead of reaching this box. Are you sure?`,
+              'Add anyway',
+              () => window.submitFirewallAddForm(form, '/api/firewall/portforward', fieldNames),
+            );
           } else {
-            delete form.dataset.confirm;
-            delete form.dataset.confirmLabel;
+            window.submitFirewallAddForm(form, '/api/firewall/portforward', fieldNames);
           }
+        });
+      })();
+    </script>
+    <script>
+      (function() {
+        // SNAT has no client-side warning (no DROP/reserved-port shape to
+        // catch here — see app/firewall.py's own Known Limitations note on
+        // this form's optional-src looseness, deliberately left open) —
+        // submits straight through.
+        const form = document.getElementById('add-snat-form');
+        const fieldNames = ['src', 'snat_ip', 'out_iface', 'comment'];
+        form.addEventListener('submit', (e) => {
+          e.preventDefault();
+          window.submitFirewallAddForm(form, '/api/firewall/snat', fieldNames);
         });
       })();
     </script>
@@ -419,54 +449,13 @@
       </tr>
     </thead>
     <tbody id="rules-tbody">
-      {% if not rules %}
-      <tr class="empty-row"><td colspan="10" class="empty">No rules yet.</td></tr>
-      {% endif %}
+      <!-- Populated by firewall-page.js via GET /api/firewall/rules —
+           see clients-page.js's top comment for the pattern this
+           follows. Note: unlike the old server-rendered version, this
+           never runs discover_cli_rules() reconciliation (same
+           reasoning as GET /api/firewall/rules itself) — no
+           "missing_live" warning badge here; use Apply Rules for that. -->
       <tr id="rules-empty-client" class="empty-row" style="display:none"><td colspan="10" class="empty">No rules scoped to this client yet.</td></tr>
-      {% set ns = namespace(prev_label=None) %}
-      {% for r in rules %}
-      {% set label = kind_display_label.get(r.kind, r.kind) %}
-      {% if label != ns.prev_label %}
-      <tr class="kind-divider-row"><td colspan="10">{{ label }}</td></tr>
-      {% set ns.prev_label = label %}
-      {% endif %}
-      <tr class="{{ '' if r.enabled else 'disabled-row' }} {{ 'missing-live-row' if r.missing_live else '' }}"
-          {% if r.kind != 'client_block' %}draggable="true" data-rule-id="{{ r.id }}"{% endif %}>
-        <td><input type="checkbox" class="rule-select-checkbox" data-rule-id="{{ r.id }}" aria-label="Select rule {{ r.id }}"></td>
-        <td>{{ r.client_name or '' }}</td>
-        <td>{{ r.kind }}</td>
-        <td>{{ r.action }}</td>
-        <td>{{ r.detail }}
-          {% if r.missing_live %}
-          <br><span class="missing-live-badge" title="Rule #{{ r.id }} — tracked here, but not found in the live firewall (likely removed directly via iptables). Delete to stop tracking it, or Apply Rules to re-add it live.">⚠ #{{ r.id }} — not found live</span>
-          {% endif %}
-        </td>
-        <td>{{ r.comment or '' }}</td>
-        <td>{{ 'CLI' if r.source == 'cli' else 'webui' }}</td>
-        <td><span class="{{ 'saved-yes' if r.persisted else 'saved-no' }}">{{ 'Saved' if r.persisted else 'Unsaved' }}</span></td>
-        <td>
-          {% if r.kind == 'client_block' %}
-          <span class="hint" title="Client blocks always take priority over other rules and can't be reordered">&mdash;</span>
-          {% else %}
-          <span class="drag-handle" title="Drag to reorder, or focus and press ↑/↓"
-                tabindex="0" role="button" aria-label="Reorder rule — press up or down arrow to move it">&#9776;</span>
-          {% endif %}
-        </td>
-        <td>
-          <div class="actions">
-          <form method="post" action="{{ url_for('main.toggle_rule', rule_id=r.id) }}" class="btn-form">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button type="submit" class="btn btn-sm {{ 'btn-warn' if r.enabled else 'btn-ok' }}">{{ 'Disable' if r.enabled else 'Enable' }}</button>
-          </form>
-          <form method="post" action="{{ url_for('main.delete_rule', rule_id=r.id) }}" class="btn-form"
-                data-confirm="Delete this rule?" data-confirm-label="Delete">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button type="submit" class="btn btn-sm btn-danger">Delete</button>
-          </form>
-          </div>
-        </td>
-      </tr>
-      {% endfor %}
     </tbody>
   </table>
   </div>
@@ -485,73 +474,10 @@
       <button type="button" class="btn btn-sm" data-page-next>Next</button>
     </div>
   </div>
+  <script src="{{ url_for('static', filename='js/api-client.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/firewall-page.js') }}"></script>
   <script>
-    // "No rules scoped to this client yet." only makes sense once a specific
-    // client is picked — with "All Rules" selected, an empty result means
-    // the search box excluded everything, which the pagination status text
-    // ("No results") already covers.
-    const rulesEmptyClientRow = document.getElementById('rules-empty-client');
-    function updateEmptyClientMessage() {
-      if (!rulesEmptyClientRow) return;
-      const clientSelect = document.getElementById('rules-client-filter');
-      const clientSelected = !!clientSelect && clientSelect.value !== '';
-      // dataset.selectMatch is the client filter's own verdict, set
-      // independent of the search box (see select-filter.js) — so this
-      // reflects "does this client have any rules at all," not "does
-      // anything survive the search box too."
-      const clientHasRules = Array.from(document.querySelectorAll('#rules-tbody tr:not(.empty-row):not(.kind-divider-row)'))
-        .some((row) => row.dataset.selectMatch !== '0');
-      rulesEmptyClientRow.style.display = (clientSelected && !clientHasRules) ? '' : 'none';
-    }
-
-    // Divider rows aren't real rules — excluded from every one of these
-    // (pagination count, both filters, drag-reorder) the same way
-    // .empty-row already is, so they never eat into "Show 10" or get
-    // treated as a search/filter match or a drag target. They're a pure
-    // grouping label (see firewall.KIND_DISPLAY_ORDER's own comment); a
-    // divider's own visibility is handled separately below
-    // (updateDividerVisibility), since pagination.js only ever manages
-    // style.display for rows matching itemSelector, and dividers
-    // deliberately aren't one of those.
-    const rulesRowSelector = 'tr:not(.empty-row):not(.kind-divider-row)';
-
-    // Shows a kind-divider only when at least one row in the group it
-    // labels is currently visible (post search/filter/page slicing) —
-    // without this, a divider can show with zero visible rows under it
-    // (its whole group landed on a different page, or got filtered out
-    // entirely), or a page can start mid-group with the divider itself
-    // left behind on the previous page. Re-run after anything that
-    // changes which rows are visible: paging, either filter, or page size.
-    function updateDividerVisibility() {
-      let currentDivider = null;
-      let groupHasVisibleRow = false;
-      function closeGroup() {
-        if (currentDivider) currentDivider.style.display = groupHasVisibleRow ? '' : 'none';
-      }
-      Array.from(document.querySelectorAll('#rules-tbody > tr')).forEach((row) => {
-        if (row.classList.contains('kind-divider-row')) {
-          closeGroup();
-          currentDivider = row;
-          groupHasVisibleRow = false;
-        } else if (!row.classList.contains('empty-row') && row.style.display !== 'none') {
-          groupHasVisibleRow = true;
-        }
-      });
-      closeGroup();
-    }
-
-    const rulesPager = attachPagination('#rules-tbody', rulesRowSelector, 'rules-page-size', 'rules-pagination', updateDividerVisibility);
-    const rulesClientFilter = attachSelectFilter('rules-client-filter', '#rules-tbody', rulesRowSelector, () => {
-      rulesPager && rulesPager.refresh();
-      updateEmptyClientMessage();
-    });
-    attachLogFilter('rules-filter', '#rules-tbody', rulesRowSelector, '#rules-table thead th:not(:first-child):not(:last-child)', () => {
-      rulesClientFilter && rulesClientFilter.refresh();
-      rulesPager && rulesPager.refresh();
-      updateEmptyClientMessage();
-    });
-    attachFirewallReorder('#rules-tbody');
-
+    // Selection state follows the asynchronously rendered rules.
     (function() {
       const selectAll = document.getElementById('rules-select-all');
       const bulkGroup = document.getElementById('bulk-actions-group');
@@ -561,7 +487,8 @@
       const deleteBtn = document.getElementById('bulk-delete-btn');
       const deleteForm = document.getElementById('bulk-delete-form');
       const deleteCount = document.getElementById('bulk-delete-count');
-      if (!selectAll || !bulkGroup || !disableBtn || !disableForm || !deleteBtn || !deleteForm) return;
+      const tbody = document.getElementById('rules-tbody');
+      if (!selectAll || !bulkGroup || !disableBtn || !disableForm || !deleteBtn || !deleteForm || !tbody) return;
 
       const checkboxes = () => Array.from(document.querySelectorAll('#rules-tbody .rule-select-checkbox'));
       const visibleCheckboxes = () => checkboxes().filter((cb) => cb.closest('tr').style.display !== 'none');
@@ -581,41 +508,23 @@
         visibleCheckboxes().forEach((cb) => { cb.checked = selectAll.checked; });
         updateCount();
       });
-      checkboxes().forEach((cb) => cb.addEventListener('change', updateCount));
+      tbody.addEventListener('change', (e) => {
+        updateCount();
+        const visible = visibleCheckboxes();
+        selectAll.checked = visible.length > 0 && visible.every((cb) => cb.checked);
+        selectAll.indeterminate = visible.some((cb) => cb.checked) && !selectAll.checked;
+      });
 
-      // Checkboxes aren't nested in either form (they'd need to submit to
-      // both), so on submit each form gets its own hidden rule_ids inputs
-      // built from whatever's checked right now.
-      function injectSelectedIds(form) {
-        form.querySelectorAll('input[name="rule_ids"]').forEach((el) => el.remove());
-        checkboxes().filter((cb) => cb.checked).forEach((cb) => {
-          const hidden = document.createElement('input');
-          hidden.type = 'hidden';
-          hidden.name = 'rule_ids';
-          hidden.value = cb.dataset.ruleId;
-          form.appendChild(hidden);
-        });
+      function submitBulk(event, action, form) {
+        event.preventDefault();
+        const ids = checkboxes().filter((cb) => cb.checked).map((cb) => cb.dataset.ruleId);
+        if (!ids.length) return;
+        const submit = () => window.runFirewallAction(form, `/api/firewall/bulk-${action}`, { rule_ids: ids });
+        if (action === 'delete') window.askConfirm(`Delete ${ids.length} selected rule(s)? This cannot be undone.`, 'Delete', submit);
+        else submit();
       }
-
-      disableForm.addEventListener('submit', (e) => {
-        const checked = checkboxes().filter((cb) => cb.checked).length;
-        if (checked === 0) { e.preventDefault(); return; }
-        injectSelectedIds(disableForm);
-      });
-
-      deleteForm.addEventListener('submit', (e) => {
-        const checked = checkboxes().filter((cb) => cb.checked).length;
-        if (checked === 0) { e.preventDefault(); return; }
-        injectSelectedIds(deleteForm);
-        // Message depends on the current selection, so it can't be a
-        // static data-confirm set at page-render time — compute it now and
-        // let nav-loading.js's own submit listener (which fires next,
-        // since it's on document and this one is on the form itself) pick
-        // it up and show the same custom modal, instead of duplicating
-        // that logic here.
-        deleteForm.dataset.confirm = `Delete ${checked} selected rule(s)? This cannot be undone.`;
-        deleteForm.dataset.confirmLabel = 'Delete';
-      });
+      disableForm.addEventListener('submit', (event) => submitBulk(event, 'disable', disableForm));
+      deleteForm.addEventListener('submit', (event) => submitBulk(event, 'delete', deleteForm));
     })();
   </script>
 </section>

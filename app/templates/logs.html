@@ -2,110 +2,59 @@
 {% block title %}Logs — PiVPN Web UI{% endblock %}
 {% block content %}
 
-{# search_box/range_and_refresh: search_box sits in the page-header-row up
-   top (matching every other page's search box); range_and_refresh stays in
-   the tab's own card, above its table. Split into separate forms/macros so
-   each carries the others' current value as a hidden field — moving the
-   search box up shouldn't mean losing the selected range (or vice versa)
-   when any one of them submits on its own. Used by the five DB-backed,
-   server-paginated tabs (VPN Sessions, Client Sessions, Traffic, Activity,
-   User Auth) for both macros. Activity/User Auth's own Refresh now is a bit
-   of a fiction (they read audit_log directly, no ingestion lag to actually
-   catch up on) but kept for visual consistency across all five tabs; it's
-   still a real reload, just one that was never stale.
-
-   System is now DB-backed too (deploy/ingest_logs.py's system-tail
-   ingestion — see app/vpnlog.py's module docstring for why it moved off
-   a live journalctl fetch), so it uses both macros exactly like Sessions/
-   Client Sessions/Traffic: search_box's q is a real server-side search
-   over system_log_lines, and range_and_refresh's Refresh re-runs
-   ingestion (catching up early instead of waiting for the next tick),
-   not a live journalctl re-fetch. #}
-{% macro search_box(tab_name, label) %}
-  <form method="get" action="{{ url_for('main.logs') }}" class="search-form">
-    <input type="hidden" name="tab" value="{{ tab_name }}">
-    <input type="hidden" name="range" value="{{ log_range }}">
-    <input type="text" name="q" value="{{ q or '' }}" class="log-filter-input"
-           placeholder="Search…" aria-label="Search {{ label }}">
-  </form>
-{% endmacro %}
-
-{% macro range_and_refresh(tab_name) %}
-  <div class="table-toolbar">
-    <form method="get" action="{{ url_for('main.logs') }}">
-      <input type="hidden" name="tab" value="{{ tab_name }}">
-      {% if q %}<input type="hidden" name="q" value="{{ q }}">{% endif %}
-      <span class="pagination-size log-range-filter">
-        <select name="range" onchange="this.form.submit()" aria-label="Time range">
-          {% for key, opt_label in log_range_options %}
-          <option value="{{ key }}" {{ 'selected' if log_range == key else '' }}>{{ opt_label }}</option>
-          {% endfor %}
-        </select>
-      </span>
-    </form>
-    <form method="post" action="{{ url_for('main.logs_refresh') }}" class="btn-form">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <input type="hidden" name="tab" value="{{ tab_name }}">
-      <button type="submit" class="btn btn-icon" title="Refresh now" aria-label="Refresh now">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
-      </button>
-    </form>
-  </div>
-{% endmacro %}
-
-{% macro pagination_nav(tab_name) %}
-  <div class="pagination">
-    <form method="get" action="{{ url_for('main.logs') }}">
-      <input type="hidden" name="tab" value="{{ tab_name }}">
-      {% if q %}<input type="hidden" name="q" value="{{ q }}">{% endif %}
-      <input type="hidden" name="range" value="{{ log_range }}">
-      <label class="pagination-size">Show
-        <select name="page_size" onchange="this.form.submit()" aria-label="Rows per page">
-          {% for n in (10, 25, 50, 100) %}
-          <option value="{{ n }}" {{ 'selected' if page_size == n else '' }}>{{ n }}</option>
-          {% endfor %}
-        </select>
-      </label>
-    </form>
-    <div class="pagination-nav">
-      {% if page > 1 %}
-      <a class="btn btn-sm" href="{{ url_for('main.logs', tab=tab_name, q=q, range=log_range, page=page-1, page_size=page_size) }}">Prev</a>
-      {% else %}
-      <button type="button" class="btn btn-sm" disabled>Prev</button>
-      {% endif %}
-      <span class="hint" aria-live="polite">Page {{ page }} of {{ total_pages }} ({{ total }} total)</span>
-      {% if page < total_pages %}
-      <a class="btn btn-sm" href="{{ url_for('main.logs', tab=tab_name, q=q, range=log_range, page=page+1, page_size=page_size) }}">Next</a>
-      {% else %}
-      <button type="button" class="btn btn-sm" disabled>Next</button>
-      {% endif %}
-    </div>
-  </div>
-{% endmacro %}
-
 {% set log_search_labels = {'sessions': 'VPN sessions', 'client_sessions': 'client sessions', 'traffic': 'traffic flows', 'system': 'system log', 'activity': 'activity log', 'auth': 'user auth log'} %}
 <div class="page-header-row">
   <h1>Logs</h1>
-  {% if tab in log_search_labels %}
-    {{ search_box(tab, log_search_labels[tab]) }}
-  {% endif %}
+  <!-- One shared, ever-present search box (every tab is in
+       log_search_labels, so this was never actually conditional) — its
+       placeholder/aria-label are updated by logs-page.js on tab switch.
+       Server-rendered value/label are the *initial* tab's, matching a
+       bookmarked ?tab=... link. -->
+  <input type="text" id="logs-search" class="log-filter-input filter-input-inline" value="{{ q or '' }}"
+         placeholder="Search…" aria-label="Search {{ log_search_labels.get(tab, 'logs') }}">
 </div>
 
-<div class="tabs" id="logs-tabs">
-  <a href="{{ url_for('main.logs', tab='client_sessions') }}" class="{{ 'active' if tab == 'client_sessions' }}" {% if tab == 'client_sessions' %}aria-current="page"{% endif %}>Client Sessions</a>
-  <a href="{{ url_for('main.logs', tab='traffic') }}" class="{{ 'active' if tab == 'traffic' }}" {% if tab == 'traffic' %}aria-current="page"{% endif %}>Traffic Sessions</a>
+<!-- data-tab/page: the resolved (validated/defaulted) tab/page
+     logs-page.js needs for its first GET /api/logs — read once here since
+     the raw URL on a fresh /logs visit may carry neither at all (defaults
+     are resolved server-side in main.logs, cheaply, with no DB access).
+     q/range/page_size don't need duplicating here — logs-page.js reads
+     those straight off #logs-search/#logs-range/#logs-page-size's own
+     server-rendered initial value/selected option instead. -->
+<div class="tabs" id="logs-tabs" data-tab="{{ tab }}" data-page="{{ page }}">
+  <a href="{{ url_for('main.logs', tab='client_sessions') }}" data-logs-tab-link="client_sessions" data-logs-tab-label="client sessions" class="{{ 'active' if tab == 'client_sessions' }}" {% if tab == 'client_sessions' %}aria-current="page"{% endif %}>Client Sessions</a>
+  <a href="{{ url_for('main.logs', tab='traffic') }}" data-logs-tab-link="traffic" data-logs-tab-label="traffic flows" class="{{ 'active' if tab == 'traffic' }}" {% if tab == 'traffic' %}aria-current="page"{% endif %}>Traffic Sessions</a>
   {% if current_user.is_admin %}
-  <a href="{{ url_for('main.logs', tab='sessions') }}" class="{{ 'active' if tab == 'sessions' }}" {% if tab == 'sessions' %}aria-current="page"{% endif %}>VPN Sessions</a>
-  <a href="{{ url_for('main.logs', tab='system') }}" class="{{ 'active' if tab == 'system' }}" {% if tab == 'system' %}aria-current="page"{% endif %}>System</a>
-  <a href="{{ url_for('main.logs', tab='activity') }}" class="{{ 'active' if tab == 'activity' }}" {% if tab == 'activity' %}aria-current="page"{% endif %}>Activity</a>
+  <a href="{{ url_for('main.logs', tab='sessions') }}" data-logs-tab-link="sessions" data-logs-tab-label="VPN sessions" class="{{ 'active' if tab == 'sessions' }}" {% if tab == 'sessions' %}aria-current="page"{% endif %}>VPN Sessions</a>
+  <a href="{{ url_for('main.logs', tab='system') }}" data-logs-tab-link="system" data-logs-tab-label="system log" class="{{ 'active' if tab == 'system' }}" {% if tab == 'system' %}aria-current="page"{% endif %}>System</a>
+  <a href="{{ url_for('main.logs', tab='activity') }}" data-logs-tab-link="activity" data-logs-tab-label="activity log" class="{{ 'active' if tab == 'activity' }}" {% if tab == 'activity' %}aria-current="page"{% endif %}>Activity</a>
   {% endif %}
-  <a href="{{ url_for('main.logs', tab='auth') }}" class="{{ 'active' if tab == 'auth' }}" {% if tab == 'auth' %}aria-current="page"{% endif %}>User Auth</a>
+  <a href="{{ url_for('main.logs', tab='auth') }}" data-logs-tab-link="auth" data-logs-tab-label="user auth log" class="{{ 'active' if tab == 'auth' }}" {% if tab == 'auth' %}aria-current="page"{% endif %}>User Auth</a>
 </div>
 
-{% if tab == 'sessions' %}
-<section class="card">
+<!-- Range/Refresh: one shared instance, not one per tab. Now that every
+     tab's <section> exists in the DOM at once (see below — needed so
+     switching tabs doesn't require a page reload) instead of only the
+     active one being rendered server-side, duplicating these per tab
+     would mean N elements matching the same data-logs-refresh/#logs-range
+     selector at once, which logs-page.js can't disambiguate. Applies to
+     whichever tab is currently active. -->
+<div class="table-toolbar">
+  <span class="pagination-size log-range-filter">
+    <select id="logs-range" aria-label="Time range">
+      {% for key, opt_label in log_range_options %}
+      <option value="{{ key }}" {{ 'selected' if log_range == key else '' }}>{{ opt_label }}</option>
+      {% endfor %}
+    </select>
+  </span>
+  <button type="button" class="btn btn-icon" data-logs-refresh title="Refresh now" aria-label="Refresh now">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+  </button>
+</div>
+
+{% if current_user.is_admin %}
+<section class="card" data-logs-section="sessions" {{ 'hidden' if tab != 'sessions' }}>
   <p class="hint">Client connect/disconnect events parsed from the OpenVPN service journal, most recent first (last 7 days). Parsing is best-effort — lines that don't match a known OpenVPN log format show up with event "other" and the raw message in Detail.</p>
-  {{ range_and_refresh('sessions') }}
   <div class="table-scroll">
   <table id="sessions-table">
     <thead>
@@ -118,37 +67,15 @@
       </tr>
     </thead>
     <tbody id="sessions-tbody">
-      {% if not sessions %}
-      <tr><td colspan="5" class="empty">{{ 'No sessions match that search.' if q else 'No session events found.' }}</td></tr>
-      {% endif %}
-      {% for e in sessions %}
-      <tr>
-        <td>{{ e.ts }}</td>
-        <td>
-          {% if e.event == 'connected' %}
-            <span class="badge badge-connected">connected</span>
-          {% elif e.event == 'disconnected' %}
-            <span class="badge badge-inactive">disconnected</span>
-          {% else %}
-            <span class="badge badge-inactive">other</span>
-          {% endif %}
-        </td>
-        <td>{{ e.client }}</td>
-        <td>{{ e.address }}</td>
-        <td>{{ e.detail }}</td>
-      </tr>
-      {% endfor %}
+      <!-- Populated by logs-page.js via GET /api/logs?tab=sessions. -->
     </tbody>
   </table>
   </div>
-  {{ pagination_nav('sessions') }}
 </section>
 {% endif %}
 
-{% if tab == 'client_sessions' %}
-<section class="card">
+<section class="card" data-logs-section="client_sessions" {{ 'hidden' if tab != 'client_sessions' }}>
   <p class="hint">Each client's login sessions — when, how long, and how many — paired from the same connect/disconnect journal events as VPN Sessions. A session still in progress shows as "ongoing" with no end time or duration yet.</p>
-  {{ range_and_refresh('client_sessions') }}
   <div class="table-scroll">
   <table id="client-sessions-table">
     <thead>
@@ -161,44 +88,14 @@
       </tr>
     </thead>
     <tbody id="client-sessions-tbody">
-      {% if not client_sessions %}
-      <tr><td colspan="5" class="empty">{{ 'No sessions match that search.' if q else 'No session events found.' }}</td></tr>
-      {% endif %}
-      {% for s in client_sessions %}
-      <tr>
-        <td>{{ s.client }}</td>
-        <td>{{ s.start or '—' }}</td>
-        <td>
-          {% if s.ongoing %}
-            <span class="badge badge-connected">ongoing</span>
-          {% elif s.status_note %}
-            <span class="cell-note">{{ s.status_note }}</span>
-          {% else %}
-            {{ s.end or '—' }}
-          {% endif %}
-        </td>
-        <td>{{ s.duration or '—' }}</td>
-        <td>
-          {% if s.real_address %}
-            {{ s.real_address }}
-            <span class="cell-note hint-block">via relay ({{ s.address }})</span>
-          {% else %}
-            {{ s.address or '—' }}
-          {% endif %}
-        </td>
-      </tr>
-      {% endfor %}
+      <!-- Populated by logs-page.js via GET /api/logs?tab=client_sessions. -->
     </tbody>
   </table>
   </div>
-  {{ pagination_nav('client_sessions') }}
 </section>
-{% endif %}
 
-{% if tab == 'traffic' %}
-<section class="card">
+<section class="card" data-logs-section="traffic" {{ 'hidden' if tab != 'traffic' }}>
   <p class="hint">Which client talked to which destination and when — one row per new connection (not every packet), parsed from the kernel's netfilter log (last 7 days, searchable and paginated below). Requires deploy/setup-traffic-log.sh to have been run on this server; new flows can take up to ~10 seconds to appear (ingested periodically in the background, not fetched live on page load) — or use Refresh for less than that.</p>
-  {{ range_and_refresh('traffic') }}
   <div class="table-scroll">
   <table id="traffic-table">
     <thead>
@@ -213,31 +110,15 @@
       </tr>
     </thead>
     <tbody id="traffic-tbody">
-      {% if not traffic_flows %}
-      <tr><td colspan="7" class="empty">{{ 'No flows match that search.' if q else "No traffic flow events found." }}</td></tr>
-      {% endif %}
-      {% for f in traffic_flows %}
-      <tr>
-        <td>{{ f.ts }}</td>
-        <td>{{ f.client }}</td>
-        <td>{{ f.src }}{% if f.sport %}:{{ f.sport }}{% endif %}</td>
-        <td>{{ f.dst }}{% if f.dport %}:{{ f.dport }}{% endif %}</td>
-        <td>{{ f.dst_org or '—' }}</td>
-        <td>{{ f.proto }}</td>
-        <td>{{ f.dport or '—' }}</td>
-      </tr>
-      {% endfor %}
+      <!-- Populated by logs-page.js via GET /api/logs?tab=traffic. -->
     </tbody>
   </table>
   </div>
-  {{ pagination_nav('traffic') }}
 </section>
-{% endif %}
 
-{% if tab == 'system' %}
-<section class="card">
+{% if current_user.is_admin %}
+<section class="card" data-logs-section="system" {{ 'hidden' if tab != 'system' }}>
   <p class="hint">journalctl (whole system) — every process, not just VPN-related ones. Most recent first, searchable and paginated below; new lines can take up to ~10 seconds to appear (ingested periodically in the background, not fetched live on page load) — or use Refresh for less than that.</p>
-  {{ range_and_refresh('system') }}
   <div class="table-scroll">
   <table id="system-log-table">
     <thead>
@@ -248,27 +129,14 @@
       </tr>
     </thead>
     <tbody id="system-log-tbody">
-      {% if not system_log %}
-      <tr><td colspan="3" class="empty">{{ 'No log lines match that search.' if q else 'No log lines found yet.' }}</td></tr>
-      {% endif %}
-      {% for e in system_log %}
-      <tr>
-        <td>{{ e.ts }}</td>
-        <td>{{ e.process or '—' }}</td>
-        <td>{{ e.message }}</td>
-      </tr>
-      {% endfor %}
+      <!-- Populated by logs-page.js via GET /api/logs?tab=system. -->
     </tbody>
   </table>
   </div>
-  {{ pagination_nav('system') }}
 </section>
-{% endif %}
 
-{% if tab == 'activity' %}
-<section class="card">
+<section class="card" data-logs-section="activity" {{ 'hidden' if tab != 'activity' }}>
   <p class="hint">Every audited action — firewall changes, client management, user management — not just login/logout (see User Auth for that), most recent first.</p>
-  {{ range_and_refresh('activity') }}
   <div class="table-scroll">
   <table id="activity-table">
     <thead>
@@ -282,30 +150,15 @@
       </tr>
     </thead>
     <tbody id="activity-tbody">
-      {% if not activity_entries %}
-      <tr><td colspan="6" class="empty">{{ 'No activity matches that search.' if q else 'No activity yet.' }}</td></tr>
-      {% endif %}
-      {% for e in activity_entries %}
-      <tr class="{{ 'blocked-row' if e.result == 'error' }}">
-        <td>{{ e.ts }}</td>
-        <td>{{ e.actor }}</td>
-        <td>{{ e.action }}</td>
-        <td>{{ e.target or '' }}</td>
-        <td>{{ e.result }}</td>
-        <td>{{ e.detail or '' }}</td>
-      </tr>
-      {% endfor %}
+      <!-- Populated by logs-page.js via GET /api/logs?tab=activity. -->
     </tbody>
   </table>
   </div>
-  {{ pagination_nav('activity') }}
 </section>
 {% endif %}
 
-{% if tab == 'auth' %}
-<section class="card">
+<section class="card" data-logs-section="auth" {{ 'hidden' if tab != 'auth' }}>
   <p class="hint">Login and logout events for every account, most recent first.</p>
-  {{ range_and_refresh('auth') }}
   <div class="table-scroll">
   <table id="auth-table">
     <thead>
@@ -318,22 +171,29 @@
       </tr>
     </thead>
     <tbody id="auth-tbody">
-      {% if not auth_entries %}
-      <tr><td colspan="5" class="empty">{{ 'No auth activity matches that search.' if q else 'No auth activity yet.' }}</td></tr>
-      {% endif %}
-      {% for e in auth_entries %}
-      <tr class="{{ 'blocked-row' if e.result == 'error' }}">
-        <td>{{ e.ts }}</td>
-        <td>{{ e.actor }}</td>
-        <td>{{ e.action }}</td>
-        <td>{{ e.result }}</td>
-        <td>{{ e.detail or '' }}</td>
-      </tr>
-      {% endfor %}
+      <!-- Populated by logs-page.js via GET /api/logs?tab=auth. -->
     </tbody>
   </table>
   </div>
-  {{ pagination_nav('auth') }}
 </section>
-{% endif %}
+
+<!-- Pagination: also one shared instance, same reasoning as the toolbar
+     above — applies to whichever tab is currently active. -->
+<div class="pagination" id="logs-pagination">
+  <label class="pagination-size">Show
+    <select id="logs-page-size" aria-label="Rows per page">
+      {% for n in (10, 25, 50, 100) %}
+      <option value="{{ n }}" {{ 'selected' if page_size == n else '' }}>{{ n }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <div class="pagination-nav">
+    <button type="button" class="btn btn-sm" data-logs-page-nav="prev" disabled>Prev</button>
+    <span class="hint" data-logs-page-status aria-live="polite"></span>
+    <button type="button" class="btn btn-sm" data-logs-page-nav="next" disabled>Next</button>
+  </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/api-client.js') }}"></script>
+<script src="{{ url_for('static', filename='js/logs-page.js') }}"></script>
 {% endblock %}

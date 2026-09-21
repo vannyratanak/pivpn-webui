@@ -107,6 +107,26 @@ def issue_cert(name: str):
     _print_cert_instructions(name, *cert_pair)
 
 
+def rotate_token(name: str):
+    """Issues a fresh token for an agent that's already registered —
+    the renewal path once its current token is approaching
+    config.AGENT_TOKEN_TTL_DAYS, or any time sooner after a suspected
+    leak. Its id/name/certificate are untouched; only the token itself
+    (and its expiry) changes, so agent.py just needs its .env's
+    AGENT_TOKEN updated and to be restarted — no re-copying of any TLS
+    files."""
+    db.init_db()
+    result = db.rotate_server_token(name)
+    if not result:
+        print(f"Error: no server named '{name}' is registered.", file=sys.stderr)
+        sys.exit(1)
+    server_id, token = result
+    print(f"Rotated token for server #{server_id} ({name!r}). Update that box's agent .env:\n")
+    print(f"AGENT_TOKEN={token}")
+    print("\n(AGENT_SERVER_ID is unchanged — no need to touch it or any TLS cert/key files.)")
+    print("Restart that box's agent.py to pick up the new token.")
+
+
 def main():
     if len(sys.argv) == 3 and sys.argv[1] == "register":
         register(sys.argv[2])
@@ -114,8 +134,12 @@ def main():
     if len(sys.argv) == 3 and sys.argv[1] == "issue-cert":
         issue_cert(sys.argv[2])
         return
+    if len(sys.argv) == 3 and sys.argv[1] == "rotate-token":
+        rotate_token(sys.argv[2])
+        return
     print(f"Usage: {sys.argv[0]} register <name>", file=sys.stderr)
-    print(f"       {sys.argv[0]} issue-cert <name>   (mutual-TLS cert for an already-registered agent)", file=sys.stderr)
+    print(f"       {sys.argv[0]} issue-cert <name>     (mutual-TLS cert for an already-registered agent)", file=sys.stderr)
+    print(f"       {sys.argv[0]} rotate-token <name>   (fresh token for an already-registered agent)", file=sys.stderr)
     sys.exit(1)
 
 
