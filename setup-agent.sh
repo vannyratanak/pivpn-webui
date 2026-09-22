@@ -1,0 +1,144 @@
+#!/usr/bin/env bash
+# One-time setup for an AGENT box (the actual PiVPN server) in a hub/agent
+# deployment. Run this ONCE on each real PiVPN box you want a hub to
+# manage remotely, after cloning this repo there and confirming PiVPN
+# itself is already installed and working. This box only ever needs
+# agent.py + the app package's local-execution code paths — NOT
+# Postgres, NOT nginx, NOT the Flask app itself.
+#
+# Before running this: register the box on the HUB first
+#   python3 manage_servers.py register <name>
+# (or answer "yes" to setup-hub.sh's own step 6) — you'll need the
+# printed AGENT_SERVER_ID/AGENT_TOKEN (and cert paths, if the hub has
+# mutual TLS set up) to answer this script's prompts below.
+set -euo pipefail
+
+if [[ $EUID -eq 0 ]]; then
+  echo "Run this as your normal user (the one PiVPN was installed as), not root/sudo." >&2
+  exit 1
+fi
+
+APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$APP_DIR"
+
+echo "======================================================"
+echo " PiVPN Web UI — one-time AGENT setup"
+echo "======================================================"
+echo
+echo "This box dials OUT to the hub over an encrypted WebSocket — nothing"
+echo "inbound needs opening here. No Postgres/nginx/Flask runs on this"
+echo "machine; just the small always-on connector."
+echo
+
+if ! command -v pivpn >/dev/null 2>&1; then
+  echo "Warning: 'pivpn' not found on PATH. This box can't actually manage" >&2
+  echo "clients/firewall until it is." >&2
+fi
+
+# Courtesy check for an already-running ad-hoc agent.py (e.g. one started
+# by hand with nohup for testing, before this script existed) — two
+# processes both holding the same AGENT_TOKEN would just fight the hub
+# for the same connection slot instead of cleanly replacing each other.
+if pgrep -f "python3.*agent\.py" >/dev/null 2>&1; then
+  echo
+  echo "A python agent.py process is already running outside systemd:"
+  pgrep -af "python3.*agent\.py" || true
+  read -rp "Stop it now, before installing the real service? [Y/n] " STOP_OLD
+  if [[ "${STOP_OLD:-Y}" =~ ^[Yy]?$ ]]; then
+    pkill -f "python3.*agent\.py" || true
+    sleep 1
+    echo "Stopped."
+  fi
+fi
+
+echo
+echo "== Step 1/5: venv + dependencies =="
+python3 -m venv venv
+# shellcheck disable=SC1091
+source venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt   # full list — `from app import pivpn_ctl` runs app/__init__.py first
+
+echo
+echo "== Step 2/5: connection config (.env) =="
+if [[ -f .env ]]; then
+  echo ".env already exists — leaving it as-is."
+  echo "(Delete it first if you want to re-enter these values.)"
+else
+  read -rp "Hub's HUB_URL (e.g. wss://hub.example.com:8765, or ws://... with no TLS): " HUB_URL
+  read -rp "AGENT_SERVER_ID (from 'manage_servers.py register' on the hub): " AGENT_SERVER_ID
+  read -rsp "AGENT_TOKEN (shown once at registration time — paste it now): " AGENT_TOKEN
+  echo
+  read -rp "Path to the hub's copied hub-gateway.crt, if HUB_URL is wss:// (blank if ws://): " HUB_TLS_CERT
+  read -rp "Path to this agent's own .crt, if the hub uses mutual TLS (blank to skip): " AGENT_TLS_CERT
+  AGENT_TLS_KEY=""
+  if [[ -n "$AGENT_TLS_CERT" ]]; then
+    read -rp "Path to this agent's own .key: " AGENT_TLS_KEY
+  fi
+  read -rp "Path PiVPN writes .ovpn files to [$HOME/ovpns]: " OVPN_DIR
+  OVPN_DIR="${OVPN_DIR:-$HOME/ovpns}"
+  read -rp "OpenVPN subnet, first 3 octets [10.8.0]: " SUBNET_BASE
+  SUBNET_BASE="${SUBNET_BASE:-10.8.0}"
+
+  {
+    echo "HUB_URL=${HUB_URL}"
+    echo "AGENT_SERVER_ID=${AGENT_SERVER_ID}"
+    echo "AGENT_TOKEN=${AGENT_TOKEN}"
+    [[ -n "$HUB_TLS_CERT" ]] && echo "HUB_TLS_CERT=${HUB_TLS_CERT}"
+    [[ -n "$AGENT_TLS_CERT" ]] && echo "AGENT_TLS_CERT=${AGENT_TLS_CERT}"
+    [[ -n "$AGENT_TLS_KEY" ]] && echo "AGENT_TLS_KEY=${AGENT_TLS_KEY}"
+    echo "PIVPN_OVPN_DIR=${OVPN_DIR}"
+    echo "OPENVPN_CCD_DIR=/etc/openvpn/ccd"
+    echo "OPENVPN_SUBNET_BASE=${SUBNET_BASE}"
+    echo "CCD_HELPER=/usr/local/sbin/pivpn-webui-ccd-helper.sh"
+    echo "LOG_HELPER=/usr/local/sbin/pivpn-webui-log-helper.sh"
+  } > .env
+  chmod 600 .env
+  unset AGENT_TOKEN
+  echo "Wrote .env"
+fi
+
+echo
+echo "== Step 3/5: installing privileged helper scripts (requires sudo) =="
+# These run ON THIS BOX — the hub only ever relays a "run this helper"
+# request over the WebSocket; the actual pivpn/iptables calls happen
+# here, same as a standalone install.
+sudo install -m 0750 -o root -g root deploy/pivpn-webui-ccd-helper.sh /usr/local/sbin/pivpn-webui-ccd-helper.sh
+sudo install -m 0750 -o root -g root deploy/pivpn-webui-log-helper.sh /usr/local/sbin/pivpn-webui-log-helper.sh
+sudo install -m 0750 -o root -g root deploy/pivpn-webui-routes-helper.sh /usr/local/sbin/pivpn-webui-routes-helper.sh
+sudo install -m 0750 -o root -g root deploy/pivpn-webui-client-script-helper.sh /usr/local/sbin/pivpn-webui-client-script-helper.sh
+
+echo
+echo "== Step 4/5: sudoers grant (narrower than the standalone/hub one — no Flask/CD on this box) =="
+CURRENT_USER="$(whoami)"
+SUDOERS_TMP="$(mktemp)"
+sed -e "s/__USER__/${CURRENT_USER}/g" deploy/sudoers-pivpn-webui-agent.template > "$SUDOERS_TMP"
+sudo visudo -cf "$SUDOERS_TMP"
+sudo install -m 0440 -o root -g root "$SUDOERS_TMP" /etc/sudoers.d/pivpn-webui-agent
+rm -f "$SUDOERS_TMP"
+
+echo
+echo "== Step 5/5: installing + starting the agent systemd service =="
+SERVICE_TMP="$(mktemp)"
+sed -e "s/__USER__/${CURRENT_USER}/g" -e "s#__APP_DIR__#${APP_DIR}#g" \
+  deploy/pivpn-webui-agent.service.template > "$SERVICE_TMP"
+sudo install -m 0644 "$SERVICE_TMP" /etc/systemd/system/pivpn-webui-agent.service
+rm -f "$SERVICE_TMP"
+sudo systemctl daemon-reload
+sudo systemctl enable --now pivpn-webui-agent
+
+echo
+echo "======================================================"
+echo " Agent setup complete."
+echo "======================================================"
+echo
+echo "Verify it actually connected:"
+echo "  sudo journalctl -u pivpn-webui-agent -n 20 --no-pager"
+echo "Should show: connected to hub as server #<id>"
+echo
+echo "On the hub, confirm the other side too:"
+echo "  sudo journalctl -u pivpn-webui-hub-gateway -n 20 --no-pager"
+echo "Should show: agent for server #<id> connected"
+echo
+echo "Then log into the hub's web UI and check Clients — it should show"
+echo "this box's real clients within a few seconds."

@@ -309,15 +309,24 @@ feature in this app — nothing breaks, they're just empty.
 
 Everything above describes **standalone** mode: this app, its database, and
 PiVPN all live on the same box. **Hub/agent** mode splits that in two — the
-app + database run on a separate machine (the **hub**, e.g. a dedicated
-server or your own laptop for testing), and a small, dependency-light
-`agent.py` process runs on the actual PiVPN box (the **agent**) and dials
-*out* to the hub over an encrypted WebSocket. Nothing on the agent box ever
-needs an inbound port opened for this to work. This is the foundation for
-eventually managing more than one PiVPN box from a single dashboard — today
-it still only talks to one (`DEFAULT_SERVER_ID`), but the split itself is
-what makes adding a second one later just a matter of registering it, not a
+app + database run on a separate machine (the **hub** — a real, permanently-
+online server; not a laptop that sleeps/closes/changes networks, beyond a
+quick test), and a small, dependency-light `agent.py` process runs on the
+actual PiVPN box (the **agent**) and dials *out* to the hub over an
+encrypted WebSocket. Nothing on the agent box ever needs an inbound port
+opened for this to work. This is the foundation for eventually managing
+more than one PiVPN box from a single dashboard — today it still only
+talks to one (`DEFAULT_SERVER_ID`), but the split itself is what makes
+adding a second one later just a matter of registering it, not a
 rearchitecture.
+
+**Automated one-time setup**: `./setup-hub.sh` (on the hub) and
+`./setup-agent.sh` (on each agent box) run every numbered step below in
+order — TLS, systemd units, background ingestion, sudoers, the lot — and
+are safe to re-run. The numbered steps below are what those scripts are
+actually doing, kept as the reference for troubleshooting or a manual/
+partial setup; run the scripts unless you specifically want to do this by
+hand.
 
 Every domain module (`app/firewall.py`, `app/pivpn_ctl.py`, ...) is written
 as if it always runs locally — only a handful of primitives
