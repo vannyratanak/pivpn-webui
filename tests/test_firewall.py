@@ -29,6 +29,7 @@ from app.firewall import (
     describe_rule,
     disable_rule,
     discover_cli_rules,
+    import_client_rules,
     import_rules,
     reorder_rule,
     rule_client_name,
@@ -1062,6 +1063,74 @@ def test_add_forward_rule_allows_unrestricted_accept(tmp_path, monkeypatch):
     add_forward_rule(action="ACCEPT", protocol="all", src=None, dst=None, dport=None)
     assert len(db.list_rules()) == 1
     assert len(applied) == 1
+
+
+# --- import_client_rules: the client detail page's own narrower Import
+# dialog — every line is already a forward rule for one fixed client, no
+# 'kind' word and no 'src' (see app/api.py's client_import_rules).
+
+def test_import_client_rules_adds_forward_rule_with_fixed_src(tmp_path, monkeypatch):
+    applied = _setup_forward_db(tmp_path, monkeypatch)
+    added, errors = import_client_rules(
+        "action=DROP protocol=tcp dst=192.168.1.0/24 dport=443\n", "10.8.0.5",
+    )
+    assert errors == []
+    assert added == 1
+    rules = db.list_rules()
+    assert len(rules) == 1
+    assert rules[0]["src"] == "10.8.0.5"
+    assert rules[0]["dst"] == "192.168.1.0/24"
+    assert len(applied) == 1
+
+
+def test_import_client_rules_skips_blank_lines_and_comments(tmp_path, monkeypatch):
+    applied = _setup_forward_db(tmp_path, monkeypatch)
+    added, errors = import_client_rules(
+        "\n# a comment\naction=ACCEPT protocol=all dst= dport=\n", "10.8.0.5",
+    )
+    assert errors == []
+    assert added == 1
+    assert len(applied) == 1
+
+
+def test_import_client_rules_rejects_a_rule_kind_prefix(tmp_path, monkeypatch):
+    # A file copied from the main Firewall page's Import Rules dialog
+    # (which does have a 'forward'/'input'/... kind word) must be
+    # rejected with a clear pointer, not silently misparsed.
+    applied = _setup_forward_db(tmp_path, monkeypatch)
+    added, errors = import_client_rules(
+        "forward action=DROP protocol=tcp dst=192.168.1.0/24 dport=443\n", "10.8.0.5",
+    )
+    assert added == 0
+    assert len(errors) == 1
+    assert "Import Rules dialog instead" in errors[0]
+    assert applied == []
+
+
+def test_import_client_rules_rejects_an_explicit_src_field(tmp_path, monkeypatch):
+    # src is always this client's own IP — a line trying to set it (e.g.
+    # copy-pasted from another client's export) must be rejected, not
+    # silently override the fixed client_ip.
+    applied = _setup_forward_db(tmp_path, monkeypatch)
+    added, errors = import_client_rules(
+        "action=DROP protocol=tcp src=10.8.0.99 dst=192.168.1.0/24\n", "10.8.0.5",
+    )
+    assert added == 0
+    assert len(errors) == 1
+    assert "'src' can't be set here" in errors[0]
+    assert applied == []
+
+
+def test_import_client_rules_one_bad_line_does_not_stop_the_rest(tmp_path, monkeypatch):
+    applied = _setup_forward_db(tmp_path, monkeypatch)
+    added, errors = import_client_rules(
+        "action=DROP protocol=tcp dport=443\nnot-a-valid-token\naction=ACCEPT protocol=udp dport=53\n",
+        "10.8.0.5",
+    )
+    assert added == 2
+    assert len(errors) == 1
+    assert "line 2" in errors[0]
+    assert len(applied) == 2
 
 
 # --- _check_not_hijacking_reserved_port: a port-forward rule always has a

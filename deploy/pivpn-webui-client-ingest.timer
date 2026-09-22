@@ -1,0 +1,10 @@
+[Unit]
+Description=Run PiVPN Web UI client status ingestion every 10 seconds
+
+[Timer]
+OnBootSec=10s
+OnUnitActiveSec=10s
+Unit=pivpn-webui-client-ingest.service
+
+[Install]
+WantedBy=timers.target

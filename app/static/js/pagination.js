@@ -28,7 +28,7 @@ function attachPagination(containerSelector, itemSelector, pageSizeId, controlsI
   let currentPage = 1;
 
   function refresh() {
-    const pageSize = parseInt(pageSizeSelect.value, 10) || 25;
+    const pageSize = parseInt(pageSizeSelect.value, 10) || 10;
     const allItems = Array.from(container.querySelectorAll(itemSelector));
     const matching = allItems.filter((item) => item.dataset.filterMatch !== '0' && item.dataset.selectMatch !== '0');
     const totalPages = Math.max(1, Math.ceil(matching.length / pageSize));

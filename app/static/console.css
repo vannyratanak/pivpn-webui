@@ -1,0 +1,213 @@
+/* Shared console refinement. Keep control borders distinct from quiet surface dividers. */
+.console-page {
+  --surface-line: color-mix(in srgb, var(--border) 30%, transparent);
+  --row-line: color-mix(in srgb, var(--border) 20%, transparent);
+  --surface-shadow: 0 3px 16px rgba(8,20,48,.035);
+  --console-link: #8ab4ff;
+  color-scheme: dark;
+}
+[data-theme="light"] .console-page { --console-link: #2f5fd6; color-scheme: light; }
+.console-page td a:not(.btn), .console-page .hint a { color: var(--console-link); text-underline-offset: 3px; }
+/* Keep the shell within the viewport. Longer page content scrolls inside the
+   main area, so the browser window itself never gains an unwanted overflow
+   while pagination remains reachable below the table. */
+body.console-page { height: 100vh; height: 100dvh; overflow: hidden; }
+body.console-page .content { flex: 1 1 auto; min-height: 0; overflow: hidden; padding-bottom: 56px; }
+/* Client detail is the one page with two independent cards stacked full-
+   height (Firewall rules, then Activity) instead of a single table that
+   table-fit.js can size to the remaining viewport — together they can
+   genuinely exceed the window, with no single ".table-scroll" region left
+   to hold "the rest" internally. Reuses the same body-level-scroll escape
+   hatch the narrow-viewport rule below already relies on (rather than
+   letting only .content scroll), so the scrollbar sits flush at the real
+   window edge instead of tracking .content's own narrower, centered box.
+   This is an exception, not a reversion of the rule above — every other
+   console page still has exactly one main table and stays non-scrolling. */
+body.client-detail-page.console-page {
+  height: auto;
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow-y: auto;
+}
+body.client-detail-page.console-page .content {
+  flex: 0 0 auto;
+  min-height: auto;
+  overflow: visible;
+}
+.console-page .topbar { min-height: 72px; padding: 12px 32px; gap: 28px; border-color: var(--surface-line); }
+.console-brand { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; color: var(--text); white-space: nowrap; font-size: 17px; letter-spacing: -.03em; }
+.console-brand-caption { display: block; font-size: 10px; font-weight: 500; letter-spacing: .08em; color: var(--muted); line-height: 1.3; }
+.console-mark { display: grid; place-items: center; width: 34px; height: 38px; border-radius: 10px; color: #fff; background: var(--accent); }
+.console-mark svg { width: 23px; height: 23px; }
+.console-page .topbar nav { gap: 5px; }
+.console-page .topbar nav a { padding: 9px 13px; border: 0; border-radius: 8px; font-size: 13px; font-weight: 500; white-space: nowrap; }
+.console-page .topbar nav a.active { background: rgba(var(--accent-rgb),.1); color: var(--text); box-shadow: inset 0 -2px var(--accent); }
+.console-page .topbar nav a:hover { background: var(--panel-2); }
+.console-page .topbar .logout { font-size: 12px; padding: 8px 10px; border-radius: 7px; }
+.console-page .content { max-width: 1320px; padding: 30px 32px 24px; }
+.console-page .page-header-row { margin-bottom: 24px; gap: 20px; align-items: center; }
+.page-heading { min-width: 0; }
+.console-page .page-heading h1 { margin: 0; font-size: 27px; font-weight: 650; line-height: 1.25; letter-spacing: -.035em; }
+.page-description { margin: 7px 0 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.console-page .card { border-color: var(--surface-line); border-radius: 14px; padding: 24px; margin-bottom: 22px; box-shadow: var(--surface-shadow); min-width: 0; }
+.console-page .card-header-row { gap: 16px; margin-bottom: 20px; }
+.console-page .card h2 { font-size: 15px; font-weight: 650; letter-spacing: -.015em; }
+.console-page .card > .hint { line-height: 1.7; margin-top: 0; margin-bottom: 18px; max-width: 100ch; }
+.console-page .table-scroll { border: 1px solid var(--surface-line); border-radius: 9px; }
+.console-page table { margin: 0; font-variant-numeric: tabular-nums; }
+.console-page th { background: var(--panel-2); font-size: 11px; font-weight: 650; letter-spacing: .025em; padding: 12px; border-color: var(--surface-line); }
+.console-page td { padding: 12px; border-color: var(--row-line); font-size: 13px; }
+.console-page tbody tr:last-child td { border-bottom: 0; }
+.console-page tbody tr:not(.empty-row):not(.skeleton-row):hover { background-color: rgba(var(--accent-rgb),.04); }
+.console-page td.empty { padding: 40px 20px; text-align: center; font-size: 13px; line-height: 1.8; }
+.console-page .pagination { margin-top: 18px; gap: 12px; }
+.console-page .pagination-nav { gap: 12px; }
+.console-page .pagination-nav .btn { border-radius: 7px; }
+.console-page input[type="text"], .console-page input[type="password"], .console-page select, .console-page .custom-select-trigger { border-radius: 8px; }
+.console-page .filter-input-inline { width: 260px; max-width: 100%; background: var(--panel); }
+.console-page button, .console-page .btn { font-weight: 500; }
+.console-page .btn:not(.btn-icon):not(.dropdown-item) { border-radius: 7px; }
+.console-page .inline-form { gap: 18px 16px; }
+.console-page .inline-form label { gap: 7px; }
+.console-page .inline-form .label-text { color: var(--text); }
+.console-page .inline-form .hint { line-height: 1.6; }
+.console-page .badge { font-size: 11px; font-weight: 600; padding: 3px 9px; }
+.console-page .badge-role { border-color: var(--surface-line); background: var(--panel-2); }
+.console-page .tabs { border-color: var(--surface-line); gap: 5px; margin-bottom: 20px; }
+.console-page .tabs a, .console-page .tabs button { font-size: 13px; padding: 10px 15px; border-radius: 7px 7px 0 0; }
+.console-page .tabs a.active, .console-page .tabs button.active { background: rgba(var(--accent-rgb),.07); color: var(--text); }
+.console-page .table-toolbar { margin-bottom: 16px; }
+.console-page dialog.modal:not(.nav-drawer) { border-color: var(--surface-line); border-radius: 16px; padding: 28px; box-shadow: 0 24px 80px rgba(0,0,0,.25); max-height: calc(100dvh - 40px); overflow-y: auto; }
+.console-page #confirm-modal { width: min(420px, calc(100vw - 32px)); max-width: min(420px, calc(100vw - 32px)); padding: 24px; }
+.console-page #confirm-modal h2 { margin-bottom: 16px; }
+.console-page #confirm-modal #confirm-modal-message { margin: 0 0 20px; font-size: 15px; line-height: 1.6; }
+.console-page #confirm-modal .btn-group { gap: 10px; }
+.console-page dialog.modal::backdrop { background: rgba(7,14,29,.55); backdrop-filter: blur(3px); }
+.console-page dialog.modal h2 { font-size: 20px; letter-spacing: -.025em; padding-right: 24px; margin-bottom: 22px; }
+.console-page dialog.modal > .hint { line-height: 1.7; margin-bottom: 20px; }
+.console-page .custom-select-menu, .console-page .dropdown-menu { border-color: var(--surface-line); border-radius: 10px; padding: 5px; }
+.console-page .flash-toast { border-radius: 10px; box-shadow: 0 8px 30px rgba(0,0,0,.12); }
+.console-breadcrumb { margin: 0 0 14px; font-size: 12px; }
+.console-breadcrumb a { color: var(--muted); text-decoration: none; }
+.console-breadcrumb a:hover { color: var(--text); }
+.console-page .nav-drawer { padding: 24px; }
+.console-page .nav-drawer-links a { padding: 13px 12px; font-size: 14px; }
+.console-page .nav-drawer-links a.active { background: rgba(var(--accent-rgb),.1); box-shadow: inset 3px 0 var(--accent); }
+@media (max-width: 960px) {
+  .console-page .topbar { padding: 12px 20px; gap: 16px; }
+  .console-page .topbar nav.topbar-nav-desktop, .console-page .topbar-logout-desktop { display: none; }
+  .console-page .hamburger-btn { display: inline-flex; align-items: center; justify-content: center; }
+  .console-page .topbar-brand-group { flex: 1; }
+  .console-page .content { padding: 24px 20px; }
+}
+@media (max-width: 640px) {
+  /* Phones need the document to grow past the shorter viewport; desktop
+     keeps the fixed console shell and table-owned scrolling. */
+  body.console-page { height: auto; min-height: 100dvh; overflow-y: auto; }
+  body.console-page .content { flex: 0 0 auto; min-height: auto; overflow: visible; }
+  .console-page .topbar { min-height: 66px; padding: 10px 16px; }
+  .console-page .content { padding: 24px 16px 16px; }
+  .console-page .page-header-row { align-items: stretch; gap: 15px; margin-bottom: 20px; }
+  .console-page .page-heading h1 { font-size: 24px; }
+  .page-description { font-size: 12px; }
+  .console-page .filter-input-inline { width: 100%; }
+  .console-page .card { padding: 16px; border-radius: 12px; }
+  .console-page .card-header-row { flex-wrap: wrap; }
+  .console-page .card-header-title-group { flex-wrap: wrap; }
+  .console-page th, .console-page td { padding: 11px 10px; }
+  .console-page .pagination { flex-wrap: wrap; row-gap: 14px; }
+  .console-page dialog.modal:not(.nav-drawer) { width: calc(100vw - 24px); padding: 24px 18px; }
+  .console-page .nav-drawer { width: min(86vw, 340px); }
+  .console-page .tabs a, .console-page .tabs button { padding: 10px 12px; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .console-page .topbar nav a, .console-page .nav-drawer-links a { transition: background-color .15s, color .15s; }
+}
+
+/* File import: keep the upload action visible and the full reference optional. */
+.console-page dialog.file-import-modal { width: min(620px, calc(100vw - 32px)); padding: 28px; }
+.file-import-header { display: flex; align-items: flex-start; gap: 14px; padding-right: 22px; margin-bottom: 24px; }
+.file-import-icon { flex: 0 0 42px; height: 46px; display: grid; place-items: center; border: 1px solid var(--surface-line); border-radius: 11px; background: var(--panel-2); color: var(--muted); }
+.file-import-icon svg { width: 25px; height: 25px; }
+.console-page .file-import-header h2 { margin: 0 0 5px; padding: 0; font-size: 21px; }
+.file-import-header p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.file-import-form { min-width: 0; }
+.file-import-upload { border: 1px dashed var(--border); background: var(--bg); border-radius: 12px; padding: 20px; }
+.file-import-upload label { font-size: 14px; font-weight: 600; color: var(--text); }
+.file-import-upload p { margin: 5px 0 16px; font-size: 12px; color: var(--muted); }
+.file-import-upload input { display: block; width: 100%; min-width: 0; color: var(--muted); font-size: 12px; }
+.file-import-upload input::file-selector-button { box-sizing: border-box; height: 34px; background: var(--panel); border: 1px solid var(--border); border-radius: 7px; padding: 0 14px; margin-right: 12px; font: inherit; font-weight: 600; color: var(--text); cursor: pointer; }
+.file-import-upload input::file-selector-button:hover { background: var(--panel-2); }
+.file-import-format { margin: 22px 0; }
+.file-import-format h3 { font-size: 13px; font-weight: 600; margin: 0 0 10px; }
+.file-import-format p, .file-import-tips { color: var(--muted); font-size: 12px; line-height: 1.8; }
+.file-import-format p { margin: 10px 0 0; }
+.console-page .file-import-modal code { color: var(--text); border: 0; border-radius: 4px; padding: 2px 4px; word-break: normal; overflow-wrap: anywhere; background: var(--panel-2); font-size: 11px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+.file-import-modal pre { max-width: 100%; margin: 0; padding: 12px 14px; background: var(--panel-2); border: 1px solid var(--surface-line); border-radius: 8px; overflow-x: auto; scrollbar-width: thin; }
+.console-page .file-import-modal pre code { display: block; background: none; padding: 0; white-space: pre; overflow-wrap: normal; line-height: 1.7; }
+.file-import-reference { border-top: 1px solid var(--surface-line); }
+.file-import-reference summary { padding: 15px 0; font-size: 13px; font-weight: 600; cursor: pointer; color: var(--text); }
+.file-import-reference summary span { margin-left: 8px; color: var(--muted); font-size: 11px; font-weight: 400; }
+.file-import-reference summary::marker { color: var(--muted); }
+.file-import-examples { display: grid; gap: 18px; padding: 0 0 20px; min-width: 0; }
+.file-import-examples section { min-width: 0; }
+.file-import-examples h4 { margin: 0 0 5px; font-size: 12px; font-weight: 650; }
+.file-import-examples h4 span { display: block; color: var(--muted); font-weight: 400; margin-top: 3px; }
+.file-import-examples p { margin: 0 0 8px; color: var(--muted); font-size: 11px; line-height: 1.7; }
+.file-import-tips { padding-left: 18px; margin: 0 0 18px; }
+.file-import-tips li + li { margin-top: 10px; }
+.file-import-footer { display: flex; justify-content: flex-end; gap: 10px; padding-top: 20px; margin-top: 8px; border-top: 1px solid var(--surface-line); }
+.file-import-footer button { height: 34px; min-height: 34px; padding: 0 14px; border-radius: 7px; white-space: nowrap; }
+.file-import-modal :is(summary, pre, input[type="file"]):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+@media (max-width: 640px) {
+  .console-page dialog.file-import-modal { padding: 24px 18px; }
+  .file-import-header { gap: 10px; }
+  .file-import-icon { display: none; }
+  .file-import-upload { padding: 16px; }
+  .file-import-footer button { flex: 1; padding: 0 10px; }
+}
+
+/* Phone tables use compact columns and the page's vertical scroll. */
+@media (max-width: 640px) {
+  .console-page .content { padding: 18px 10px 16px; }
+  body.console-page .content { padding-bottom: 48px; }
+  .console-page .card { padding: 14px 10px; }
+  .console-page .page-header-row { margin-bottom: 16px; gap: 12px; }
+  .console-page .card-header-row { margin-bottom: 14px; gap: 10px; }
+  .console-page .table-scroll { overscroll-behavior: contain; }
+  .console-page .table-scroll th, .console-page .table-scroll td { padding: 9px 7px; font-size: 12px; }
+  .console-page .table-scroll th { font-size: 10px; letter-spacing: 0; }
+  .console-page #rules-table .kind-divider-row td,
+  .console-page #client-rules-table .kind-divider-row td { font-size: 9px !important; line-height: 1.25; letter-spacing: 0; padding: 5px 7px; white-space: normal; }
+  .console-page #clients-table { min-width: 790px; }
+  .console-page #clients-table th:nth-child(1) { width: 28px; }
+  .console-page #clients-table th:nth-child(2) { width: 112px; }
+  .console-page #clients-table th:nth-child(3) { width: 62px; }
+  .console-page #clients-table th:nth-child(4) { width: 98px; }
+  .console-page #clients-table th:nth-child(5) { width: 98px; }
+  .console-page #clients-table th:nth-child(6) { width: 92px; }
+  .console-page #clients-table th:nth-child(7) { width: 300px; }
+  .console-page #clients-table td:nth-child(2), .console-page #users-table td:first-child { overflow-wrap: anywhere; }
+  .console-page #clients-table .actions { display: flex; flex-wrap: nowrap; gap: 5px; }
+  .console-page #clients-table .actions .btn { width: 66px; padding: 0 5px; font-size: 11px; white-space: nowrap; }
+  .console-page #users-table { min-width: 530px; }
+  .console-page #users-table th:nth-child(1) { width: 116px; }
+  .console-page #users-table th:nth-child(2) { width: 96px; }
+  .console-page #users-table th:nth-child(3) { width: 170px; }
+  .console-page #users-table th:nth-child(4) { width: 148px; }
+  .console-page #users-table .actions { flex-direction: column; gap: 5px; }
+  .console-page #users-table .actions .btn { width: 100%; white-space: nowrap; }
+  .console-page .table-scroll .badge { font-size: 10px; padding: 2px 6px; }
+  .console-page .table-scroll::-webkit-scrollbar { height: 8px; }
+  .console-page .table-scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .table-scroll-hint { margin: 0 0 7px; color: var(--muted); font-size: 11px; text-align: right; }
+  .console-page .flash-toasts { top: 0; left: 0; right: 0; width: 100%; max-width: none; gap: 0; padding-top: env(safe-area-inset-top, 0px); background: var(--panel); }
+  .console-page .flash-toast { width: 100%; border-radius: 0; border-width: 0 0 2px; padding: 14px 48px 14px 16px; overflow-wrap: anywhere; font-size: 13px; }
+  .console-page .flash-toast-close { width: 34px; height: 34px; top: 7px; right: 8px; }
+  .console-page .reorder-error-toast { top: 0; left: 0; right: 0; width: 100%; max-width: none; border-radius: 0; border-width: 0 0 2px; padding: calc(14px + env(safe-area-inset-top, 0px)) 16px 14px; overflow-wrap: anywhere; }
+}
+@media (max-width: 900px) {
+  .console-page #rules-table .kind-divider-row td,
+  .console-page #client-rules-table .kind-divider-row td { font-size: 8px !important; line-height: 1.2; padding: 4px 6px; letter-spacing: 0; }
+}
+@media (min-width: 641px) { .table-scroll-hint { display: none; } }

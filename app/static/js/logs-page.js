@@ -88,6 +88,18 @@
       return document.querySelector(`[data-logs-section="${tab}"]`);
     }
 
+    // Keep the shared controls inside the active card, matching the Firewall
+    // Rules table's pagination placement and spacing. The same element moves
+    // between tabs so there is still only one source of state.
+    function placePagination() {
+      const section = activeSection();
+      const pagination = document.getElementById('logs-pagination');
+      if (section && pagination && pagination.parentElement !== section) {
+        section.appendChild(pagination);
+      }
+      if (window.fitTableScrollHeights) window.fitTableScrollHeights();
+    }
+
     function skeletonRowHtml(colCount) {
       const cells = Array(colCount).fill('<td><span class="skeleton-bar"></span></td>').join('');
       return `<tr class="skeleton-row">${cells}</tr>`.repeat(6);
@@ -161,6 +173,7 @@
       searchInput.setAttribute('aria-label', `Search ${newTabLabel}`);
       const newSection = activeSection();
       if (newSection) newSection.hidden = false;
+      placePagination();
       tabLinks.forEach((a) => {
         const isActive = a.dataset.logsTabLink === newTab;
         a.classList.toggle('active', isActive);
@@ -202,6 +215,7 @@
       });
     }
 
+    placePagination();
     loadLogs(true);
   });
 })();

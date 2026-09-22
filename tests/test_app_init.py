@@ -89,3 +89,33 @@ def test_firewall_sync_lock_held_for_whole_worker_lifetime(tmp_path):
     finally:
         child.terminate()
         child.wait(timeout=5)
+
+
+def test_seed_client_status_cache_once_runs_on_app_startup(monkeypatch):
+    """create_app() must populate client_status_cache itself (via
+    _seed_client_status_cache_once) so GET /api/clients has real data from
+    the very first request after a (re)start, even before
+    deploy/setup-client-ingest.sh's systemd timer has ever run — see that
+    function's own docstring. Deliberately does NOT use the `client`
+    fixture, which neutralizes this exact call for every other test in the
+    suite (see conftest.py's own comment on why)."""
+    from werkzeug.security import generate_password_hash
+
+    import app.pivpn_ctl as pivpn_ctl
+    import config
+    from app import create_app, db
+    from tests.conftest import TEST_PASSWORD, _configure_test_db
+
+    monkeypatch.setattr(config, "SECRET_KEY", "test-secret-key")
+    monkeypatch.setattr(config, "ADMIN_USERNAME", "admin")
+    monkeypatch.setattr(config, "ADMIN_PASSWORD_HASH", generate_password_hash(TEST_PASSWORD))
+    _configure_test_db(monkeypatch)
+    monkeypatch.setattr(pivpn_ctl, "list_clients", lambda: [
+        {"name": "laptop-anna", "status": "Valid", "expiration": "2027-01-01"},
+    ])
+    monkeypatch.setattr(pivpn_ctl, "list_client_ips", lambda: {})
+    monkeypatch.setattr(pivpn_ctl, "list_connected_clients", lambda: {})
+
+    create_app()
+
+    assert [c["name"] for c in db.list_client_status_cache()] == ["laptop-anna"]

@@ -117,6 +117,10 @@ components:
 
 # Design System: PiVPN Web UI
 
+## Current UI refinement
+
+The September 2026 refinement adds `app/static/console.css` for authenticated pages and `app/static/login.css` for sign-in. These page-specific styles take precedence over the original dimensions and surface rules below. The console retains its table-first layout, semantic status colors, system font, and both themes, with 27px page headings, concise page descriptions, a 1320px maximum content width, quieter surface dividers, 14px card corners, and restrained card shadows. Inputs retain the stronger control-border token for contrast. Navigation switches to a drawer at 960px, and dense tables scroll within their cards on phones. The login page uses a separate spacious layout with a network illustration and a subtle background gradient, as requested for the redesign.
+
 ## Overview
 
 **Creative North Star: "The Ops Console"**

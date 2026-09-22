@@ -12,6 +12,8 @@ from app import db
 
 login_manager = LoginManager()
 login_manager.login_view = "main.login"
+# Reaching the sign-in page is normal; the form already explains what to do.
+login_manager.login_message = None
 
 # The browser's own identity cookie — a JWT, not a Flask session. Kept as
 # its own cookie (not flask_jwt_extended's JWT_TOKEN_LOCATION=cookies

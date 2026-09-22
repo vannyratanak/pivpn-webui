@@ -1,7 +1,8 @@
 {% extends "base.html" %}
 {% block title %}{{ name }} — PiVPN Web UI{% endblock %}
+{% block body_class %}client-detail-page{% endblock %}
 {% block content %}
-<p class="hint"><a href="{{ url_for('main.clients') }}">&larr; Back to Clients</a></p>
+<p class="console-breadcrumb"><a href="{{ url_for('main.clients') }}">&larr; Back to Clients</a></p>
 
 <div class="page-header-row">
   <div class="page-header-title-group">
@@ -36,6 +37,7 @@
     <div class="btn-group-stack" id="client-rule-actions" hidden>
       <div class="btn-group">
         <button type="button" class="btn" id="client-add-rule-open-btn">Add Rule</button>
+        <button type="button" class="btn" id="client-import-rule-open-btn">Import Rules</button>
         <button type="button" class="btn" id="client-apply-rules-btn">Apply Rules</button>
         <button type="button" class="btn btn-warn btn-unsaved-jump" id="client-save-rules-btn" hidden>Save Rules</button>
       </div>
@@ -129,6 +131,34 @@
     });
   </script>
 
+  <dialog id="client-import-rules-dialog" class="modal file-import-modal" aria-labelledby="client-import-rules-title" aria-describedby="client-import-rules-description" onclick="closeDialogIfClickedOutside(event, this)">
+    <button type="button" class="modal-close-btn" onclick="document.getElementById('client-import-rules-dialog').close()" aria-label="Close import rules">&times;</button>
+    <header class="file-import-header">
+      <span class="file-import-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z"/><path d="M14 3v6h6M12 17v-6m-3 3 3-3 3 3"/></svg></span>
+      <div><h2 id="client-import-rules-title">Import rules for {{ name }}</h2><p id="client-import-rules-description">Add multiple Forward/Drop rules for {{ name }} from a plain text file.</p></div>
+    </header>
+
+    <form id="client-import-rules-form" enctype="multipart/form-data" class="file-import-form">
+      <div class="file-import-upload">
+        <label for="client-rules-import-file">Choose your rules file</label>
+        <p id="client-rules-import-file-help">A <code>.txt</code> file with one rule per line.</p>
+        <input id="client-rules-import-file" type="file" name="rules_file" accept=".txt" required aria-describedby="client-rules-import-file-help">
+      </div>
+
+      <div class="file-import-format">
+        <h3>File format</h3>
+        <pre tabindex="0" aria-label="Rule syntax"><code>key=value key=value ...</code></pre>
+        <p>Blank lines and <code>#</code> comments are skipped. Every line is a Forward/Drop rule for {{ name }} — no rule-kind word, and no <code>src</code> (always {{ name }}'s own IP). Quote values containing spaces: <code>comment="block guest wifi"</code>.</p>
+        <pre tabindex="0" aria-label="Client rule example"><code>action=DROP protocol=tcp dst=192.168.1.0/24 dport=443</code></pre>
+      </div>
+
+      <div class="file-import-footer">
+        <button type="button" class="btn btn-secondary" onclick="document.getElementById('client-import-rules-dialog').close()">Cancel</button>
+        <button type="submit">Import rules</button>
+      </div>
+    </form>
+  </dialog>
+
   <div class="table-scroll">
   <table id="client-rules-table">
     <thead>
@@ -139,6 +169,7 @@
         <th scope="col">Details</th>
         <th scope="col">Comment</th>
         <th scope="col">Saved</th>
+        <th scope="col">Order</th>
         <th scope="col">Actions</th>
       </tr>
     </thead>
@@ -165,5 +196,76 @@
   </div>
   <script src="{{ url_for('static', filename='js/api-client.js') }}"></script>
   <script src="{{ url_for('static', filename='js/client-detail-page.js') }}"></script>
+</section>
+
+<section class="card">
+  <div class="card-header-row">
+    <h2>Activity for {{ name }}</h2>
+    <span class="pagination-size log-range-filter">
+      <select id="client-activity-range" aria-label="Time range">
+        {% for key, opt_label in log_range_options %}
+        <option value="{{ key }}" {{ 'selected' if key == '7d' else '' }}>{{ opt_label }}</option>
+        {% endfor %}
+      </select>
+    </span>
+  </div>
+  <p class="hint">Where {{ name }} has connected from and gone to — connect/disconnect sessions and outbound traffic destinations, scoped to just this client. Traffic requires <code>deploy/setup-traffic-log.sh</code> to have been run on this server.</p>
+
+  <div class="tabs" id="client-activity-tabs" role="tablist" aria-label="Activity type">
+    <button type="button" class="active" role="tab" aria-selected="true" data-activity-tab="client_sessions">Sessions</button>
+    <button type="button" role="tab" aria-selected="false" data-activity-tab="traffic">Traffic</button>
+  </div>
+
+  <section data-activity-section="client_sessions">
+    <div class="table-scroll">
+    <table id="client-activity-sessions-table">
+      <thead>
+        <tr>
+          <th scope="col">Start</th>
+          <th scope="col">End</th>
+          <th scope="col">Duration</th>
+          <th scope="col">Address</th>
+        </tr>
+      </thead>
+      <tbody id="client-activity-sessions-tbody">
+        <!-- Populated by client-detail-page.js via GET /api/logs?tab=client_sessions&client={{ name }}. -->
+      </tbody>
+    </table>
+    </div>
+  </section>
+
+  <section data-activity-section="traffic" hidden>
+    <div class="table-scroll">
+    <table id="client-activity-traffic-table">
+      <thead>
+        <tr>
+          <th scope="col">Time</th>
+          <th scope="col">Destination</th>
+          <th scope="col">Organization</th>
+          <th scope="col">Proto</th>
+        </tr>
+      </thead>
+      <tbody id="client-activity-traffic-tbody">
+        <!-- Populated by client-detail-page.js via GET /api/logs?tab=traffic&client={{ name }}. -->
+      </tbody>
+    </table>
+    </div>
+  </section>
+
+  <div class="pagination" id="client-activity-pagination">
+    <label class="pagination-size">Show
+      <select id="client-activity-page-size">
+        <option value="10">10</option>
+        <option value="25" selected>25</option>
+        <option value="50">50</option>
+        <option value="100">100</option>
+      </select>
+    </label>
+    <div class="pagination-nav">
+      <button type="button" class="btn btn-sm" data-activity-page-prev>Prev</button>
+      <span data-activity-page-status class="hint"></span>
+      <button type="button" class="btn btn-sm" data-activity-page-next>Next</button>
+    </div>
+  </div>
 </section>
 {% endblock %}

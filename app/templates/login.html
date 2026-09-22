@@ -1,47 +1,79 @@
 {% extends "base.html" %}
-{% block title %}{% if locked_user %}Session locked — PiVPN Web UI{% else %}Log in — PiVPN Web UI{% endif %}{% endblock %}
+{% block title %}{{ 'Session locked' if locked_user else 'Sign in' }} — PiVPN Web UI{% endblock %}
+{% block body_class %}auth-page{% endblock %}
+{% block page_head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='login.css') }}">
+<script defer src="{{ url_for('static', filename='js/login-page.js') }}"></script>
+{% endblock %}
+{% block notifications %}{% endblock %}
 {% block content %}
-{% if not locked_user %}
-<script>
-  localStorage.removeItem('pivpn_webui_api_token');
-  localStorage.removeItem('pivpn_webui_last_activity');
-</script>
-{% endif %}
-<div class="login-wrap">
-  {% if locked_user %}
-  {# ── Idle-lock / resume mode ─────────────────────────────────────────── #}
-  <form class="login-card" method="post">
-    <div class="login-card-header">
-      <h1>Session locked</h1>
-      <p class="login-card-subtitle">
-        Locked due to inactivity.<br>
-        Enter your password to resume as <strong>{{ locked_user }}</strong>.
-      </p>
-    </div>
-    <label>Password
-      <input type="password" name="password" autocomplete="current-password" required autofocus>
-    </label>
-    <button type="submit">Resume session</button>
-  </form>
-  <p class="login-alt-action">
-    Not {{ locked_user }}?
-    <a href="{{ url_for('main.account_clear_lock') }}">Sign in with a different account</a>
-  </p>
-  {% else %}
-  {# ── Normal login ─────────────────────────────────────────────────────── #}
-  <form class="login-card" method="post">
-    <div class="login-card-header">
-      <h1>PiVPN Web UI</h1>
-      <p class="login-card-subtitle">Sign in to manage this server</p>
-    </div>
-    <label>Username
-      <input type="text" name="username" autocomplete="username" required autofocus>
-    </label>
-    <label>Password
-      <input type="password" name="password" autocomplete="current-password" required>
-    </label>
-    <button type="submit">Log in</button>
-  </form>
-  {% endif %}
+{% set errors = field_errors|default({}) %}
+<div class="auth-shell">
+  <a class="auth-brand" href="{{ url_for('main.login') }}" aria-label="PiVPN Web UI sign in">
+    <span class="auth-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3 4 6v6c0 5 8 9 8 9s8-4 8-9V6Z"/><path d="m8 12 3 3 5-6"/></svg></span>
+    <span>PiVPN <span class="auth-brand-muted">/ Web UI</span></span>
+  </a>
+  <div class="auth-layout">
+    <section class="auth-intro" aria-labelledby="auth-intro-title">
+      <p class="auth-eyebrow">YOUR PRIVATE NETWORK</p>
+      <h2 id="auth-intro-title">Your server.<br> Your connections.<br> <span>Your control.</span></h2>
+      <p class="auth-description">One place to manage your PiVPN server.<br>Create clients, control access, and keep an eye on every connection.</p>
+      <div class="auth-network" aria-hidden="true">
+        <svg viewBox="0 0 480 210" fill="none">
+          <path class="network-line" d="M75 55h75q20 0 20 20v30h70M75 155h75q20 0 20-20v-30M240 105h70q20 0 20-20V55h75M310 105q20 0 20 20v30h75"/>
+          <circle class="network-orbit" cx="240" cy="105" r="79"/>
+          <circle class="network-orbit" cx="240" cy="105" r="99"/>
+          <g class="network-device"><rect x="40" y="33" width="58" height="42" rx="9"/><path d="M53 46h32v17H53zM62 69h14"/><rect x="40" y="134" width="58" height="42" rx="9"/><path d="M58 144h23v18H58zM53 166h33"/><rect x="382" y="33" width="58" height="42" rx="9"/><path d="M405 42h13v24h-13zM410 62h3"/><rect x="382" y="134" width="58" height="42" rx="9"/><path d="M397 146h28v17h-28zM404 169h14"/></g>
+          <rect class="network-hub" x="207" y="72" width="66" height="66" rx="18"/>
+          <path class="network-shield" d="m240 85-16 6v13c0 11 16 21 16 21s16-10 16-21V91Z"/>
+          <path class="network-check" d="m233 104 5 5 10-12"/>
+          <g class="network-dot"><circle cx="136" cy="55" r="3"/><circle cx="340" cy="155" r="3"/></g>
+        </svg>
+        <span>CLIENTS <span>PRIVATE VPN</span> SERVER</span>
+      </div>
+      <div class="auth-capabilities"><span>Client management</span><span>Access control</span><span>Connection logs</span></div>
+    </section>
+    <section class="auth-panel" aria-labelledby="login-title">
+      <div class="auth-panel-heading">
+        <p class="auth-eyebrow">PIVPN CONSOLE</p>
+        <h1 id="login-title">{{ 'Welcome back.' if locked_user else 'Sign in.' }}</h1>
+        <p>{% if locked_user %}Your session was locked due to inactivity.<br>Enter your password to resume.{% else %}Manage your network, from one place.{% endif %}</p>
+      </div>
+      <form id="login-form" method="post" data-locked="{{ 'true' if locked_user else 'false' }}">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        <div class="auth-alert" id="login-error" role="alert" tabindex="-1">
+          {% for category, message in messages %}<p>{{ message }}</p>{% endfor %}
+        </div>
+        {% endif %}
+        {% endwith %}
+        {% if locked_user %}
+        <div class="auth-identity"><span>Resuming as</span><strong>{{ locked_user }}</strong></div>
+        {% else %}
+        <div class="auth-field">
+          <label for="login-username">Username</label>
+          <input id="login-username" type="text" name="username" value="{{ username|default('') }}" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus aria-describedby="username-error"{% if errors.get('username') %} aria-invalid="true"{% endif %}>
+          <p class="auth-field-error" id="username-error" aria-live="polite"{% if not errors.get('username') %} hidden{% endif %}>{{ errors.get('username', '') }}</p>
+        </div>
+        {% endif %}
+        <div class="auth-field">
+          <label for="login-password">Password</label>
+          <div class="auth-password">
+            <input id="login-password" type="password" name="password" autocomplete="current-password" required {% if locked_user %}autofocus{% endif %} aria-describedby="password-error caps-lock-hint"{% if errors.get('password') %} aria-invalid="true"{% endif %}>
+            <button id="password-toggle" type="button" aria-controls="login-password" aria-label="Show password" aria-pressed="false" hidden>
+              <svg class="password-eye" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>
+              <svg class="password-eye-off" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m3 3 18 18M10.6 5.1 12 5c6.5 0 10 7 10 7a19 19 0 0 1-3 3.8M6.5 6.5A20 20 0 0 0 2 12s3.5 7 10 7a11 11 0 0 0 5.5-1.5M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>
+            </button>
+          </div>
+          <p class="auth-field-error" id="password-error" aria-live="polite"{% if not errors.get('password') %} hidden{% endif %}>{{ errors.get('password', '') }}</p>
+          <p id="caps-lock-hint" class="auth-hint" aria-live="polite" hidden>Caps Lock is on.</p>
+        </div>
+        <button class="auth-submit" type="submit"><span>{{ 'Resume session' if locked_user else 'Sign in' }}</span><span aria-hidden="true">→</span></button>
+        <p class="auth-help">{% if locked_user %}Not {{ locked_user }}? <a href="{{ url_for('main.account_clear_lock') }}">Use a different account</a>{% else %}Use the account provided by your server administrator.{% endif %}</p>
+      </form>
+      <div class="auth-panel-footer"><svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor"><rect x="3.5" y="7" width="9" height="7" rx="2"/><path d="M5.5 7V4.5a2.5 2.5 0 0 1 5 0V7"/></svg>Private infrastructure. Managed by you.</div>
+    </section>
+  </div>
+  <footer class="auth-footer"><span>PiVPN Web UI</span><span>Your network starts here.</span></footer>
 </div>
 {% endblock %}

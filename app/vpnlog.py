@@ -257,7 +257,8 @@ def sort_client_sessions(sessions: list[dict]) -> None:
 
 
 def list_client_sessions(
-    q: str | None = None, page: int = 1, page_size: int = 50, since: str | None = None
+    q: str | None = None, page: int = 1, page_size: int = 50, since: str | None = None,
+    client: str | None = None,
 ) -> tuple[list[dict], int]:
     """Per-client login sessions — each a paired connect+disconnect (or
     still-open connect with no disconnect yet), most recent first,
@@ -295,6 +296,12 @@ def list_client_sessions(
     filters to sessions that *started* at or after it — applied here, in
     Python, after pairing, for the same reason `q` is: pairing needs the
     full event stream regardless of the window being displayed.
+
+    `client`, if given, is an exact (not substring) match on session
+    client name — the client detail page's own session-log tab uses this
+    to scope the whole history to just one client, unlike `q` which
+    substring-searches every field including client for the main Logs
+    page's free-text search.
     """
     events = _parse_openvpn_events()
     open_sessions: dict[str, dict] = {}
@@ -328,13 +335,16 @@ def list_client_sessions(
                 "ongoing": False,
                 "real_address": pending["real_address"] if pending else None,
             })
-    for client, pending in open_sessions.items():
+    for open_client, pending in open_sessions.items():
         sessions.append({
-            "client": client, "start": pending["start"], "end": None,
+            "client": open_client, "start": pending["start"], "end": None,
             "address": pending["address"], "duration": None, "ongoing": True,
             "real_address": pending["real_address"],
         })
     sort_client_sessions(sessions)
+
+    if client:
+        sessions = [s for s in sessions if s.get("client") == client]
 
     if since:
         sessions = [s for s in sessions if (s.get("start") or "") >= since]
@@ -374,13 +384,20 @@ def _client_ip_map() -> dict[str, str]:
 
 
 def list_traffic_flows(
-    q: str | None = None, page: int = 1, page_size: int = 50, since: str | None = None
+    q: str | None = None, page: int = 1, page_size: int = 50, since: str | None = None,
+    client: str | None = None,
 ) -> tuple[list[dict], int]:
     """Per-flow, client-initiated connections (src client -> dst anywhere),
     most recent first, server-side paginated and searched over the full
     retained history (not just a fixed-size recent slice — see db.py's
     list_traffic_flows for why this matters once retention holds a real
     week of data). Returns (flows, total_matching_count).
+
+    `client`, if given, is an exact match pushed down into the SQL query
+    (unlike `q`, a substring search across several columns) — the client
+    detail page's own traffic tab uses this to answer "where has this one
+    client actually gone", scoped server-side rather than filtering a
+    mixed-client page in JS.
 
     Reads from the traffic_flows table (populated periodically by
     deploy/ingest_logs.py, not on any request path) — client name and
@@ -397,7 +414,7 @@ def list_traffic_flows(
     mapping gone stale) is shown as a bare IP rather than dropped, and
     setup-traffic-log.sh never having been run at all just means an empty
     list, not an error."""
-    rows, total = db.list_traffic_flows(q=q, page=page, page_size=page_size, since=since)
+    rows, total = db.list_traffic_flows(q=q, page=page, page_size=page_size, since=since, client=client)
     flows = []
     for row in rows:
         flows.append({

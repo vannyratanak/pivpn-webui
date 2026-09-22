@@ -78,37 +78,33 @@ def _require_admin():
     return None
 
 
-def _find_valid_client(name):
-    """Return one valid client using the same normalization as the list
-    endpoint. PiVPN output can contain repeated historical certificate
-    names and spacing differences; the detail endpoint must select the
-    current valid row rather than rely on one exact raw comparison."""
-    wanted = name.strip().casefold()
-    matches = [
-        client for client in pivpn_ctl.list_clients()
-        if client.get("name", "").strip().casefold() == wanted
-        and client.get("status", "").strip().casefold() == "valid"
-    ]
-    return matches[-1] if matches else None
+def _refresh_client_status_cache():
+    """Runs one client-status ingest cycle immediately instead of waiting
+    for the next timer tick — same pattern as logs_refresh() below, called
+    right after add/renew/remove/import so a change made through this API
+    shows up on the very next GET /api/clients instead of being up to 10s
+    stale. Best-effort: a transient pivpn/agent failure here shouldn't
+    turn an already-successful mutation into a 502 response, so errors are
+    swallowed (the next timer tick will just try again)."""
+    from deploy import ingest_clients
+    try:
+        ingest_clients.ingest_client_status()
+    except Exception:
+        pass
 
 
 @bp.route("/clients", methods=["GET"])
 @jwt_required()
 def list_clients():
-    """Mirrors routes.py's clients() view (same status filter, same IP/
-    connection/block enrichment), as JSON instead of an HTML table. Any
-    authenticated caller may read this — the Clients page itself is
-    login_required only, not admin-only, so the API matches."""
-    try:
-        client_list = [c for c in pivpn_ctl.list_clients() if c["status"].lower() == "valid"]
-    except pivpn_ctl.PivpnError as exc:
-        return jsonify({"error": str(exc)}), 502
-    connected = pivpn_ctl.list_connected_clients()
-    client_ips = pivpn_ctl.list_client_ips()
+    """Reads app/db.py's client_status_cache table (kept fresh by
+    deploy/ingest_clients.py's systemd timer, every 10s) instead of
+    calling pivpn_ctl live — see that table's own comment for why. blocked
+    is still computed live here (db.get_client_block, a local firewall_rules
+    read, no agent call), since caching it would add staleness for no
+    speed benefit."""
+    client_list = db.list_client_status_cache()
     for c in client_list:
-        c["ip"] = client_ips.get(c["name"])
         c["blocked"] = db.get_client_block(c["name"]) is not None
-        c["session"] = connected.get(c["name"])
     return jsonify({"clients": client_list, "connected_count": sum(1 for c in client_list if c["session"])})
 
 
@@ -116,20 +112,16 @@ def list_clients():
 @jwt_required()
 def client_status(name):
     """Single-client view of /api/clients, for a caller polling just one
-    name instead of fetching the whole list every time."""
+    name instead of fetching the whole list every time. Same cache-backed
+    read as list_clients() above."""
     try:
         name = pivpn_ctl.validate_name(name)
     except pivpn_ctl.PivpnError as exc:
         return jsonify({"error": str(exc)}), 400
-    try:
-        match = _find_valid_client(name)
-    except pivpn_ctl.PivpnError as exc:
-        return jsonify({"error": str(exc)}), 502
+    match = db.get_client_status_cache(name)
     if not match:
         return jsonify({"error": f"no valid client named '{name}'"}), 404
-    match["ip"] = pivpn_ctl.list_client_ips().get(name)
     match["blocked"] = db.get_client_block(name) is not None
-    match["session"] = pivpn_ctl.list_connected_clients().get(name)
     return jsonify(match)
 
 
@@ -208,6 +200,7 @@ def add_client():
         _audit("client_add", name, "error", str(exc))
         return jsonify({"error": str(exc)}), 400
     _audit("client_add", name)
+    _refresh_client_status_cache()
     return jsonify({"created": name}), 201
 
 
@@ -223,11 +216,16 @@ def renew_client(name):
         # routes.py's own renew_client() for the full reasoning. Flagged
         # with its own audit action so it's easy to spot in Logs later.
         _audit("client_renew_partial", name, "error", str(exc))
+        # Real state changed (the old cert really is revoked now) even
+        # though this counts as a failure response — refresh so the cache
+        # doesn't keep showing the old, no-longer-valid expiration.
+        _refresh_client_status_cache()
         return jsonify({"error": str(exc), "partial_failure": True}), 502
     except pivpn_ctl.PivpnError as exc:
         _audit("client_renew", name, "error", str(exc))
         return jsonify({"error": str(exc)}), 400
     _audit("client_renew", name)
+    _refresh_client_status_cache()
     return jsonify({"renewed": name})
 
 
@@ -241,6 +239,7 @@ def remove_client(name):
         _audit("client_remove", name, "error", str(exc))
         return jsonify({"error": str(exc)}), 400
     _audit("client_remove", name)
+    _refresh_client_status_cache()
     return jsonify({"removed": name})
 
 
@@ -258,6 +257,8 @@ def bulk_remove_clients():
         except pivpn_ctl.PivpnError as exc:
             errors.append(f"{name}: {exc}")
     _audit("client_bulk_remove", f"{len(removed)} removed, {len(errors)} failed")
+    if removed:
+        _refresh_client_status_cache()
     return jsonify({"removed": removed, "errors": errors})
 
 
@@ -277,6 +278,8 @@ def import_clients():
     added, errors = pivpn_ctl.import_clients(text)
     _audit("client_import", upload.filename, "ok" if not errors else "error",
            f"{added} added, {len(errors)} failed")
+    if added:
+        _refresh_client_status_cache()
     return jsonify({"added": added, "errors": errors})
 
 
@@ -536,6 +539,84 @@ def client_bulk_delete_rules(name):
     data = request.get_json(silent=True) or {}
     result = _bulk_disable_or_delete("delete", data.get("rule_ids") or [], restrict_to_client=name)
     return jsonify(result)
+
+
+@bp.route("/clients/<name>/rules/<int:rule_id>/reorder", methods=["POST"])
+@jwt_required()
+def client_reorder_rule(name, rule_id):
+    """POST {"target_id": <id>, "place": "before"|"after"}. Mirrors
+    /firewall/rules/<id>/reorder below, but open to any logged-in user
+    (not admin-only) — same "moderator gets full rule management for one
+    client" model as this page's other rule endpoints, and scoped: both
+    rule_id and target_id must actually belong to this client (same
+    restrict_to_client idea _bulk_disable_or_delete already uses), so this
+    narrower page can only be used to reorder a client's rules relative to
+    its *own* other rules, never to reach into another client's rule or a
+    non-client-scoped INPUT/SNAT/port-forward rule by id. This matches the
+    page's own table, which only ever lists (and only ever lets you drag)
+    this client's own rows to begin with."""
+    try:
+        name = pivpn_ctl.validate_name(name)
+    except pivpn_ctl.PivpnError as exc:
+        return jsonify({"error": str(exc)}), 400
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify(ok=False, error="Invalid request."), 400
+    client_ips = pivpn_ctl.list_client_ips()
+    ip_to_name = {ip: n for n, ip in client_ips.items()}
+    rule = db.get_rule(rule_id)
+    if not rule or firewall.rule_client_name(rule, ip_to_name) != name:
+        return jsonify(ok=False, error="Rule not found for this client."), 404
+    try:
+        target_id = int(data.get("target_id"))
+        place = data.get("place")
+    except (TypeError, ValueError):
+        return jsonify(ok=False, error="Invalid request."), 400
+    target = db.get_rule(target_id)
+    if not target or firewall.rule_client_name(target, ip_to_name) != name:
+        return jsonify(ok=False, error="Can only reorder relative to this client's own rules."), 404
+    try:
+        firewall.reorder_rule(rule_id, target_id, place, client_ip=_client_ip())
+    except (firewall.FirewallError, PrivilegedCommandError) as exc:
+        _audit("firewall_rule_reorder", f"rule#{rule_id}", "error", str(exc))
+        return jsonify(ok=False, error=str(exc)), 400
+    _audit("firewall_rule_reorder", f"rule#{rule_id} {place} rule#{target_id}")
+    return jsonify(ok=True)
+
+
+@bp.route("/clients/<name>/rules/import", methods=["POST"])
+@jwt_required()
+def client_import_rules(name):
+    """Client-scoped counterpart of /firewall/import below — a narrower
+    file format to match this page's own narrower Add Rule dialog (no
+    'kind' prefix, no variables/raw-iptables lines, and no 'src' field at
+    all: every imported line is a forward rule for *this* client, with src
+    always this client's own VPN IP — see firewall.import_client_rules for
+    the exact format). Open to any logged-in user, same access model as
+    this page's other rule endpoints."""
+    try:
+        name = pivpn_ctl.validate_name(name)
+    except pivpn_ctl.PivpnError as exc:
+        return jsonify({"error": str(exc)}), 400
+    client_ip = pivpn_ctl.list_client_ips().get(name)
+    if not client_ip:
+        return jsonify({"error": f"{name} has no VPN IP yet — it needs to connect at least once first."}), 400
+    upload = request.files.get("rules_file")
+    if not upload or not upload.filename:
+        return jsonify(error="Choose a file to import."), 400
+    try:
+        text = upload.read().decode("utf-8")
+    except UnicodeDecodeError:
+        return jsonify(error="Could not read that file as text (expected UTF-8)."), 400
+    added, errors = firewall.import_client_rules(text, client_ip)
+    if added:
+        try:
+            firewall.regenerate_client_script(name, client_ip)
+        except PrivilegedCommandError:
+            pass
+    _audit("firewall_import", upload.filename, "error" if errors else "ok",
+           f"{added} added, {len(errors)} failed")
+    return jsonify(added=added, errors=errors)
 
 
 # --- global firewall rules (mirrors routes.py's add_forward/add_input/
@@ -812,6 +893,7 @@ def logs():
         return jsonify({"error": f"tab must be one of: {', '.join(allowed_tabs)}"}), 403
 
     q = (request.args.get("q") or "").strip() or None
+    client = (request.args.get("client") or "").strip() or None
     log_range = request.args.get("range") or "1h"
     if log_range not in _LOG_RANGE_HOURS:
         log_range = "1h"
@@ -820,16 +902,16 @@ def logs():
         page = max(1, int(request.args.get("page", 1)))
     except ValueError:
         page = 1
-    page_size = request.args.get("page_size", 50, type=int)
+    page_size = request.args.get("page_size", 10, type=int)
     if page_size not in (10, 25, 50, 100):
-        page_size = 50
+        page_size = 10
 
     entries, total = [], 0
     try:
         if tab == "sessions":
             entries, total = vpnlog.list_sessions(q=q, page=page, page_size=page_size, since=since)
         elif tab == "client_sessions":
-            entries, total = vpnlog.list_client_sessions(q=q, page=page, page_size=page_size, since=since)
+            entries, total = vpnlog.list_client_sessions(q=q, page=page, page_size=page_size, since=since, client=client)
             # Mirrors routes.py's old browser-only relabeling (now removed
             # from there — this is the only place this query runs anymore):
             # "ongoing" only means "no disconnect event matched our known
@@ -853,7 +935,7 @@ def logs():
             if relabeled:
                 vpnlog.sort_client_sessions(entries)
         elif tab == "traffic":
-            entries, total = vpnlog.list_traffic_flows(q=q, page=page, page_size=page_size, since=since)
+            entries, total = vpnlog.list_traffic_flows(q=q, page=page, page_size=page_size, since=since, client=client)
         elif tab == "system":
             entries, total = vpnlog.list_system_log(q=q, page=page, page_size=page_size, since=since)
         elif tab == "activity":

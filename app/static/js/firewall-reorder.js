@@ -1,13 +1,20 @@
-// Reordering for the Firewall page's rules table, two ways: native HTML5
-// drag-and-drop (no library, matching this app's no-dependencies-if-
-// avoidable stance) for the mouse, and ↑/↓ on a focused drag-handle for
-// the keyboard (drag-and-drop has no keyboard equivalent of its own —
-// found by an /impeccable audit, since without this the whole feature was
-// mouse-only). Both send which rule it landed before/after to POST
-// /api/firewall/rules/<id>/reorder using the shared bearer token.
-function attachFirewallReorder(tbodySelector) {
+// Reordering for the Firewall page's rules table (and the client detail
+// page's own client-scoped rules table, which reuses this verbatim), two
+// ways: native HTML5 drag-and-drop (no library, matching this app's
+// no-dependencies-if-avoidable stance) for the mouse, and ↑/↓ on a focused
+// drag-handle for the keyboard (drag-and-drop has no keyboard equivalent
+// of its own — found by an /impeccable audit, since without this the whole
+// feature was mouse-only). Both send which rule it landed before/after to
+// POST .../reorder using the shared bearer token.
+//
+// endpointFn(ruleId) builds that POST's URL — defaults to the main
+// Firewall page's global endpoint; client-detail-page.js passes its own
+// client-scoped one instead (see that file's call site) so both pages'
+// rules table can share this one implementation rather than a near-copy.
+function attachFirewallReorder(tbodySelector, endpointFn) {
   const tbody = document.querySelector(tbodySelector);
   if (!tbody) return;
+  const buildEndpoint = endpointFn || ((ruleId) => `/api/firewall/rules/${ruleId}/reorder`);
   let draggingRow = null;
 
   // Pagination (pagination.js) hides off-page rows via style.display
@@ -44,7 +51,7 @@ function attachFirewallReorder(tbodySelector) {
   // both just need "tell the server the new before/after, then recover if
   // it disagrees."
   function sendReorder(ruleId, body, onSuccess) {
-    ApiClient.call(`/api/firewall/rules/${ruleId}/reorder`, {
+    ApiClient.call(buildEndpoint(ruleId), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),

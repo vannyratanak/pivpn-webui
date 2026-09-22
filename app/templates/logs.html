@@ -4,7 +4,7 @@
 
 {% set log_search_labels = {'sessions': 'VPN sessions', 'client_sessions': 'client sessions', 'traffic': 'traffic flows', 'system': 'system log', 'activity': 'activity log', 'auth': 'user auth log'} %}
 <div class="page-header-row">
-  <h1>Logs</h1>
+  <div class="page-heading"><h1>Logs</h1><p class="page-description">Review connections, traffic, and server activity.</p></div>
   <!-- One shared, ever-present search box (every tab is in
        log_search_labels, so this was never actually conditional) — its
        placeholder/aria-label are updated by logs-page.js on tab switch.
@@ -177,8 +177,8 @@
   </div>
 </section>
 
-<!-- Pagination: also one shared instance, same reasoning as the toolbar
-     above — applies to whichever tab is currently active. -->
+<!-- One shared pagination instance is moved into the active log card by
+     logs-page.js, matching the Firewall Rules table layout. -->
 <div class="pagination" id="logs-pagination">
   <label class="pagination-size">Show
     <select id="logs-page-size" aria-label="Rows per page">

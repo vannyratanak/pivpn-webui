@@ -24,6 +24,8 @@
     }
   </script>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  {% if current_user.is_authenticated %}<link rel="stylesheet" href="{{ url_for('static', filename='console.css', v='15') }}">{% endif %}
+  {% block page_head %}{% endblock %}
   <!-- Not deferred: every page's own inline <script> block (search/pagination/
        bulk-select wiring in clients.html, firewall.html, etc.) runs inline,
        synchronously, during body parsing — it calls attachPagination() /
@@ -50,7 +52,7 @@
   <script src="{{ url_for('static', filename='js/jwt-expiry-watcher.js') }}"></script>
   <script src="{{ url_for('static', filename='js/idle-timeout.js') }}"></script>
 </head>
-<body>
+<body class="{% if current_user.is_authenticated %}console-page {% endif %}{% block body_class %}{% endblock %}">
   <a href="#main-content" class="skip-link">Skip to content</a>
   {% macro nav_links() %}
     <a href="{{ url_for('main.clients') }}" class="{{ 'active' if request.endpoint == 'main.clients' }}" {% if request.endpoint == 'main.clients' %}aria-current="page"{% endif %}>Clients</a>
@@ -67,7 +69,7 @@
       <button type="button" class="hamburger-btn" id="nav-drawer-open-btn" aria-label="Open navigation menu" aria-haspopup="dialog">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
       </button>
-      <div class="brand">PiVPN Web UI</div>
+      <a class="brand console-brand" href="{{ url_for('main.clients') }}" aria-label="PiVPN Web UI — Clients"><span class="console-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 6v6c0 5 8 9 8 9s8-4 8-9V6Z"/><path d="m8 12 3 3 5-6"/></svg></span><span>PiVPN <span class="console-brand-caption">Web UI</span></span></a>
     </div>
     <nav class="topbar-nav-desktop">
       {{ nav_links() }}
@@ -117,17 +119,12 @@
   {% endif %}
 
   <main class="content" id="main-content">
+    {% block notifications %}
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
         {% if current_user.is_authenticated %}
-        {# Auto-dismissing toast stack everywhere in the app proper — see
-           the Toasts / Floating Alerts entry in DESIGN.md and
-           flash-toasts.js for the show-then-go-away behavior. The login
-           page below keeps the plain inline banner instead: a transient
-           toast that can vanish before someone's read it is a poor fit
-           for "why did my login just fail," and .flashes:has(+ .login-wrap)
-           already centers/width-matches it to that page's one narrow
-           card. #}
+        {# Authenticated pages use dismissible toasts. The login template
+           overrides this block and renders persistent errors in its form. #}
         <div class="flash-toasts" aria-live="polite">
           {% for category, message in messages %}
             <div class="flash-toast flash-{{ category }}">{{ message }}</div>
@@ -142,6 +139,7 @@
         {% endif %}
       {% endif %}
     {% endwith %}
+    {% endblock %}
 
     {% block content %}{% endblock %}
   </main>

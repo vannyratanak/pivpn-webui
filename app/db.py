@@ -288,6 +288,37 @@ CREATE TABLE IF NOT EXISTS servers (
     created_at TEXT DEFAULT to_char(now(), 'YYYY-MM-DD HH24:MI:SS'),
     last_seen_at TEXT
 );
+
+-- Client list/status snapshot, refreshed by deploy/ingest_clients.py
+-- (systemd timer, every 10s) — same story as vpn_events/traffic_flows
+-- above but for GET /api/clients and /api/clients/<name>, which used to
+-- call pivpn_ctl.list_clients()/list_client_ips()/list_connected_clients()
+-- live on every single request. In HUB_MODE those are real multi-second
+-- WebSocket round-trips to the agent, and every open browser tab's own
+-- status poll used to repeat that independently. blocked is deliberately
+-- NOT a column here: it's already a fast local read from firewall_rules
+-- (db.get_client_block), no agent call involved, so caching it would add
+-- staleness for zero speed benefit — api.py still computes it live.
+-- list_position preserves `pivpn list`'s own display order (whatever
+-- that happens to be) across the cache, since a plain `ORDER BY name`
+-- would silently re-sort the Clients page relative to the pre-cache
+-- behavior. Full-refresh table, not incremental: ingest_clients.py
+-- always re-fetches the complete current client list, so a name that's
+-- no longer present just isn't in the next batch handed to
+-- replace_client_status_cache, which deletes it.
+CREATE TABLE IF NOT EXISTS client_status_cache (
+    name TEXT PRIMARY KEY,
+    status TEXT NOT NULL,
+    expiration TEXT NOT NULL DEFAULT '',
+    list_position INTEGER NOT NULL DEFAULT 0,
+    ip TEXT,
+    session_real_address TEXT,
+    session_virtual_address TEXT,
+    session_bytes_recv TEXT,
+    session_bytes_sent TEXT,
+    session_since TEXT,
+    updated_at TEXT NOT NULL DEFAULT to_char(now(), 'YYYY-MM-DD HH24:MI:SS')
+);
 """
 
 
@@ -456,6 +487,103 @@ def get_client_block(client_name: str):
             (client_name,),
         ).fetchone()
         return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def _client_status_row_to_dict(row) -> dict:
+    """Shared by list_client_status_cache/get_client_status_cache — matches
+    the shape api.py's endpoints used to build straight from
+    pivpn_ctl.list_clients()/list_connected_clients(): a flat client dict
+    with `session` either a {"real_address", "virtual_address",
+    "bytes_recv", "bytes_sent", "since"} dict or None. `blocked` is NOT
+    added here — see the table's own comment; callers add it themselves
+    from a live get_client_block() call."""
+    session = None
+    if row["session_since"] is not None:
+        session = {
+            "real_address": row["session_real_address"],
+            "virtual_address": row["session_virtual_address"],
+            "bytes_recv": row["session_bytes_recv"],
+            "bytes_sent": row["session_bytes_sent"],
+            "since": row["session_since"],
+        }
+    return {
+        "status": row["status"],
+        "name": row["name"],
+        "expiration": row["expiration"],
+        "ip": row["ip"],
+        "session": session,
+    }
+
+
+def list_client_status_cache() -> list[dict]:
+    """Ordered by list_position, i.e. whatever order pivpn_ctl.list_clients()
+    returned at the last ingest tick — not alphabetical, to match the
+    Clients page's pre-cache display order exactly."""
+    conn = get_conn()
+    try:
+        rows = conn.execute("SELECT * FROM client_status_cache ORDER BY list_position").fetchall()
+        return [_client_status_row_to_dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def get_client_status_cache(name: str) -> dict | None:
+    """Case-insensitive on name, same as the old live-lookup path
+    (api.py's _find_valid_client) used to be — a client name in the URL
+    might not match the stored casing exactly."""
+    conn = get_conn()
+    try:
+        row = conn.execute(
+            "SELECT * FROM client_status_cache WHERE lower(name) = lower(%s)", (name,)
+        ).fetchone()
+        return _client_status_row_to_dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def replace_client_status_cache(rows: list[dict]):
+    """Full-snapshot replace: deploy/ingest_clients.py always re-fetches the
+    complete current client list (a full `pivpn list` + status/CCD lookup,
+    not a delta), so this deletes whatever's no longer present in `rows`
+    and upserts the rest — rather than an incremental update that would
+    never notice a removed client. Each row: {"name", "status",
+    "expiration", "list_position", "ip", "session_real_address",
+    "session_virtual_address", "session_bytes_recv", "session_bytes_sent",
+    "session_since"}.
+
+    If the same name appears more than once in `rows` (pivpn_ctl.list_clients()
+    can return repeated historical certificate entries for one name — see
+    that function's own docstring), the LAST one wins via ON CONFLICT DO
+    UPDATE, matching the old live-lookup's _find_valid_client, which picked
+    matches[-1] for the same reason."""
+    conn = get_conn()
+    try:
+        names = [r["name"] for r in rows]
+        conn.execute("DELETE FROM client_status_cache WHERE NOT (name = ANY(%s::text[]))", (names,))
+        for r in rows:
+            conn.execute(
+                "INSERT INTO client_status_cache "
+                "(name, status, expiration, list_position, ip, session_real_address, "
+                " session_virtual_address, session_bytes_recv, session_bytes_sent, session_since, updated_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, to_char(now(), 'YYYY-MM-DD HH24:MI:SS')) "
+                "ON CONFLICT (name) DO UPDATE SET "
+                "status = EXCLUDED.status, expiration = EXCLUDED.expiration, "
+                "list_position = EXCLUDED.list_position, ip = EXCLUDED.ip, "
+                "session_real_address = EXCLUDED.session_real_address, "
+                "session_virtual_address = EXCLUDED.session_virtual_address, "
+                "session_bytes_recv = EXCLUDED.session_bytes_recv, "
+                "session_bytes_sent = EXCLUDED.session_bytes_sent, "
+                "session_since = EXCLUDED.session_since, "
+                "updated_at = EXCLUDED.updated_at",
+                (
+                    r["name"], r["status"], r["expiration"], r["list_position"], r["ip"],
+                    r["session_real_address"], r["session_virtual_address"],
+                    r["session_bytes_recv"], r["session_bytes_sent"], r["session_since"],
+                ),
+            )
+        conn.commit()
     finally:
         conn.close()
 
@@ -890,13 +1018,18 @@ def insert_traffic_flows(rows: list[tuple]):
 
 
 def list_traffic_flows(
-    q: str | None = None, page: int = 1, page_size: int = 50, since: str | None = None
+    q: str | None = None, page: int = 1, page_size: int = 50, since: str | None = None,
+    client: str | None = None,
 ) -> tuple[list[dict], int]:
     """Most recent first, server-side paginated and searched — this is a
     display list, unlike list_vpn_events above (which feeds a pairing
     algorithm that wants chronological order). Returns (rows,
     total_matching_count); see list_vpn_events_page's docstring for why,
-    and for what `since` expects."""
+    and for what `since` expects.
+
+    `client`, if given, is an exact match (= not LIKE) on the client
+    column — see vpnlog.list_traffic_flows for the caller-facing reason
+    this exists alongside `q`."""
     conn = get_conn()
     try:
         clauses = []
@@ -909,6 +1042,9 @@ def list_traffic_flows(
                 "OR proto LIKE %s ESCAPE '\\' OR dport LIKE %s ESCAPE '\\')"
             )
             params += [like, like, like, like, like, like]
+        if client:
+            clauses.append("client = %s")
+            params.append(client)
         if since:
             clauses.append("ts >= %s")
             params.append(since)

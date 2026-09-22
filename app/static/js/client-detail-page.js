@@ -175,13 +175,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function rowHtml(r) {
     return `
-      <tr class="${r.enabled ? '' : 'disabled-row'}">
+      <tr class="${r.enabled ? '' : 'disabled-row'}" draggable="true" data-rule-id="${r.id}">
         <td><input type="checkbox" class="client-rule-select-checkbox" data-rule-id="${r.id}" aria-label="Select rule ${r.id}"></td>
         <td>${escapeHtml(r.kind)}</td>
         <td>${escapeHtml(r.action)}</td>
         <td>${escapeHtml(r.detail)}</td>
         <td>${escapeHtml(r.comment || '')}</td>
         <td><span class="${r.persisted ? 'saved-yes' : 'saved-no'}">${r.persisted ? 'Saved' : 'Unsaved'}</span></td>
+        <td><span class="drag-handle" title="Drag to reorder, or focus and press ↑/↓" tabindex="0" role="button" aria-label="Reorder rule — press up or down arrow to move it">&#9776;</span></td>
         <td>
           <div class="actions">
             <button type="button" class="btn btn-sm ${r.enabled ? 'btn-warn' : 'btn-ok'}" data-action="toggle" data-rule-id="${r.id}">${r.enabled ? 'Disable' : 'Enable'}</button>
@@ -192,7 +193,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function skeletonRowHtml() {
-    const cells = '<td></td>' + Array(4).fill('<td><span class="skeleton-bar"></span></td>').join('') + '<td></td><td></td>';
+    const cells = '<td></td>' + Array(4).fill('<td><span class="skeleton-bar"></span></td>').join('') + '<td></td><td></td><td></td>';
     return `<tr class="skeleton-row">${cells}</tr>`.repeat(4);
   }
 
@@ -211,7 +212,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function render(rules) {
     if (!rules.length) {
-      rulesTbody.innerHTML = '<tr class="empty-row"><td colspan="7" class="empty">No rules scoped to this client yet.</td></tr>';
+      rulesTbody.innerHTML = '<tr class="empty-row"><td colspan="8" class="empty">No rules scoped to this client yet.</td></tr>';
     } else {
       rulesTbody.innerHTML = rules.map(rowHtml).join('');
     }
@@ -222,6 +223,12 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
       rulesPager = attachPagination('#client-rules-tbody', 'tr:not(.empty-row)', 'client-rules-page-size', 'client-rules-pagination');
       attachLogFilter('client-rules-filter', '#client-rules-tbody', 'tr:not(.empty-row)', null, () => rulesPager && rulesPager.refresh());
+      // Shared with the main Firewall page (firewall-reorder.js, loaded
+      // globally via base.html) — only the endpoint differs, scoped to
+      // this client's own rules (see api.py's client_reorder_rule).
+      if (window.attachFirewallReorder) {
+        window.attachFirewallReorder('#client-rules-tbody', (ruleId) => `/api/clients/${encodeURIComponent(name)}/rules/${ruleId}/reorder`);
+      }
     }
     document.getElementById('client-rules-select-all').checked = false;
     updateBulkUi();
@@ -252,7 +259,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function removeRuleRow(row) {
     row.remove();
     if (!rulesTbody.querySelector('tr:not(.empty-row)')) {
-      rulesTbody.innerHTML = '<tr class="empty-row"><td colspan="7" class="empty">No rules scoped to this client yet.</td></tr>';
+      rulesTbody.innerHTML = '<tr class="empty-row"><td colspan="8" class="empty">No rules scoped to this client yet.</td></tr>';
     }
     if (rulesPager) rulesPager.refresh();
     saveRulesBtn.hidden = !rulesTbody.querySelector('.saved-no');
@@ -270,7 +277,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // pages' version of this gap), but just as misleading: it looks
         // like a normal empty state, not a failure.
         if (!ok) {
-          rulesTbody.innerHTML = `<tr class="empty-row"><td colspan="7" class="empty">${escapeHtml(data.error || 'Could not load rules.')}</td></tr>`;
+          rulesTbody.innerHTML = `<tr class="empty-row"><td colspan="8" class="empty">${escapeHtml(data.error || 'Could not load rules.')}</td></tr>`;
           return;
         }
         render(data.rules || []);
@@ -395,8 +402,35 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // Same reasoning as clients-page.js's own poll: this client's Active/
-  // Inactive status can change with no action on this page at all (they
+  // --- Import Rules dialog
+
+  const importRuleDialog = document.getElementById('client-import-rules-dialog');
+  const importRuleForm = document.getElementById('client-import-rules-form');
+  document.getElementById('client-import-rule-open-btn').addEventListener('click', () => importRuleDialog.showModal());
+
+  importRuleForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const submitBtn = importRuleForm.querySelector('[type="submit"]');
+    ApiClient.withBusy(submitBtn, ApiClient.call(`/api/clients/${encodeURIComponent(name)}/rules/import`, {
+      method: 'POST',
+      body: new FormData(importRuleForm),
+    }).then((resp) => resp.json().then((data) => ({ ok: resp.ok, data }))))
+      .then(({ ok, data }) => {
+        if (!ok) { showToast(data.error || 'Could not import rules.'); return; }
+        let message = data.added ? `Imported ${data.added} rule(s).` : 'No rules were added.';
+        if (data.errors && data.errors.length) message += ` ${data.errors.length} failed: ${data.errors.slice(0, 10).join('; ')}`;
+        showToast(message);
+        if (data.added) {
+          importRuleDialog.close();
+          importRuleForm.reset();
+          loadRules();
+        }
+      })
+      .catch(() => showToast('Could not import rules.'));
+  });
+
+  // Same reasoning as clients-page.js's own poll: this client's Online/
+  // Offline status can change with no action on this page at all (they
   // connect/disconnect their own VPN client), so it shouldn't need a
   // manual reload to show current — the meta strip is small enough that
   // loadClient()'s existing full-refresh is fine to reuse here (unlike
@@ -408,6 +442,105 @@ document.addEventListener('DOMContentLoaded', () => {
     loadClient();
   }, POLL_INTERVAL_MS);
 
+  // --- Activity (session log + traffic), scoped to this client only —
+  // reuses the same GET /api/logs endpoint the Logs page itself uses,
+  // with a client=<name> filter pushed down server-side (see
+  // vpnlog.py/db.py) so this never has to filter a mixed-client page's
+  // worth of rows out in JS.
+  const activityTabs = Array.from(document.querySelectorAll('[data-activity-tab]'));
+  const activityRangeSelect = document.getElementById('client-activity-range');
+  const activityPageSizeSelect = document.getElementById('client-activity-page-size');
+  const activityPrevBtn = document.querySelector('[data-activity-page-prev]');
+  const activityNextBtn = document.querySelector('[data-activity-page-next]');
+  const activityStatusEl = document.querySelector('[data-activity-page-status]');
+  let activityTab = 'client_sessions';
+  let activityPage = 1;
+
+  function activitySection(tab) {
+    return document.querySelector(`[data-activity-section="${tab}"]`);
+  }
+
+  // Same row shape as logs-page.js's own clientSessionsRow/trafficRow,
+  // minus the Client/Source columns those need (always this client here,
+  // so showing it again on every row would be pure noise).
+  function clientSessionRowHtml(s) {
+    const endCell = s.ongoing
+      ? '<span class="badge badge-connected">ongoing</span>'
+      : s.status_note
+        ? `<span class="cell-note">${escapeHtml(s.status_note)}</span>`
+        : escapeHtml(s.end || '—');
+    const addressCell = s.real_address
+      ? `${escapeHtml(s.real_address)}<span class="cell-note hint-block">via relay (${escapeHtml(s.address)})</span>`
+      : escapeHtml(s.address || '—');
+    return `<tr><td>${escapeHtml(s.start || '—')}</td><td>${endCell}</td><td>${escapeHtml(s.duration || '—')}</td><td>${addressCell}</td></tr>`;
+  }
+
+  function trafficRowHtml(f) {
+    const dst = escapeHtml(f.dst) + (f.dport ? ':' + escapeHtml(f.dport) : '');
+    return `<tr><td>${escapeHtml(f.ts)}</td><td>${dst}</td><td>${escapeHtml(f.dst_org || '—')}</td><td>${escapeHtml(f.proto)}</td></tr>`;
+  }
+
+  const ACTIVITY_CONFIG = {
+    client_sessions: { tbodyId: 'client-activity-sessions-tbody', colCount: 4, rowHtml: clientSessionRowHtml, emptyMessage: 'No session events found for this client yet.' },
+    traffic: { tbodyId: 'client-activity-traffic-tbody', colCount: 4, rowHtml: trafficRowHtml, emptyMessage: 'No traffic flows found for this client yet.' },
+  };
+
+  function activitySkeletonRowHtml(colCount) {
+    const cells = Array(colCount).fill('<td><span class="skeleton-bar"></span></td>').join('');
+    return `<tr class="skeleton-row">${cells}</tr>`.repeat(4);
+  }
+
+  function loadActivity(showSkeletonWhileLoading) {
+    const cfg = ACTIVITY_CONFIG[activityTab];
+    const tbody = document.getElementById(cfg.tbodyId);
+    if (showSkeletonWhileLoading) tbody.innerHTML = activitySkeletonRowHtml(cfg.colCount);
+    const params = new URLSearchParams({
+      tab: activityTab, client: name, range: activityRangeSelect.value,
+      page: String(activityPage), page_size: activityPageSizeSelect.value,
+    });
+    return ApiClient.call(`/api/logs?${params.toString()}`)
+      .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data })))
+      .then(({ ok, data }) => {
+        if (!ok) {
+          tbody.innerHTML = `<tr class="empty-row"><td colspan="${cfg.colCount}" class="empty">${escapeHtml(data.error || 'Could not load this tab.')}</td></tr>`;
+          return;
+        }
+        const entries = data.entries || [];
+        tbody.innerHTML = entries.length
+          ? entries.map(cfg.rowHtml).join('')
+          : `<tr class="empty-row"><td colspan="${cfg.colCount}" class="empty">${cfg.emptyMessage}</td></tr>`;
+        const totalPages = Math.max(1, Math.ceil(data.total / data.page_size));
+        if (activityStatusEl) activityStatusEl.textContent = `Page ${data.page} of ${totalPages} (${data.total} total)`;
+        activityPrevBtn.disabled = data.page <= 1;
+        activityNextBtn.disabled = data.page >= totalPages;
+        activityPage = data.page;
+      });
+  }
+
+  activityTabs.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const newTab = btn.dataset.activityTab;
+      if (newTab === activityTab) return;
+      const oldSection = activitySection(activityTab);
+      if (oldSection) oldSection.hidden = true;
+      activityTabs.forEach((t) => {
+        t.classList.toggle('active', t === btn);
+        t.setAttribute('aria-selected', String(t === btn));
+      });
+      activityTab = newTab;
+      activityPage = 1;
+      const newSection = activitySection(activityTab);
+      if (newSection) newSection.hidden = false;
+      loadActivity(true);
+    });
+  });
+
+  activityRangeSelect.addEventListener('change', () => { activityPage = 1; loadActivity(false); });
+  activityPageSizeSelect.addEventListener('change', () => { activityPage = 1; loadActivity(false); });
+  activityPrevBtn.addEventListener('click', () => { activityPage = Math.max(1, activityPage - 1); loadActivity(false); });
+  activityNextBtn.addEventListener('click', () => { activityPage += 1; loadActivity(false); });
+
   loadClient(true);
   loadRules(true);
+  loadActivity(true);
 });

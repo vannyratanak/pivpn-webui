@@ -35,6 +35,45 @@ def _api_token_superseded(jwt_header, jwt_payload):
 # prevent. A module-level reference survives past the function call.
 _firewall_sync_lock_file = None
 
+# Same reasoning as _firewall_sync_lock_file above, for
+# _seed_client_status_cache_once below — a separate lock since it's an
+# unrelated concern (client status ingest, not firewall sync).
+_client_ingest_lock_file = None
+
+
+def _seed_client_status_cache_once(app):
+    """Makes sure GET /api/clients has real data from the very first
+    request after a (re)start, even before
+    deploy/setup-client-ingest.sh's systemd timer has ever run — without
+    this, a freshly-created (empty) client_status_cache table would make
+    the Clients page look like there are no clients at all. That's a much
+    worse failure mode here than the Sessions/Traffic tabs starting empty
+    (see README's Background log ingestion section): those are additive
+    history that's genuinely fine starting from nothing, but Clients is
+    existing, load-bearing data — it already has real clients on it on
+    day one of adding this cache.
+
+    Same cross-worker-race guard as _sync_firewall_once, so gunicorn's
+    multiple worker processes don't all independently pay the same
+    (possibly multi-second, in HUB_MODE) startup ingest call."""
+    global _client_ingest_lock_file
+    lock_path = Path(config.DB_PATH).parent / ".client-ingest-startup.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_file = open(lock_path, "w")
+    try:
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        lock_file.close()
+        return  # another worker already has this covered
+
+    _client_ingest_lock_file = lock_file
+
+    from deploy import ingest_clients
+    try:
+        ingest_clients.ingest_client_status()
+    except Exception as exc:  # pragma: no cover - best effort on boot
+        app.logger.warning("Client status cache seed on startup failed: %s", exc)
+
 
 def _sync_firewall_once(app):
     """gunicorn runs multiple worker processes (see the -w flag in the
@@ -118,5 +157,6 @@ def create_app():
 
     with app.app_context():
         _sync_firewall_once(app)
+        _seed_client_status_cache_once(app)
 
     return app

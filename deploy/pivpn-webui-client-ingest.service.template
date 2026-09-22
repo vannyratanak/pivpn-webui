@@ -1,0 +1,15 @@
+[Unit]
+Description=PiVPN Web UI client status ingestion (Clients page -> database cache)
+After=network.target
+
+[Service]
+Type=oneshot
+User=__USER__
+WorkingDirectory=__APP_DIR__
+ExecStart=__APP_DIR__/venv/bin/python3 __APP_DIR__/deploy/ingest_clients.py
+# Same reasoning as pivpn-webui-log-ingest.service.template: this calls
+# `sudo` (via app/privileged.py's run_root, for pivpn_ctl.list_connected_clients/
+# list_client_ips's CCD helper calls), and sudo's setuid needs NoNewPrivileges
+# off to work under systemd. The privilege boundary is the narrow sudoers
+# allowlist, not this setting.
+NoNewPrivileges=false

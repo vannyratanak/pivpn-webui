@@ -677,6 +677,42 @@ aren't part of the CD forced command; reinstall them by hand
 (`sudo install ...` + `sudo systemctl daemon-reload`) if you ever change
 those specifically.
 
+## Background client status ingestion (Clients page)
+
+`./setup-client-ingest.sh` (run once, after `setup.sh`) installs a systemd
+timer that runs `deploy/ingest_clients.py` every 10 seconds, the same
+pattern as log ingestion above but for `GET /api/clients` and
+`GET /api/clients/<name>`. Those endpoints used to call
+`pivpn_ctl.list_clients()`/`list_client_ips()`/`list_connected_clients()`
+live on every single request — in [hub/agent mode](#hubagent-deployment-managing-the-vpn-server-remotely)
+each of those is a real WebSocket round-trip to the agent, taking multiple
+seconds, and every open browser tab's own status poll used to repeat that
+independently. The timer keeps a `client_status_cache` database table
+fresh instead, so both endpoints become plain, fast Postgres reads.
+`blocked` is deliberately not part of this cache — it's already a fast
+local read (`db.get_client_block`, backed by `firewall_rules`, no agent
+call involved), computed live on every request either way.
+
+**Unlike Sessions/Traffic/System above, this one isn't optional**:
+`create_app()` itself runs one ingest cycle at startup
+(`_seed_client_status_cache_once` in `app/__init__.py`) specifically so
+the Clients page has real data from the very first request, even before
+`setup-client-ingest.sh` has ever been run — Clients is existing,
+load-bearing data (real VPN clients that already exist on day one), not
+additive history that's fine starting empty the way a brand-new Sessions
+tab is. The systemd timer's job is keeping that cache fresh going
+forward, not making it exist at all. A client added/renewed/removed
+through this app also triggers one immediate ingest cycle itself (mirrors
+the Logs page's own **Refresh now** button/`POST /logs/refresh` — see
+above), so your own actions show up on the very next `GET /api/clients`
+instead of waiting up to 10s for the next timer tick.
+
+**Updating it later**: same story as `ingest_logs.py` above —
+`ingest_clients.py` runs straight from the git checkout, so it picks up
+changes automatically; the systemd unit files
+(`pivpn-webui-client-ingest.service`/`.timer`) are static and need a
+manual reinstall if you change those specifically.
+
 ## Database concurrency and gunicorn workers
 
 **PostgreSQL handles concurrent reads/writes natively** (MVCC — a write in

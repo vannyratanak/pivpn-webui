@@ -17,6 +17,23 @@ function fitTableScrollHeights() {
     // measure against itself, ratcheting smaller on every resize instead
     // of re-measuring fresh each time.
     el.style.maxHeight = '';
+    const mobile = window.matchMedia('(max-width: 640px)').matches;
+    const overflows = el.scrollWidth > el.clientWidth + 1;
+    if (mobile && overflows) {
+      el.tabIndex = 0;
+      el.setAttribute('aria-label', 'Scrollable table');
+    } else {
+      el.removeAttribute('tabindex');
+      el.removeAttribute('aria-label');
+    }
+    let hint = el.previousElementSibling;
+    if (!hint || !hint.classList.contains('table-scroll-hint')) {
+      hint = document.createElement('p');
+      hint.className = 'table-scroll-hint';
+      hint.textContent = 'Swipe table to see more columns →';
+      el.before(hint);
+    }
+    hint.hidden = !mobile || !overflows;
     const rect = el.getBoundingClientRect();
     // Whatever sits after this element but still inside the same card
     // (pagination's Prev/Next row, the card's own bottom padding/border)
@@ -45,6 +62,8 @@ function fitTableScrollHeights() {
     el.style.maxHeight = `${Math.max(available, 300)}px`;
   });
 }
+
+window.fitTableScrollHeights = fitTableScrollHeights;
 
 window.addEventListener('resize', fitTableScrollHeights);
 document.addEventListener('DOMContentLoaded', fitTableScrollHeights);

@@ -77,18 +77,27 @@ def login():
     # session_generation (it's a resume, not a new login; the existing API
     # bearer token and any other still-open tabs stay valid).
     locked_user = peek_locked_username(request)
+    username = locked_user or request.form.get("username", "")
 
     if request.method == "POST":
         ip = _client_ip()
         if db.count_recent_login_failures(ip, LOGIN_LOCKOUT_WINDOW_SECONDS) >= LOGIN_MAX_ATTEMPTS:
             flash("Too many failed login attempts. Try again in a few minutes.", "error")
-            return render_template("login.html", locked_user=locked_user)
+            return render_template("login.html", locked_user=locked_user, username=username)
 
         # In locked mode the username comes from the cookie, not the form,
         # so a tampered hidden field can't elevate access — verify_credentials
         # still checks the database, so only valid users pass.
         username = locked_user if locked_user else request.form.get("username", "")
         password = request.form.get("password", "")
+        field_errors = {}
+        if not username.strip():
+            field_errors["username"] = "Enter your username."
+        if not password:
+            field_errors["password"] = "Enter your password."
+        if field_errors:
+            return render_template("login.html", locked_user=locked_user,
+                                   username=username, field_errors=field_errors)
         user = verify_credentials(username, password)
         if user:
             db.clear_login_failures(ip)
@@ -121,7 +130,7 @@ def login():
         db.record_login_failure(ip)
         db.add_audit(username or "(blank)", "login", result="error", detail=f"bad credentials from {ip}")
         flash("Invalid username or password.", "error")
-    return render_template("login.html", locked_user=locked_user)
+    return render_template("login.html", locked_user=locked_user, username=username)
 
 
 @bp.route("/logout")
@@ -448,7 +457,7 @@ def client_detail(name):
         name = pivpn_ctl.validate_name(name)
     except pivpn_ctl.PivpnError:
         abort(404)
-    return render_template("client_detail.html", name=name)
+    return render_template("client_detail.html", name=name, log_range_options=LOG_RANGE_OPTIONS)
 
 
 @bp.route("/clients/<name>/rules/add", methods=["POST"])
@@ -1068,11 +1077,11 @@ def logs():
     except ValueError:
         page = 1
     try:
-        page_size = int(request.args.get("page_size", 50))
+        page_size = int(request.args.get("page_size", 10))
     except ValueError:
-        page_size = 50
+        page_size = 10
     if page_size not in (10, 25, 50, 100):
-        page_size = 50
+        page_size = 10
 
     return render_template(
         "logs.html", tab=tab, q=q, page=page, page_size=page_size,

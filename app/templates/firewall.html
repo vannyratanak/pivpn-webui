@@ -2,7 +2,7 @@
 {% block title %}Firewall — PiVPN Web UI{% endblock %}
 {% block content %}
 <div class="page-header-row">
-  <h1>Firewall Rules</h1>
+  <div class="page-heading"><h1>Firewall Rules</h1><p class="page-description">Control how traffic moves through your server.</p></div>
   <input type="text" id="rules-filter" class="log-filter-input filter-input-inline" placeholder="Search…" aria-label="Search firewall rules">
 </div>
 
@@ -358,53 +358,48 @@
     </script>
   </dialog>
 
-  <dialog id="import-rules-dialog" class="modal" onclick="closeDialogIfClickedOutside(event, this)">
-    <button type="button" class="modal-close-btn" onclick="document.getElementById('import-rules-dialog').close()" aria-label="Close">&times;</button>
-    <h2>Import rules from file</h2>
-    <p class="hint">Upload a plain text file to add several rules at once — one rule per line: <code>kind key=value key=value ...</code> (see table below). Blank lines and <code>#</code> comments are skipped; quote values with spaces, e.g. <code>comment="block guest wifi"</code>.</p>
+  <dialog id="import-rules-dialog" class="modal file-import-modal" aria-labelledby="import-rules-title" aria-describedby="import-rules-description" onclick="closeDialogIfClickedOutside(event, this)">
+    <button type="button" class="modal-close-btn" onclick="document.getElementById('import-rules-dialog').close()" aria-label="Close import rules">&times;</button>
+    <header class="file-import-header">
+      <span class="file-import-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z"/><path d="M14 3v6h6M12 17v-6m-3 3 3-3 3 3"/></svg></span>
+      <div><h2 id="import-rules-title">Import firewall rules</h2><p id="import-rules-description">Add multiple rules from a plain text file.</p></div>
+    </header>
 
-    <table class="import-example-table">
-      <thead>
-        <tr><th scope="col">Kind</th><th scope="col">Fields</th><th scope="col">Example line</th></tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td>forward</td>
-          <td>action, protocol, src, dst, dport, comment</td>
-          <td><code>forward action=DROP protocol=tcp src=10.8.0.5 dst=192.168.1.0/24 dport=443</code></td>
-        </tr>
-        <tr>
-          <td>input</td>
-          <td>action, protocol, src, dport, comment</td>
-          <td><code>input action=DROP protocol=tcp dport=22</code></td>
-        </tr>
-        <tr>
-          <td>portforward</td>
-          <td>ext_port*, target_ip*, target_port, protocol, ext_iface, comment</td>
-          <td><code>portforward ext_port=8080 target_ip=10.8.0.5 target_port=80 protocol=tcp</code></td>
-        </tr>
-        <tr>
-          <td>snat</td>
-          <td>src, snat_ip*, out_iface, comment</td>
-          <td><code>snat src=10.202.226.0/24 snat_ip=192.168.100.12 out_iface=ens19 comment="cluster access"</code></td>
-        </tr>
-      </tbody>
-    </table>
-    <p class="hint">* required. Other fields can be left blank, same as the "Add ___ rule" forms above.</p>
+    <form method="post" action="{{ url_for('main.import_rules') }}" enctype="multipart/form-data" class="file-import-form">
+      <div class="file-import-upload">
+        <label for="rules-import-file">Choose your rules file</label>
+        <p id="rules-import-file-help">A <code>.txt</code> file with one rule per line.</p>
+        <input id="rules-import-file" type="file" name="rules_file" accept=".txt" required aria-describedby="rules-import-file-help">
+      </div>
 
-    <ul class="hint import-help-list">
-      <li><strong>Variables:</strong> a line with just <code>NAME=value</code> defines one to reuse as <code>$NAME</code> below, e.g. <code>CLIENT_IP=10.202.226.21</code> then <code>src=$CLIENT_IP</code>.</li>
-      <li><strong>Client names:</strong> use a client's name for <code>src</code>/<code>dst</code> instead of its IP, e.g. <code>src=nurak</code>.</li>
-      <li><strong>Raw iptables lines</strong> work too — paste <code>-A FORWARD ...</code> / <code>-A INPUT ...</code> straight from a script; anything else is skipped.</li>
-    </ul>
+      <div class="file-import-format">
+        <h3>File format</h3>
+        <pre tabindex="0" aria-label="Rule syntax"><code>kind key=value key=value ...</code></pre>
+        <p>Blank lines and <code>#</code> comments are skipped. Quote values containing spaces: <code>comment="block guest wifi"</code>.</p>
+      </div>
 
-    <form method="post" action="{{ url_for('main.import_rules') }}" enctype="multipart/form-data" class="inline-form">
-      <label>File
-        <input type="file" name="rules_file" accept=".txt" required>
-      </label>
-      <div class="btn-group">
-        <button type="submit">Import</button>
-        <button type="button" class="btn" onclick="document.getElementById('import-rules-dialog').close()">Cancel</button>
+      <details class="file-import-reference">
+        <summary>Rule types &amp; examples<span>4 types</span></summary>
+        <div class="file-import-examples">
+          <section><h4>Forward <span>Traffic passing through the server</span></h4><p>Fields: action, protocol, src, dst, dport, comment</p><pre tabindex="0" aria-label="Forward rule example"><code>forward action=DROP protocol=tcp src=10.8.0.5 dst=192.168.1.0/24 dport=443</code></pre></section>
+          <section><h4>Input <span>Traffic to the server</span></h4><p>Fields: action, protocol, src, dport, comment</p><pre tabindex="0" aria-label="Input rule example"><code>input action=DROP protocol=tcp dport=22</code></pre></section>
+          <section><h4>Port forward</h4><p>Required: <strong>ext_port, target_ip</strong><br>Optional: target_port, protocol, ext_iface, comment</p><pre tabindex="0" aria-label="Port forward rule example"><code>portforward ext_port=8080 target_ip=10.8.0.5 target_port=80 protocol=tcp</code></pre></section>
+          <section><h4>SNAT <span>Source address translation</span></h4><p>Required: <strong>snat_ip</strong><br>Optional: src, out_iface, comment</p><pre tabindex="0" aria-label="SNAT rule example"><code>snat src=10.202.226.0/24 snat_ip=192.168.100.12 out_iface=ens19 comment="cluster access"</code></pre></section>
+        </div>
+      </details>
+
+      <details class="file-import-reference">
+        <summary>Variables &amp; advanced syntax</summary>
+        <ul class="file-import-tips">
+          <li><strong>Variables.</strong> Define <code>CLIENT_IP=10.202.226.21</code> on its own line, then use <code>src=$CLIENT_IP</code> in rules below it.</li>
+          <li><strong>Client names.</strong> Use a client's name instead of its IP for <code>src</code> or <code>dst</code>, for example <code>src=nurak</code>.</li>
+          <li><strong>iptables.</strong> You can also paste raw <code>-A FORWARD ...</code> and <code>-A INPUT ...</code> lines. Unsupported lines are skipped.</li>
+        </ul>
+      </details>
+
+      <div class="file-import-footer">
+        <button type="button" class="btn btn-secondary" onclick="document.getElementById('import-rules-dialog').close()">Cancel</button>
+        <button type="submit">Import rules</button>
       </div>
     </form>
   </dialog>
@@ -441,7 +436,7 @@
       <select id="rules-page-size">
         <option value="10">10</option>
         <option value="25">25</option>
-        <option value="50" selected>50</option>
+        <option value="50">50</option>
         <option value="100">100</option>
       </select>
     </label>

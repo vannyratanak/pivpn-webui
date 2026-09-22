@@ -55,37 +55,65 @@ def test_clients_endpoint_rejects_garbage_token(client):
     assert resp.status_code in (401, 422)
 
 
+def _seed_client_status_cache(rows):
+    """Test helper for db.replace_client_status_cache — fills in every
+    column with a sensible default so call sites only need to spell out
+    the fields a given test actually cares about. Each item in `rows` may
+    omit any key other than "name"."""
+    defaults = {
+        "status": "Valid", "expiration": "", "list_position": 0, "ip": None,
+        "session_real_address": None, "session_virtual_address": None,
+        "session_bytes_recv": None, "session_bytes_sent": None, "session_since": None,
+    }
+    full_rows = []
+    for i, row in enumerate(rows):
+        merged = {**defaults, "list_position": i, **row}
+        full_rows.append(merged)
+    db.replace_client_status_cache(full_rows)
+
+
 def test_clients_endpoint_returns_enriched_client_list(client, monkeypatch):
+    # GET /api/clients reads app/db.py's client_status_cache table now
+    # (see deploy/ingest_clients.py) instead of calling pivpn_ctl live —
+    # the "which clients end up in the cache at all" filtering (e.g.
+    # revoked ones dropped) is ingest-time behavior, covered by
+    # tests/test_ingest_clients.py instead.
     token = _login(client).get_json()["access_token"]
-    monkeypatch.setattr("app.api.pivpn_ctl.list_clients", lambda: [
-        {"name": "laptop-anna", "status": "Valid"},
-        {"name": "old-phone", "status": "Revoked"},
+    _seed_client_status_cache([
+        {"name": "laptop-anna", "ip": "10.8.0.2", "session_bytes_recv": "100", "session_since": "2026-09-16 10:00:00"},
     ])
-    monkeypatch.setattr("app.api.pivpn_ctl.list_client_ips", lambda: {"laptop-anna": "10.8.0.2"})
-    monkeypatch.setattr("app.api.pivpn_ctl.list_connected_clients", lambda: {"laptop-anna": {"bytes_recv": 100}})
     monkeypatch.setattr("app.api.db.get_client_block", lambda name: None)
 
     resp = client.get("/api/clients", headers=_auth_header(token))
     assert resp.status_code == 200
     body = resp.get_json()
-    # revoked clients are dropped, same as the browser Clients page
     assert [c["name"] for c in body["clients"]] == ["laptop-anna"]
     assert body["clients"][0]["ip"] == "10.8.0.2"
-    assert body["clients"][0]["session"] == {"bytes_recv": 100}
+    assert body["clients"][0]["session"]["bytes_recv"] == "100"
     assert body["connected_count"] == 1
+
+
+def test_clients_endpoint_marks_disconnected_clients_session_none(client, monkeypatch):
+    token = _login(client).get_json()["access_token"]
+    _seed_client_status_cache([{"name": "laptop-anna"}])
+    monkeypatch.setattr("app.api.db.get_client_block", lambda name: None)
+
+    resp = client.get("/api/clients", headers=_auth_header(token))
+    body = resp.get_json()
+    assert body["clients"][0]["session"] is None
+    assert body["connected_count"] == 0
 
 
 def test_client_status_endpoint_shows_status_ip_and_session(client, monkeypatch):
     # This is client_detail.html's own data source now — see
     # client-detail-page.js.
     token = _login(client).get_json()["access_token"]
-    monkeypatch.setattr("app.api.pivpn_ctl.list_clients", lambda: [
-        {"status": "Valid", "name": "laptop-anna", "expiration": "2027-01-01", "raw": ""},
+    _seed_client_status_cache([
+        {
+            "name": "laptop-anna", "expiration": "2027-01-01", "ip": "10.202.226.2",
+            "session_since": "2026-09-16 10:00:00",
+        },
     ])
-    monkeypatch.setattr("app.api.pivpn_ctl.list_client_ips", lambda: {"laptop-anna": "10.202.226.2"})
-    monkeypatch.setattr("app.api.pivpn_ctl.list_connected_clients", lambda: {
-        "laptop-anna": {"since": "2026-09-16 10:00:00"},
-    })
     monkeypatch.setattr("app.api.db.get_client_block", lambda name: None)
 
     resp = client.get("/api/clients/laptop-anna", headers=_auth_header(token))
@@ -97,34 +125,29 @@ def test_client_status_endpoint_shows_status_ip_and_session(client, monkeypatch)
     assert body["session"]["since"] == "2026-09-16 10:00:00"
 
 
-def test_client_status_uses_current_valid_row_when_history_has_duplicates(client, monkeypatch):
+def test_client_status_endpoint_matches_name_case_insensitively(client, monkeypatch):
     token = _login(client).get_json()["access_token"]
-    monkeypatch.setattr("app.api.pivpn_ctl.list_clients", lambda: [
-        {"status": "Revoked", "name": "mobile", "expiration": "2027-01-01"},
-        {"status": "Valid", "name": " mobile ", "expiration": "2029-01-01"},
-    ])
-    monkeypatch.setattr("app.api.pivpn_ctl.list_client_ips", lambda: {"mobile": "10.8.0.2"})
-    monkeypatch.setattr("app.api.pivpn_ctl.list_connected_clients", lambda: {})
+    _seed_client_status_cache([{"name": "laptop-anna"}])
     monkeypatch.setattr("app.api.db.get_client_block", lambda name: None)
-    resp = client.get("/api/clients/mobile", headers=_auth_header(token))
+
+    resp = client.get("/api/clients/Laptop-Anna", headers=_auth_header(token))
     assert resp.status_code == 200
-    assert resp.get_json()["expiration"] == "2029-01-01"
+    assert resp.get_json()["name"] == "laptop-anna"
 
 
-def test_client_status_endpoint_for_unknown_client_is_404(client, monkeypatch):
+def test_client_status_endpoint_for_unknown_client_is_404(client):
     token = _login(client).get_json()["access_token"]
-    monkeypatch.setattr("app.api.pivpn_ctl.list_clients", lambda: [])
     resp = client.get("/api/clients/ghost", headers=_auth_header(token))
     assert resp.status_code == 404
 
 
-def test_client_status_endpoint_rejects_invalid_name_before_touching_pivpn(client, monkeypatch):
+def test_client_status_endpoint_rejects_invalid_name_before_touching_the_cache(client, monkeypatch):
     token = _login(client).get_json()["access_token"]
 
-    def _boom():
-        raise AssertionError("list_clients should not be called for an invalid name")
+    def _boom(name):
+        raise AssertionError("get_client_status_cache should not be called for an invalid name")
 
-    monkeypatch.setattr("app.api.pivpn_ctl.list_clients", _boom)
+    monkeypatch.setattr("app.api.db.get_client_status_cache", _boom)
     resp = client.get("/api/clients/not valid!", headers=_auth_header(token))
     assert resp.status_code == 400
 
@@ -199,6 +222,7 @@ def test_add_client_creates_and_audits(client, monkeypatch):
     token = _login(client).get_json()["access_token"]
     calls = {}
     monkeypatch.setattr("app.api.pivpn_ctl.add_client", lambda name, passphrase=None: calls.update(name=name, passphrase=passphrase))
+    monkeypatch.setattr("app.api._refresh_client_status_cache", lambda: None)
 
     resp = client.post("/api/clients", json={"name": "laptop-anna", "passphrase": "s3cret"}, headers=_auth_header(token))
     assert resp.status_code == 201
@@ -208,6 +232,36 @@ def test_add_client_creates_and_audits(client, monkeypatch):
     from app import db
     audit = db.list_audit(limit=5)
     assert any(a["action"] == "client_add" and a["actor"] == "admin" for a in audit)
+
+
+def test_add_client_refreshes_the_client_status_cache(client, monkeypatch):
+    # GET /api/clients is now a cache read (see app/db.py's
+    # client_status_cache) — a client added through this endpoint must
+    # show up on the very next GET, not up to 10s later at the next
+    # timer tick, so add_client() has to trigger one ingest cycle itself.
+    token = _login(client).get_json()["access_token"]
+    monkeypatch.setattr("app.api.pivpn_ctl.add_client", lambda name, passphrase=None: None)
+    calls = []
+    monkeypatch.setattr("app.api._refresh_client_status_cache", lambda: calls.append(True))
+
+    resp = client.post("/api/clients", json={"name": "laptop-anna"}, headers=_auth_header(token))
+    assert resp.status_code == 201
+    assert calls == [True]
+
+
+def test_add_client_failure_does_not_refresh_the_cache(client, monkeypatch):
+    token = _login(client).get_json()["access_token"]
+
+    def _boom(name, passphrase=None):
+        raise pivpn_ctl.PivpnError("name already in use")
+
+    monkeypatch.setattr("app.api.pivpn_ctl.add_client", _boom)
+    calls = []
+    monkeypatch.setattr("app.api._refresh_client_status_cache", lambda: calls.append(True))
+
+    resp = client.post("/api/clients", json={"name": "dup"}, headers=_auth_header(token))
+    assert resp.status_code == 400
+    assert calls == []
 
 
 def test_add_client_failure_returns_400_with_message(client, monkeypatch):
@@ -225,6 +279,7 @@ def test_add_client_failure_returns_400_with_message(client, monkeypatch):
 def test_renew_client_success(client, monkeypatch):
     token = _login(client).get_json()["access_token"]
     monkeypatch.setattr("app.api.pivpn_ctl.renew_client", lambda name: None)
+    monkeypatch.setattr("app.api._refresh_client_status_cache", lambda: None)
     resp = client.post("/api/clients/laptop-anna/renew", headers=_auth_header(token))
     assert resp.status_code == 200
     assert resp.get_json() == {"renewed": "laptop-anna"}
@@ -237,6 +292,7 @@ def test_renew_client_partial_failure_is_flagged_distinctly(client, monkeypatch)
         raise pivpn_ctl.PivpnRenewPartialFailure(f"'{name}' was revoked but re-add failed.")
 
     monkeypatch.setattr("app.api.pivpn_ctl.renew_client", _boom)
+    monkeypatch.setattr("app.api._refresh_client_status_cache", lambda: None)
     resp = client.post("/api/clients/laptop-anna/renew", headers=_auth_header(token))
     assert resp.status_code == 502
     body = resp.get_json()
@@ -247,9 +303,29 @@ def test_renew_client_partial_failure_is_flagged_distinctly(client, monkeypatch)
     assert any(a["action"] == "client_renew_partial" and a["result"] == "error" for a in audit)
 
 
+def test_renew_client_partial_failure_still_refreshes_the_cache(client, monkeypatch):
+    # Deliberate asymmetry: this is an error response (502), but the old
+    # cert really is revoked now (an irreversible pivpn action already
+    # happened) — the cache must still refresh so it doesn't keep showing
+    # the now-stale expiration.
+    token = _login(client).get_json()["access_token"]
+
+    def _boom(name):
+        raise pivpn_ctl.PivpnRenewPartialFailure(f"'{name}' was revoked but re-add failed.")
+
+    monkeypatch.setattr("app.api.pivpn_ctl.renew_client", _boom)
+    calls = []
+    monkeypatch.setattr("app.api._refresh_client_status_cache", lambda: calls.append(True))
+
+    resp = client.post("/api/clients/laptop-anna/renew", headers=_auth_header(token))
+    assert resp.status_code == 502
+    assert calls == [True]
+
+
 def test_remove_client_success(client, monkeypatch):
     token = _login(client).get_json()["access_token"]
     monkeypatch.setattr("app.api.pivpn_ctl.remove_client", lambda name: None)
+    monkeypatch.setattr("app.api._refresh_client_status_cache", lambda: None)
     resp = client.delete("/api/clients/laptop-anna", headers=_auth_header(token))
     assert resp.status_code == 200
     assert resp.get_json() == {"removed": "laptop-anna"}
@@ -269,6 +345,7 @@ def test_remove_client_failure_returns_400(client, monkeypatch):
 def test_bulk_remove_clients_success(client, monkeypatch):
     token = _login(client).get_json()["access_token"]
     monkeypatch.setattr("app.api.pivpn_ctl.remove_client", lambda name: None)
+    monkeypatch.setattr("app.api._refresh_client_status_cache", lambda: None)
     resp = client.post(
         "/api/clients/bulk-remove", json={"names": ["a", "b"]}, headers=_auth_header(token)
     )
@@ -284,6 +361,7 @@ def test_bulk_remove_clients_partial_failure(client, monkeypatch):
             raise pivpn_ctl.PivpnError("no such client")
 
     monkeypatch.setattr("app.api.pivpn_ctl.remove_client", _remove)
+    monkeypatch.setattr("app.api._refresh_client_status_cache", lambda: None)
     resp = client.post(
         "/api/clients/bulk-remove", json={"names": ["a", "ghost"]}, headers=_auth_header(token)
     )
@@ -304,6 +382,7 @@ def test_import_clients_success(client, monkeypatch):
 
     token = _login(client).get_json()["access_token"]
     monkeypatch.setattr("app.api.pivpn_ctl.import_clients", lambda text: (2, []))
+    monkeypatch.setattr("app.api._refresh_client_status_cache", lambda: None)
     resp = client.post(
         "/api/clients/import",
         data={"clients_file": (io.BytesIO(b"name=a\nname=b\n"), "clients.txt")},
@@ -319,6 +398,7 @@ def test_import_clients_reports_line_errors(client, monkeypatch):
 
     token = _login(client).get_json()["access_token"]
     monkeypatch.setattr("app.api.pivpn_ctl.import_clients", lambda text: (1, ["line 2: bad name"]))
+    monkeypatch.setattr("app.api._refresh_client_status_cache", lambda: None)
     resp = client.post(
         "/api/clients/import",
         data={"clients_file": (io.BytesIO(b"name=a\nbogus\n"), "clients.txt")},
@@ -502,6 +582,105 @@ def test_client_bulk_delete_only_affects_that_clients_rules(client, monkeypatch)
 
     remaining_ids = {r["id"] for r in db.list_rules()}
     assert remaining_ids == {other}
+
+
+def test_client_reorder_rule_moves_within_that_clients_own_rules(client, monkeypatch):
+    # Not admin-only, unlike /api/firewall/rules/<id>/reorder — matches
+    # this page's own "moderator gets full rule management for one
+    # client" model.
+    token = _moderator_token(client)
+    monkeypatch.setattr(pivpn_ctl, "list_client_ips", lambda: {"laptop-anna": "10.202.226.2"})
+    monkeypatch.setattr(firewall, "run_root", lambda argv, **kwargs: "")
+    first = db.insert_rule({"kind": "forward", "action": "DROP", "protocol": "tcp", "src": "10.202.226.2", "dst": "1.1.1.1"})
+    second = db.insert_rule({"kind": "forward", "action": "DROP", "protocol": "tcp", "src": "10.202.226.2", "dst": "2.2.2.2"})
+
+    resp = client.post(
+        f"/api/clients/laptop-anna/rules/{second}/reorder",
+        json={"target_id": first, "place": "before"},
+        headers=_auth_header(token),
+    )
+    assert resp.status_code == 200
+    assert resp.get_json() == {"ok": True}
+    assert db.get_rule(second)["position"] < db.get_rule(first)["position"]
+
+
+def test_client_reorder_rule_rejects_a_different_clients_target(client, monkeypatch):
+    # The drag-and-drop UI only ever shows this client's own rows, so a
+    # target_id belonging to another client can only arrive via a crafted
+    # request — must be rejected, not used to infer that other client's
+    # rule order.
+    token = _admin_token(client)
+    monkeypatch.setattr(pivpn_ctl, "list_client_ips", lambda: {"laptop-anna": "10.202.226.2", "mac": "10.202.226.5"})
+    monkeypatch.setattr(firewall, "run_root", lambda argv, **kwargs: "")
+    mine = db.insert_rule({"kind": "forward", "action": "DROP", "protocol": "tcp", "src": "10.202.226.2"})
+    other = db.insert_rule({"kind": "forward", "action": "DROP", "protocol": "tcp", "src": "10.202.226.5"})
+    original_position = db.get_rule(mine)["position"]
+
+    resp = client.post(
+        f"/api/clients/laptop-anna/rules/{mine}/reorder",
+        json={"target_id": other, "place": "before"},
+        headers=_auth_header(token),
+    )
+    assert resp.status_code == 404
+    assert db.get_rule(mine)["position"] == original_position
+
+
+def test_client_reorder_rule_rejects_a_rule_not_belonging_to_this_client(client, monkeypatch):
+    token = _admin_token(client)
+    monkeypatch.setattr(pivpn_ctl, "list_client_ips", lambda: {"laptop-anna": "10.202.226.2", "mac": "10.202.226.5"})
+    monkeypatch.setattr(firewall, "run_root", lambda argv, **kwargs: "")
+    mine = db.insert_rule({"kind": "forward", "action": "DROP", "protocol": "tcp", "src": "10.202.226.2"})
+    other = db.insert_rule({"kind": "forward", "action": "DROP", "protocol": "tcp", "src": "10.202.226.5"})
+
+    resp = client.post(
+        f"/api/clients/laptop-anna/rules/{other}/reorder",
+        json={"target_id": mine, "place": "before"},
+        headers=_auth_header(token),
+    )
+    assert resp.status_code == 404
+
+
+def test_client_import_rules_success(client, monkeypatch):
+    import io
+
+    token = _moderator_token(client)
+    monkeypatch.setattr(pivpn_ctl, "list_client_ips", lambda: {"laptop-anna": "10.202.226.2"})
+    monkeypatch.setattr(firewall, "run_root", lambda argv, **kwargs: "")
+    regenerated = []
+    monkeypatch.setattr(firewall, "regenerate_client_script", lambda *args: regenerated.append(args))
+    resp = client.post(
+        "/api/clients/laptop-anna/rules/import",
+        data={"rules_file": (io.BytesIO(b"action=DROP protocol=tcp dst=192.168.1.0/24 dport=443\n"), "rules.txt")},
+        headers=_auth_header(token),
+    )
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body == {"added": 1, "errors": []}
+    rules = db.list_rules()
+    assert len(rules) == 1
+    assert rules[0]["src"] == "10.202.226.2"
+    assert regenerated == [("laptop-anna", "10.202.226.2")]
+
+
+def test_client_import_rules_requires_client_to_have_an_ip(client, monkeypatch):
+    import io
+
+    token = _admin_token(client)
+    monkeypatch.setattr(pivpn_ctl, "list_client_ips", lambda: {})
+    resp = client.post(
+        "/api/clients/laptop-anna/rules/import",
+        data={"rules_file": (io.BytesIO(b"action=DROP protocol=tcp\n"), "rules.txt")},
+        headers=_auth_header(token),
+    )
+    assert resp.status_code == 400
+    assert db.list_rules() == []
+
+
+def test_client_import_rules_rejects_missing_file(client, monkeypatch):
+    token = _admin_token(client)
+    monkeypatch.setattr(pivpn_ctl, "list_client_ips", lambda: {"laptop-anna": "10.202.226.2"})
+    resp = client.post("/api/clients/laptop-anna/rules/import", data={}, headers=_auth_header(token))
+    assert resp.status_code == 400
 
 
 # --- global firewall rules: admin-only, mirrors the browser's Firewall page
@@ -696,6 +875,24 @@ def test_client_sessions_relabeled_ended_session_resorts_below_more_recent_ones(
     assert names.index("recentclient") < names.index("staleclient")
 
 
+def test_client_sessions_tab_client_filter_is_exact_not_substring(client):
+    # The client detail page's own session-log tab passes client=<name> —
+    # unlike q, an exact match: "laptop" must not also pull in "laptop2".
+    from datetime import datetime, timedelta
+    now = datetime.now()
+    ts_a = (now - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
+    ts_b = (now - timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S")
+    db.insert_vpn_events([
+        (ts_a, "connected", "laptop", "10.66.66.1:1", "", None),
+        (ts_b, "connected", "laptop2", "10.66.66.1:2", "", None),
+    ])
+    token = _admin_token(client)
+    resp = client.get("/api/logs?tab=client_sessions&range=7d&client=laptop", headers=_auth_header(token))
+    assert resp.status_code == 200
+    entries = resp.get_json()["entries"]
+    assert [e["client"] for e in entries] == ["laptop"]
+
+
 def test_traffic_tab_search_matches_across_full_history(client):
     db.insert_traffic_flows([
         ("2026-09-16 10:00:00", "10.202.226.2", "1.1.1.1", None, "mobile",
@@ -705,6 +902,21 @@ def test_traffic_tab_search_matches_across_full_history(client):
     ])
     token = _admin_token(client)
     resp = client.get("/api/logs?tab=traffic&q=laptop&range=7d", headers=_auth_header(token))
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["total"] == 1
+    assert body["entries"][0]["client"] == "laptop"
+
+
+def test_traffic_tab_client_filter_is_exact_not_substring(client):
+    db.insert_traffic_flows([
+        ("2026-09-16 10:00:00", "10.202.226.2", "1.1.1.1", None, "laptop",
+         "TCP", "1234", "443", "tun0", "ens18"),
+        ("2026-09-16 10:00:05", "10.202.226.3", "2.2.2.2", None, "laptop2",
+         "TCP", "1235", "443", "tun0", "ens18"),
+    ])
+    token = _admin_token(client)
+    resp = client.get("/api/logs?tab=traffic&range=7d&client=laptop", headers=_auth_header(token))
     assert resp.status_code == 200
     body = resp.get_json()
     assert body["total"] == 1

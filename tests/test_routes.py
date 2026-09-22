@@ -29,6 +29,41 @@ def test_login_with_wrong_credentials_reshows_form(client):
     resp = client.post("/login", data={"username": "admin", "password": "wrong"})
     assert resp.status_code == 200
     assert b"Invalid username or password" in resp.data
+    assert b'id="login-error" role="alert"' in resp.data
+    assert b'value="admin"' in resp.data
+    assert b'value="wrong"' not in resp.data
+
+
+def test_login_validates_missing_fields_without_javascript(client):
+    resp = client.post("/login", data={"username": "   ", "password": ""})
+    assert resp.status_code == 200
+    assert b"Enter your username." in resp.data
+    assert b"Enter your password." in resp.data
+    assert b'aria-invalid="true"' in resp.data
+    assert b"Invalid username or password" not in resp.data
+
+
+def test_login_preserves_username_when_password_missing(client):
+    resp = client.post("/login", data={"username": "admin"})
+    assert resp.status_code == 200
+    assert b'value="admin"' in resp.data
+    assert b"Enter your password." in resp.data
+
+
+def test_login_resume_validates_password_and_restores_session(client):
+    client.post("/login", data={"username": "admin", "password": TEST_PASSWORD})
+    client.post("/account/lock")
+    page = client.get("/login")
+    assert b"Resume session" in page.data
+    assert b'name="username"' not in page.data
+    missing = client.post("/login", data={})
+    assert b"Enter your password." in missing.data
+    assert b"Enter your username." not in missing.data
+    resumed = client.post("/login", data={"password": TEST_PASSWORD})
+    assert resumed.status_code == 302
+    assert resumed.headers["Location"] == "/clients"
+    assert client.get_cookie("idle_lock") is None
+    assert client.get_cookie("html_jwt") is not None
 
 
 def test_successful_login_issues_an_html_jwt_cookie_with_an_expiry(client):
@@ -917,4 +952,3 @@ def test_logout_revokes_the_browser_bearer_token(client):
     client.get('/logout')
     resp = client.get('/api/clients', headers={'Authorization': f'Bearer {token}'})
     assert resp.status_code == 401
-

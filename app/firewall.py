@@ -998,6 +998,67 @@ def import_rules(
     return added, errors
 
 
+def import_client_rules(text: str, client_ip: str) -> tuple[int, list[str]]:
+    """Bulk-add FORWARD/DROP rules for one client — the client detail
+    page's own Import dialog. A narrower file format than import_rules()
+    above, to match this page's own narrower Add Rule dialog: every line
+    is just 'action=... protocol=... dst=... dport=... comment=...' (the
+    same fields that form has), no leading 'forward'/'input'/... kind
+    word, and no variables or raw 'iptables ...' lines.
+
+    src is always `client_ip` — never read from the file, same as the Add
+    Rule form's own src lock — so a line can't be used to add a rule for a
+    *different* client's traffic while uploaded under this one's page.
+
+    Returns (number added, list of 'line N: <error>' messages for the rest),
+    same contract as import_rules()."""
+    added = 0
+    errors = []
+    for i, raw_line in enumerate(text.splitlines(), start=1):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        try:
+            tokens = shlex.split(line)
+        except ValueError as exc:
+            errors.append(f"line {i}: {exc}")
+            continue
+        if not tokens:
+            continue
+        if tokens[0].lower() in _IMPORT_ADDERS:
+            errors.append(
+                f"line {i}: this file has a {tokens[0]!r} rule-kind prefix — "
+                "that belongs on the main Firewall Rules page's Import Rules "
+                "dialog instead. Every line here is already a forward rule "
+                "for this client, so just drop the leading word."
+            )
+            continue
+        fields: dict[str, str] = {}
+        bad_token = None
+        for tok in tokens:
+            if "=" not in tok:
+                bad_token = tok
+                break
+            key, _, value = tok.partition("=")
+            fields[key] = value
+        if bad_token is not None:
+            errors.append(f"line {i}: Expected key=value, got {bad_token!r}.")
+            continue
+        if "src" in fields:
+            errors.append(f"line {i}: 'src' can't be set here — it's always this client ({client_ip}).")
+            continue
+        try:
+            add_forward_rule(
+                action=fields.get("action"), protocol=fields.get("protocol"),
+                src=client_ip, dst=fields.get("dst", ""), dport=fields.get("dport"),
+                comment=fields.get("comment", ""),
+            )
+            added += 1
+        except FirewallError as exc:
+            errors.append(f"line {i}: {exc}")
+    return added, errors
+
+
 def set_client_block(client_name: str, client_ip: str, blocked: bool, admin_ip: str | None = None):
     """The existing-row check and the insert/delete both happen inside one
     locked transaction — a separate check-then-write has a real race: two
