@@ -1634,7 +1634,12 @@ dialog.modal code {
   background: var(--panel-2);
   border: 1px solid var(--border);
   border-radius: 4px;
-  padding: 0;
+  /* Was 0 — with no breathing room, the border sat flush against the
+     text baseline and read as an underline at a glance, especially
+     combined with color: var(--accent) below (the same blue as a real
+     link) — the Import Rules modal's code examples looked like a wall
+     of broken hyperlinks instead of code chips. */
+  padding: 1px 5px;
   color: var(--accent);
   font-size: 12px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;

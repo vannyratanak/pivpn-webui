@@ -152,6 +152,11 @@
       page = 1;
       searchInput.value = '';
       rangeSelect.value = '1h';
+      // Setting .value directly doesn't fire 'change', so the enhanced
+      // dropdown's own visible label (select-enhance.js) never resyncs on
+      // its own — see that function's own comment for why this isn't
+      // just a dispatchEvent(new Event('change')) instead.
+      if (window.syncSelectDisplay) window.syncSelectDisplay(rangeSelect);
       searchInput.placeholder = 'Search…';
       searchInput.setAttribute('aria-label', `Search ${newTabLabel}`);
       const newSection = activeSection();

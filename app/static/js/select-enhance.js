@@ -192,6 +192,26 @@ function enhanceSelect(select) {
   syncTrigger();
 }
 
+// For code that sets an enhanced <select>'s .value directly — the DOM
+// never fires a real 'change' event for a programmatic value assignment
+// (only for real user interaction), so the custom trigger button's own
+// change listener (syncTrigger, inside enhanceSelect above) never runs,
+// leaving the visible label showing whatever was selected before. Caught
+// live: logs-page.js's switchTab() resets the range <select> to '1h' on
+// every tab switch, but the dropdown kept displaying "Last 7 days" (or
+// whatever was last chosen) while the *actual* applied range silently
+// was 1h all along. Deliberately not a synthetic dispatchEvent(new
+// Event('change')) instead — that would also re-fire the select's own
+// 'change' listener (page-specific filtering/fetch logic), redundant
+// with whatever the caller's already about to do itself.
+function syncSelectDisplay(select) {
+  const trigger = select.parentElement && select.parentElement.querySelector('.custom-select-trigger');
+  if (!trigger) return;
+  const selected = select.options[select.selectedIndex];
+  trigger.textContent = selected ? selected.textContent : '';
+}
+window.syncSelectDisplay = syncSelectDisplay;
+
 // Re-points an existing <label for="select.id"> at the new visible trigger (via
 // aria-labelledby, since the trigger is a synthetic element the template never wrote a
 // matching <label for> for), and forwards label clicks to it. pivpn-webui's forms mostly
