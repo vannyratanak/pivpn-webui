@@ -52,7 +52,7 @@ if pgrep -f "python3.*agent\.py" >/dev/null 2>&1; then
 fi
 
 echo
-echo "== Step 1/5: venv + dependencies =="
+echo "== Step 1/6: venv + dependencies =="
 # Debian/Ubuntu split ensurepip out of the base Python package. Install the
 # matching venv package automatically on a fresh PiVPN agent.
 if ! python3 -c 'import ensurepip' >/dev/null 2>&1; then
@@ -75,7 +75,7 @@ pip install --upgrade pip
 pip install -r requirements.txt   # full list — `from app import pivpn_ctl` runs app/__init__.py first
 
 echo
-echo "== Step 2/5: connection config (.env) =="
+echo "== Step 2/6: connection config (.env) =="
 if [[ -f .env ]]; then
   echo ".env already exists — leaving it as-is."
   echo "(Delete it first if you want to re-enter these values.)"
@@ -114,7 +114,7 @@ else
 fi
 
 echo
-echo "== Step 3/5: installing privileged helper scripts (requires sudo) =="
+echo "== Step 3/6: installing privileged helper scripts (requires sudo) =="
 # These run ON THIS BOX — the hub only ever relays a "run this helper"
 # request over the WebSocket; the actual pivpn/iptables calls happen
 # here, same as a standalone install.
@@ -124,7 +124,7 @@ sudo install -m 0750 -o root -g root deploy/pivpn-webui-routes-helper.sh /usr/lo
 sudo install -m 0750 -o root -g root deploy/pivpn-webui-client-script-helper.sh /usr/local/sbin/pivpn-webui-client-script-helper.sh
 
 echo
-echo "== Step 4/5: sudoers grant (narrower than the standalone/hub one — no Flask/CD on this box) =="
+echo "== Step 4/6: sudoers grant (narrower than the standalone/hub one — no Flask/CD on this box) =="
 CURRENT_USER="$(whoami)"
 SUDOERS_TMP="$(mktemp)"
 sed -e "s/__USER__/${CURRENT_USER}/g" deploy/sudoers-pivpn-webui-agent.template > "$SUDOERS_TMP"
@@ -133,7 +133,25 @@ sudo install -m 0440 -o root -g root "$SUDOERS_TMP" /etc/sudoers.d/pivpn-webui-a
 rm -f "$SUDOERS_TMP"
 
 echo
-echo "== Step 5/5: installing + starting the agent systemd service =="
+echo "== Step 5/6: installing CRL permission watcher =="
+# PiVPN's own removeOVPN.sh does `cp -a .../pki/crl.pem /etc/openvpn/crl.pem`
+# on every revoke (which Renew also triggers, via revoke+reissue) — `-a`
+# preserves Easy-RSA's restrictive 0600 root:root source permissions, which
+# the unprivileged `openvpn` daemon can't read, silently breaking every
+# client's TLS handshake (`VERIFY ERROR: CRL not loaded`) until something
+# re-chmods it. This box is where that file actually lives (the hub never
+# has a local /etc/openvpn/crl.pem at all — see setup.sh's HUB_ONLY_INSTALL
+# handling), so — unlike the standalone/hub setup this was first added
+# to — this belongs here, not there. Missing here meant every hub/agent
+# split deployment had zero protection against this, the same live bug
+# that hit .12 on 2026-08-20 (see the .service file's own comment).
+sudo install -m 0644 deploy/fix-crl-perms.service /etc/systemd/system/fix-crl-perms.service
+sudo install -m 0644 deploy/fix-crl-perms.path /etc/systemd/system/fix-crl-perms.path
+sudo systemctl daemon-reload
+sudo systemctl enable --now fix-crl-perms.path
+
+echo
+echo "== Step 6/6: installing + starting the agent systemd service =="
 SERVICE_TMP="$(mktemp)"
 sed -e "s/__USER__/${CURRENT_USER}/g" -e "s#__APP_DIR__#${APP_DIR}#g" \
   deploy/pivpn-webui-agent.service.template > "$SERVICE_TMP"
