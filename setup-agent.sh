@@ -84,14 +84,28 @@ else
   read -rp "AGENT_SERVER_ID (from 'manage_servers.py register' on the hub): " AGENT_SERVER_ID
   read -rsp "AGENT_TOKEN (shown once at registration time — paste it now): " AGENT_TOKEN
   echo
+  # `read` never expands `~` the way a shell parsing a command argument
+  # does — a typed `~/foo` is stored as the literal 2 characters `~/foo`,
+  # and neither .env nor Python's ssl module (which reads these paths
+  # verbatim, see agent.py's _build_tls_context) expand it either. Hit
+  # live: HUB_TLS_CERT=~/pivpn-webui/instance/hub-gateway.crt landed in
+  # .env exactly like that, and agent.py failed with "[Errno 2] No such
+  # file or directory" trying to open a literal `~` directory that never
+  # existed. Expanding any leading `~` to $HOME right after each read
+  # fixes this regardless of what the user types, instead of relying on
+  # everyone remembering to type an absolute path.
   read -rp "Path to the hub's copied hub-gateway.crt, if HUB_URL is wss:// (blank if ws://): " HUB_TLS_CERT
+  HUB_TLS_CERT="${HUB_TLS_CERT/#\~/$HOME}"
   read -rp "Path to this agent's own .crt, if the hub uses mutual TLS (blank to skip): " AGENT_TLS_CERT
+  AGENT_TLS_CERT="${AGENT_TLS_CERT/#\~/$HOME}"
   AGENT_TLS_KEY=""
   if [[ -n "$AGENT_TLS_CERT" ]]; then
     read -rp "Path to this agent's own .key: " AGENT_TLS_KEY
+    AGENT_TLS_KEY="${AGENT_TLS_KEY/#\~/$HOME}"
   fi
   read -rp "Path PiVPN writes .ovpn files to [$HOME/ovpns]: " OVPN_DIR
   OVPN_DIR="${OVPN_DIR:-$HOME/ovpns}"
+  OVPN_DIR="${OVPN_DIR/#\~/$HOME}"
   read -rp "OpenVPN subnet, first 3 octets [10.8.0]: " SUBNET_BASE
   SUBNET_BASE="${SUBNET_BASE:-10.8.0}"
 

@@ -108,6 +108,10 @@ unset ADMIN_PASSWORD ADMIN_PASSWORD2
 
 read -rp "Path PiVPN writes .ovpn files to [$HOME/ovpns]: " OVPN_DIR
 OVPN_DIR="${OVPN_DIR:-$HOME/ovpns}"
+# `read` never expands a typed `~` (only a shell parsing a command
+# argument does) — same class of bug found live in setup-agent.sh's TLS
+# cert path prompts, fixed there the same way.
+OVPN_DIR="${OVPN_DIR/#\~/$HOME}"
 
 read -rp "OpenVPN subnet, first 3 octets [10.8.0]: " SUBNET_BASE
 SUBNET_BASE="${SUBNET_BASE:-10.8.0}"
