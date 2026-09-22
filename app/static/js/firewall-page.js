@@ -124,6 +124,41 @@ document.addEventListener('DOMContentLoaded', () => {
     closeGroup();
   }
 
+  // Optimistic in-place patch for a toggle — no GET /api/firewall/rules/<id>
+  // exists to re-fetch just this one row, so this uses what we already
+  // know: enabled flips to the opposite of its pre-click state, and
+  // toggling a rule always makes it Unsaved relative to whatever's on
+  // disk (the one inaccuracy: toggling back to its original state before
+  // ever saving would still show Unsaved rather than reverting to Saved —
+  // self-corrects on the next Apply Rules/Save Rules or page reload, and
+  // is a much smaller cost than re-rendering — and losing pagination/
+  // filter/drag-order DOM state on — the entire table for one row).
+  function updateRuleRowInPlace(row, enabled) {
+    row.classList.toggle('disabled-row', !enabled);
+    const toggleBtn = row.querySelector('[data-action="toggle"]');
+    if (toggleBtn) {
+      toggleBtn.textContent = enabled ? 'Disable' : 'Enable';
+      toggleBtn.classList.toggle('btn-warn', enabled);
+      toggleBtn.classList.toggle('btn-ok', !enabled);
+    }
+    const savedCell = row.querySelector('.saved-yes, .saved-no');
+    if (savedCell) {
+      savedCell.textContent = 'Unsaved';
+      savedCell.classList.remove('saved-yes');
+      savedCell.classList.add('saved-no');
+    }
+    if (saveRulesForm) saveRulesForm.hidden = false;
+  }
+
+  function removeRuleRow(row) {
+    row.remove();
+    updateDividerVisibility();
+    updateEmptyClientMessage();
+    if (rulesPager) rulesPager.refresh();
+    if (saveRulesForm) saveRulesForm.hidden = !tbody.querySelector('.saved-no');
+    tbody.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
   function loadRules(showSkeletonWhileLoading) {
     if (showSkeletonWhileLoading) tbody.innerHTML = skeletonRowHtml();
     return ApiClient.call('/api/firewall/rules')
@@ -172,17 +207,19 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!btn) return;
     const ruleId = btn.dataset.ruleId;
 
+    const row = btn.closest('tr');
     if (btn.dataset.action === 'toggle') {
+      const currentlyEnabled = !row.classList.contains('disabled-row');
       ApiClient.withBusy(btn, ApiClient.call(`/api/firewall/rules/${ruleId}/toggle`, { method: 'POST' })
-        .then((resp) => resp.ok ? loadRules() : Promise.reject()))
-        .catch(() => showRowError(btn.closest('tr'), `Could not toggle rule #${ruleId}.`));
+        .then((resp) => resp.ok ? updateRuleRowInPlace(row, !currentlyEnabled) : Promise.reject()))
+        .catch(() => showRowError(row, `Could not toggle rule #${ruleId}.`));
       return;
     }
     if (btn.dataset.action === 'delete') {
       window.askConfirm('Delete this rule?', 'Delete', () => {
         ApiClient.withBusy(btn, ApiClient.call(`/api/firewall/rules/${ruleId}`, { method: 'DELETE' })
-          .then((resp) => resp.ok ? loadRules() : Promise.reject()))
-          .catch(() => showRowError(btn.closest('tr'), `Could not delete rule #${ruleId}.`));
+          .then((resp) => resp.ok ? removeRuleRow(row) : Promise.reject()))
+          .catch(() => showRowError(row, `Could not delete rule #${ruleId}.`));
       });
     }
   });

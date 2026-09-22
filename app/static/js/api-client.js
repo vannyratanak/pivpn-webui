@@ -104,13 +104,22 @@ const ApiClient = (() => {
     // suffix is an enhancement, not the whole fix.
     const canRewriteText = el.children.length === 0 && el.textContent.trim();
     const original = el.textContent;
+    const busyText = original + '…';
     el.disabled = true;
     el.classList.add('is-busy');
-    if (canRewriteText) el.textContent = original + '…';
+    if (canRewriteText) el.textContent = busyText;
     return promise.finally(() => {
       el.disabled = false;
       el.classList.remove('is-busy');
-      if (canRewriteText) el.textContent = original;
+      // Only strip the "…" back off if nothing else changed the label
+      // while the request was in flight. Some success handlers relabel
+      // the very button that's busy — Block becoming "Unblock", Disable
+      // becoming "Enable" — and that runs *before* this finally(), so a
+      // blind restore-to-the-pre-click text would silently clobber that
+      // legitimate change back to the wrong, stale label. Caught live:
+      // Block succeeded, the row correctly showed blocked, but the
+      // button still read "Block" instead of "Unblock" afterward.
+      if (canRewriteText && el.textContent === busyText) el.textContent = original;
     });
   }
 

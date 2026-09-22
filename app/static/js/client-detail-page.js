@@ -44,6 +44,24 @@ document.addEventListener('DOMContentLoaded', () => {
     return '<span class="skeleton-bar"></span><span class="skeleton-bar"></span><span class="skeleton-bar"></span>';
   }
 
+  // clients-page.js's own GET /api/clients response already has
+  // everything this page's own GET /api/clients/<name> would return —
+  // reading what it cached in sessionStorage right before this
+  // navigation (see that file's own comment on DETAIL_CACHE_KEY) skips
+  // this page's skeleton-then-fetch entirely for the common "clicked a
+  // client's name from the list" path, without ever trusting it as the
+  // final answer — loadClient() below still always fetches fresh right
+  // after, this only affects what's on screen for that first moment.
+  const DETAIL_CACHE_KEY = 'pivpn_webui_client_cache';
+  function getCachedClient() {
+    try {
+      const raw = sessionStorage.getItem(DETAIL_CACHE_KEY);
+      return raw ? JSON.parse(raw)[name] || null : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
   function renderMeta(c) {
     clientIp = c.ip;
     clientBlocked = !!c.blocked;
@@ -71,8 +89,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  function loadClient() {
-    metaRow.innerHTML = metaSkeletonHtml();
+  function loadClient(showSkeletonWhileLoading) {
+    // Only on the very first load, not the background poll below — that
+    // one already has real content on screen, and flashing it back to
+    // skeleton bars every 10 seconds would read as far more disruptive
+    // than the thing it's meant to fix.
+    if (showSkeletonWhileLoading) {
+      const cached = getCachedClient();
+      if (cached) renderMeta(cached);
+      else metaRow.innerHTML = metaSkeletonHtml();
+    }
     return ApiClient.call(`/api/clients/${encodeURIComponent(name)}`)
       .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data })))
       .then(({ ok, data }) => {
@@ -201,6 +227,38 @@ document.addEventListener('DOMContentLoaded', () => {
     updateBulkUi();
   }
 
+  // Optimistic in-place patch for a toggle — same reasoning as
+  // firewall-page.js's own updateRuleRowInPlace: no GET for just this
+  // one rule exists, so this uses what's already known (enabled flips,
+  // toggling always makes a rule Unsaved relative to disk) rather than
+  // re-fetching and rebuilding the whole table for a single row.
+  function updateRuleRowInPlace(row, enabled) {
+    row.classList.toggle('disabled-row', !enabled);
+    const toggleBtn = row.querySelector('[data-action="toggle"]');
+    if (toggleBtn) {
+      toggleBtn.textContent = enabled ? 'Disable' : 'Enable';
+      toggleBtn.classList.toggle('btn-warn', enabled);
+      toggleBtn.classList.toggle('btn-ok', !enabled);
+    }
+    const savedCell = row.querySelector('.saved-yes, .saved-no');
+    if (savedCell) {
+      savedCell.textContent = 'Unsaved';
+      savedCell.classList.remove('saved-yes');
+      savedCell.classList.add('saved-no');
+    }
+    saveRulesBtn.hidden = false;
+  }
+
+  function removeRuleRow(row) {
+    row.remove();
+    if (!rulesTbody.querySelector('tr:not(.empty-row)')) {
+      rulesTbody.innerHTML = '<tr class="empty-row"><td colspan="7" class="empty">No rules scoped to this client yet.</td></tr>';
+    }
+    if (rulesPager) rulesPager.refresh();
+    saveRulesBtn.hidden = !rulesTbody.querySelector('.saved-no');
+    updateBulkUi();
+  }
+
   function loadRules(showSkeletonWhileLoading) {
     if (showSkeletonWhileLoading) rulesTbody.innerHTML = skeletonRowHtml();
     return ApiClient.call(`/api/clients/${encodeURIComponent(name)}/rules`)
@@ -224,16 +282,18 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!btn) return;
     const ruleId = btn.dataset.ruleId;
 
+    const row = btn.closest('tr');
     if (btn.dataset.action === 'toggle') {
+      const currentlyEnabled = !row.classList.contains('disabled-row');
       ApiClient.withBusy(btn, ApiClient.call(`/api/clients/${encodeURIComponent(name)}/rules/${ruleId}/toggle`, { method: 'POST' })
-        .then((resp) => (resp.ok ? loadRules() : Promise.reject())))
+        .then((resp) => (resp.ok ? updateRuleRowInPlace(row, !currentlyEnabled) : Promise.reject())))
         .catch(() => showToast(`Could not toggle rule #${ruleId}.`));
       return;
     }
     if (btn.dataset.action === 'delete') {
       window.askConfirm('Delete this rule?', 'Delete', () => {
         ApiClient.withBusy(btn, ApiClient.call(`/api/clients/${encodeURIComponent(name)}/rules/${ruleId}`, { method: 'DELETE' })
-          .then((resp) => (resp.ok ? loadRules() : Promise.reject())))
+          .then((resp) => (resp.ok ? removeRuleRow(row) : Promise.reject())))
           .catch(() => showToast(`Could not delete rule #${ruleId}.`));
       });
     }
@@ -335,6 +395,19 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  loadClient();
+  // Same reasoning as clients-page.js's own poll: this client's Active/
+  // Inactive status can change with no action on this page at all (they
+  // connect/disconnect their own VPN client), so it shouldn't need a
+  // manual reload to show current — the meta strip is small enough that
+  // loadClient()'s existing full-refresh is fine to reuse here (unlike
+  // the rules table, there's no pagination/filter state a rebuild could
+  // clobber).
+  const POLL_INTERVAL_MS = 10 * 1000;
+  setInterval(() => {
+    if (document.visibilityState === 'hidden') return;
+    loadClient();
+  }, POLL_INTERVAL_MS);
+
+  loadClient(true);
   loadRules(true);
 });

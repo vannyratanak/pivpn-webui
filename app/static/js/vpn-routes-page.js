@@ -74,6 +74,31 @@ document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => notice.remove(), 3200);
   }
 
+  // Removing/adding one route never changes any *other* row's own data
+  // (unlike Clients' Renew/Block, nothing here needs a re-fetch to know
+  // what changed) — direct DOM removal/insertion avoids rebuilding the
+  // whole table (and the pagination/filter flicker that comes with it)
+  // for a single-row change.
+  function removeRow(row) {
+    row.remove();
+    if (!tbody.querySelector('tr:not(.empty-row)')) {
+      tbody.innerHTML = '<tr class="empty-row"><td colspan="4" class="empty">No extra routes pushed yet (VPN clients only reach the VPN’s own subnet).</td></tr>';
+    }
+    if (routesPager) routesPager.refresh();
+  }
+
+  function insertRow(r) {
+    const emptyRow = tbody.querySelector('.empty-row');
+    if (emptyRow) emptyRow.remove();
+    tbody.insertAdjacentHTML('beforeend', rowHtml(r));
+    if (routesPager) {
+      routesPager.refresh();
+    } else {
+      routesPager = attachPagination('#routes-tbody', 'tr:not(.empty-row)', 'routes-page-size', 'routes-pagination');
+      attachLogFilter('routes-filter', '#routes-tbody', 'tr:not(.empty-row)', '#routes-table thead th:not(:last-child)', () => routesPager && routesPager.refresh());
+    }
+  }
+
   tbody.addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-action="remove"]');
     if (!btn) return;
@@ -88,7 +113,7 @@ document.addEventListener('DOMContentLoaded', () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ network, netmask }),
         })
-          .then((resp) => resp.ok ? loadRoutes() : Promise.reject()))
+          .then((resp) => resp.ok ? removeRow(row) : Promise.reject()))
           .catch(() => showRowError(row, `Could not remove ${network}/${netmask}.`));
       },
     );
@@ -110,7 +135,7 @@ document.addEventListener('DOMContentLoaded', () => {
           if (!ok) { showRowError(tbody, data.error || `Could not push ${network}/${netmask}.`); return; }
           document.getElementById('add-route-dialog').close();
           addForm.reset();
-          loadRoutes();
+          insertRow({ network, netmask, managed: true });
         });
     });
   }

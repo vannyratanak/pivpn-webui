@@ -10,6 +10,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const countHint = document.querySelector('.card-header-title-group .hint');
   const addForm = document.querySelector('#add-client-dialog form');
   let clientsPager = null;
+  let totalCount = 0;
+  let connectedCount = 0;
 
   function escapeHtml(value) {
     const div = document.createElement('div');
@@ -54,13 +56,107 @@ document.addEventListener('DOMContentLoaded', () => {
     return `<tr class="skeleton-row">${cells}</tr>`.repeat(6);
   }
 
-  function render(clients, connectedCount) {
+  function updateCountHint() {
+    if (countHint) countHint.textContent = `${connectedCount} connected / ${totalCount} total`;
+  }
+
+  // Clicking a client's name here full-page-navigates to /clients/<name>
+  // — a real browser navigation, not an in-app route change, so nothing
+  // in memory survives it. This is how client-detail-page.js still gets
+  // an instant first render instead of showing its own skeleton and
+  // re-fetching data this page already just fetched: sessionStorage
+  // (survives the navigation, cleared with the tab) carries the last
+  // list response over; the detail page still confirms it with its own
+  // background fetch right after, this is only for the *first* paint.
+  const DETAIL_CACHE_KEY = 'pivpn_webui_client_cache';
+  function cacheForDetailPage(clients) {
+    try {
+      const byName = {};
+      clients.forEach((c) => { byName[c.name] = c; });
+      sessionStorage.setItem(DETAIL_CACHE_KEY, JSON.stringify(byName));
+    } catch (e) {
+      // Private-browsing quota or storage disabled — the detail page
+      // just falls back to its own fetch+skeleton, same as before this
+      // existed. Never worth failing the actual page load over.
+    }
+  }
+
+  // Applies fresh data to an existing row's cells in place, rather than
+  // replacing the <tr> node — outerHTML-replacing (or a full tbody
+  // rebuild) would discard whatever inline style attachPagination/
+  // attachLogFilter had already set on it (they hide rows by toggling
+  // style.display, not by removing them), silently breaking pagination/
+  // search state on that row until the next full reload.
+  function updateRowInPlace(row, c) {
+    row.classList.toggle('blocked-row', !!c.blocked);
+    const cells = row.children;
+    cells[2].textContent = c.status;
+    cells[3].textContent = c.expiration;
+    cells[4].textContent = c.ip || '—';
+    cells[5].innerHTML = c.session
+      ? '<span class="badge badge-connected">connected</span>'
+      : '<span class="badge badge-inactive">inactive</span>';
+    const blockBtn = row.querySelector('[data-action="block"]');
+    if (blockBtn) {
+      blockBtn.textContent = c.blocked ? 'Unblock' : 'Block';
+      blockBtn.classList.toggle('btn-ok', !!c.blocked);
+      blockBtn.classList.toggle('btn-warn', !c.blocked);
+    }
+  }
+
+  // Re-fetches just this one client (not the whole list) and patches its
+  // row in place — see updateRowInPlace's own comment for why a full
+  // loadClients() after every Renew/Block used to make the entire table
+  // flicker on every single-row action, which is what this whole change
+  // exists to avoid.
+  function refreshRow(row, name) {
+    return ApiClient.call(`/api/clients/${encodeURIComponent(name)}`)
+      .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data })))
+      .then(({ ok, data }) => {
+        if (ok) updateRowInPlace(row, data);
+      });
+  }
+
+  function removeRow(row) {
+    const wasConnected = !!row.querySelector('.badge-connected');
+    row.remove();
+    totalCount = Math.max(0, totalCount - 1);
+    if (wasConnected) connectedCount = Math.max(0, connectedCount - 1);
+    updateCountHint();
+    if (!totalCount) {
+      tbody.innerHTML = '<tr class="empty-row"><td colspan="7" class="empty">No clients found (or `pivpn list` returned nothing parseable — check the server logs).</td></tr>';
+    }
+    if (clientsPager) clientsPager.refresh();
+  }
+
+  // Inserts a newly-added client's row without touching any existing
+  // row — same "don't refresh the whole table for a single change"
+  // reasoning as updateRowInPlace/removeRow above.
+  function insertRow(c) {
+    const emptyRow = tbody.querySelector('.empty-row');
+    if (emptyRow) emptyRow.remove();
+    tbody.insertAdjacentHTML('beforeend', rowHtml(c));
+    totalCount += 1;
+    if (c.session) connectedCount += 1;
+    updateCountHint();
+    if (clientsPager) {
+      clientsPager.refresh();
+    } else {
+      clientsPager = attachPagination('#clients-tbody', 'tr:not(.empty-row)', 'clients-page-size', 'clients-pagination');
+      attachLogFilter('clients-filter', '#clients-tbody', 'tr:not(.empty-row)', '#clients-table thead th:not(:first-child):not(:last-child)', () => clientsPager && clientsPager.refresh());
+    }
+  }
+
+  function render(clients, connectedCountArg) {
+    totalCount = clients.length;
+    connectedCount = connectedCountArg;
     if (!clients.length) {
       tbody.innerHTML = '<tr class="empty-row"><td colspan="7" class="empty">No clients found (or `pivpn list` returned nothing parseable — check the server logs).</td></tr>';
     } else {
       tbody.innerHTML = clients.map(rowHtml).join('');
     }
-    if (countHint) countHint.textContent = `${connectedCount} connected / ${clients.length} total`;
+    updateCountHint();
+    cacheForDetailPage(clients);
 
     if (clientsPager) {
       clientsPager.refresh();
@@ -138,7 +234,7 @@ document.addEventListener('DOMContentLoaded', () => {
         'Renew',
         () => {
           ApiClient.withBusy(btn, ApiClient.call(`/api/clients/${encodeURIComponent(name)}/renew`, { method: 'POST' })
-            .then((resp) => resp.ok ? loadClients() : Promise.reject()))
+            .then((resp) => resp.ok ? refreshRow(row, name) : Promise.reject()))
             .catch(() => showRowError(row, `Could not renew ${name}.`));
         },
       );
@@ -152,7 +248,7 @@ document.addEventListener('DOMContentLoaded', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ blocked: nowBlocked }),
       })
-        .then((resp) => resp.ok ? loadClients() : Promise.reject()))
+        .then((resp) => resp.ok ? refreshRow(row, name) : Promise.reject()))
         .catch(() => showRowError(row, `Could not ${nowBlocked ? 'block' : 'unblock'} ${name}.`));
       return;
     }
@@ -160,7 +256,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (action === 'remove') {
       window.askConfirm(`Permanently remove ${name}? This cannot be undone.`, 'Remove', () => {
         ApiClient.withBusy(btn, ApiClient.call(`/api/clients/${encodeURIComponent(name)}`, { method: 'DELETE' })
-          .then((resp) => resp.ok ? loadClients() : Promise.reject()))
+          .then((resp) => resp.ok ? removeRow(row) : Promise.reject()))
           .catch(() => showRowError(row, `Could not remove ${name}.`));
       });
     }
@@ -182,7 +278,15 @@ document.addEventListener('DOMContentLoaded', () => {
           if (!ok) { showRowError(tbody, data.error || `Could not create ${name}.`); return; }
           document.getElementById('add-client-dialog').close();
           addForm.reset();
-          loadClients();
+          ApiClient.call(`/api/clients/${encodeURIComponent(name)}`)
+            .then((resp) => (resp.ok ? resp.json() : Promise.reject()))
+            .then((c) => insertRow(c))
+            // The add itself already succeeded — this second fetch is
+            // just to render its row without a full reload; if it fails
+            // (e.g. a slow hub round-trip), fall back to the one case
+            // that still needs a full list refresh rather than leaving
+            // the new client invisible until the next manual reload.
+            .catch(() => loadClients());
         });
     });
   }
@@ -235,5 +339,32 @@ document.addEventListener('DOMContentLoaded', () => {
       });
   };
 
+  // A client's own connection status can change with no admin action at
+  // all (they connect/disconnect their VPN client on their own device) —
+  // without this, "Session" only ever updated on a manual reload or as a
+  // side effect of clicking something else on this page, which read as
+  // stale/wrong for a status column. Patches every row in place (same
+  // updateRowInPlace as the action handlers above), never a full
+  // tbody rebuild, so this can't reintroduce the whole-table flicker.
+  const POLL_INTERVAL_MS = 10 * 1000;
+  function pollClients() {
+    if (document.visibilityState === 'hidden') return; // no point paying for a hub round-trip nobody's looking at
+    ApiClient.call('/api/clients')
+      .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data })))
+      .then(({ ok, data }) => {
+        if (!ok) return; // a background poll failing silently is correct here — loadClients()'s own error path already covers a real failed *initial* load
+        totalCount = data.clients.length;
+        connectedCount = data.connected_count;
+        updateCountHint();
+        cacheForDetailPage(data.clients);
+        const byName = new Map(data.clients.map((c) => [c.name, c]));
+        tbody.querySelectorAll('tr[data-client-name]').forEach((row) => {
+          const fresh = byName.get(row.dataset.clientName);
+          if (fresh) updateRowInPlace(row, fresh);
+        });
+      });
+  }
+
   loadClients(true);
+  setInterval(pollClients, POLL_INTERVAL_MS);
 });
