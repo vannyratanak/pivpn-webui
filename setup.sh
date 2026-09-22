@@ -57,13 +57,21 @@ fi
 sudo systemctl enable --now postgresql
 
 DB_HOST="localhost"
-DB_NAME="pivpn_webui"
-DB_USER="pivpn_webui_app"
-DB_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"
 
-# Re-running this script always issues a fresh DB password here, same as
-# it always regenerates SECRET_KEY/admin credentials below — ALTER ROLE
-# if this role already exists (a previous run of this same script),
+read -rp "Database name [pivpn_webui]: " DB_NAME
+DB_NAME="${DB_NAME:-pivpn_webui}"
+
+read -rp "Database user [pivpn_webui_app]: " DB_USER
+DB_USER="${DB_USER:-pivpn_webui_app}"
+
+read -rsp "Database password [press Enter to generate a random one]: " DB_PASSWORD
+echo
+DB_PASSWORD="${DB_PASSWORD:-$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')}"
+
+# Re-running this script always issues a fresh DB password here (whatever
+# was just typed above, or a freshly generated one if left blank), same
+# as it always regenerates SECRET_KEY/admin credentials below — ALTER
+# ROLE if this role already exists (a previous run of this same script),
 # CREATE ROLE if it doesn't (first run), so .env's value is guaranteed
 # correct either way without needing to know which case this is first.
 sudo -u postgres psql -v ON_ERROR_STOP=1 -c \
