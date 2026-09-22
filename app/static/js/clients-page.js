@@ -22,8 +22,8 @@ document.addEventListener('DOMContentLoaded', () => {
   function rowHtml(c) {
     const blockedClass = c.blocked ? ' class="blocked-row"' : '';
     const sessionBadge = c.session
-      ? '<span class="badge badge-connected">connected</span>'
-      : '<span class="badge badge-inactive">inactive</span>';
+      ? '<span class="badge badge-connected">online</span>'
+      : '<span class="badge badge-inactive">offline</span>';
     const blockLabel = c.blocked ? 'Unblock' : 'Block';
     const blockBtnClass = c.blocked ? 'btn-ok' : 'btn-warn';
     const name = escapeHtml(c.name);
@@ -94,8 +94,8 @@ document.addEventListener('DOMContentLoaded', () => {
     cells[3].textContent = c.expiration;
     cells[4].textContent = c.ip || '—';
     cells[5].innerHTML = c.session
-      ? '<span class="badge badge-connected">connected</span>'
-      : '<span class="badge badge-inactive">inactive</span>';
+      ? '<span class="badge badge-connected">online</span>'
+      : '<span class="badge badge-inactive">offline</span>';
     const blockBtn = row.querySelector('[data-action="block"]');
     if (blockBtn) {
       blockBtn.textContent = c.blocked ? 'Unblock' : 'Block';
@@ -203,7 +203,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
   tbody.addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-action]');
-    if (!btn) return;
+    if (!btn) {
+      // Row-to-detail navigation — anywhere in the row except the
+      // Actions cell (handled above, via the early return once `btn` is
+      // found) and the checkbox (its own click target, for bulk-select)
+      // or the name <a> itself (already a real link — leaving its click
+      // alone means Cmd/Ctrl/middle-click still open a new tab the
+      // normal way, which a synthetic navigate-on-click here would break).
+      if (e.target.closest('input[type="checkbox"]') || e.target.closest('a')) return;
+      const navRow = e.target.closest('tr[data-client-name]');
+      if (navRow) window.location.href = `/clients/${encodeURIComponent(navRow.dataset.clientName)}`;
+      return;
+    }
     const row = btn.closest('tr');
     const name = row.dataset.clientName;
     const action = btn.dataset.action;

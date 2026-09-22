@@ -69,7 +69,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const blockedSvg = '<svg class="cert-icon cert-icon-blocked" aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><line x1="9.5" y1="9.5" x2="14.5" y2="14.5"/><line x1="14.5" y1="9.5" x2="9.5" y2="14.5"/></svg>';
     const sep = '<span class="meta-sep" aria-hidden="true">&middot;</span>';
     const parts = [
-      `<span class="status-indicator ${c.session ? 'status-indicator-connected' : ''}"><span class="status-dot ${c.session ? 'status-dot-connected' : ''}" aria-hidden="true"></span>${c.session ? 'Active' : 'Inactive'}</span>`,
+      `<span class="status-indicator ${c.session ? 'status-indicator-connected' : ''}"><span class="status-dot ${c.session ? 'status-dot-connected' : ''}" aria-hidden="true"></span>${c.session ? 'Online' : 'Offline'}</span>`,
       `<span class="cert-status">${c.blocked ? blockedSvg : validSvg}${escapeHtml(c.status)}${c.blocked ? ' (blocked)' : ''}</span>`,
       `<span>Expires ${escapeHtml(c.expiration || '—')}</span>`,
       `<span>${escapeHtml(c.ip || '—')}</span>`,

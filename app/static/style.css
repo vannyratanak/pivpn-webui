@@ -1511,6 +1511,17 @@ th {
 }
 
 .blocked-row { background: rgba(var(--danger-rgb), 0.08); }
+
+/* Clients table rows navigate to that client's detail page from a click
+   anywhere in the row (see clients-page.js) — except the checkbox and
+   Actions cells, which already have their own click behavior (bulk-
+   select, per-action buttons). Pointer cursor everywhere else signals
+   that, same as it already does natively over the checkbox/buttons. */
+#clients-table tbody tr[data-client-name] { cursor: pointer; }
+#clients-table tbody tr[data-client-name] .actions,
+#clients-table tbody tr[data-client-name] input[type="checkbox"] {
+  cursor: default;
+}
 /* A DB-tracked rule discover_cli_rules() couldn't find live anymore (see
    routes.py's firewall_rules() and the flash-warning it raises) —
    highlights the specific row(s) the warning is talking about, since the
