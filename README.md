@@ -909,13 +909,15 @@ Because localStorage is accessible to page scripts, protecting against XSS
 remains essential. A new login invalidates earlier tokens for that account; logging out also
 revokes the bearer tokens issued during that session.
 
-After **90 seconds without activity** (`IDLE_TIMEOUT_MINUTES=1.5`), the browser
-returns to login. Activity extends that deadline through periodic
+After **15 minutes without activity** (`IDLE_TIMEOUT_MINUTES`, default `15`),
+the browser returns to login. Activity extends that deadline through periodic
 heartbeats, and activity in another tab counts too. A countdown appears in
 the last 10 seconds before idle logout; ordinary bearer-token refresh does not
 trigger a logout warning. The server also rejects browser cookies whose
 last recorded activity has exceeded the idle window. `SESSION_LIFETIME_HOURS`
-controls the cookie's longer sliding expiry.
+controls the cookie's longer sliding expiry. For fast manual testing, a
+short value works too — e.g. `IDLE_TIMEOUT_MINUTES=1.5` for a 90-second
+window — but leave it at the 15-minute default in production.
 
 ## Known limitations / things to check
 

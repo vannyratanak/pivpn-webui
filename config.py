@@ -27,9 +27,10 @@ SESSION_LIFETIME_HOURS = int(os.environ.get("SESSION_LIFETIME_HOURS", "8"))
 # static/js/idle-timeout.js). A request alone no longer proves activity
 # now that most pages fetch their data via JS instead of full navigations.
 # Browser inactivity window. A fractional minute is allowed so installations
-# can use short policies such as 90 seconds without a separate unit or timer.
-# The default is 90 seconds; API JWT expiry remains independent below.
-IDLE_TIMEOUT_MINUTES = float(os.environ.get("IDLE_TIMEOUT_MINUTES", "1.5"))
+# can use short policies (e.g. "90" seconds via IDLE_TIMEOUT_MINUTES=1.5) for
+# testing without a separate unit or timer. Default is 15 minutes; API JWT
+# expiry remains independent below.
+IDLE_TIMEOUT_MINUTES = float(os.environ.get("IDLE_TIMEOUT_MINUTES", "15"))
 
 # JWT for the API (app/api.py) — a separate credential from the browser's
 # session cookie above, for scripts/other systems calling this app without
