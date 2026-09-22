@@ -19,6 +19,23 @@ if ! command -v pivpn >/dev/null 2>&1; then
   echo "Warning: 'pivpn' not found on PATH. Client management won't work until it is." >&2
 fi
 
+# Debian/Ubuntu intentionally split venv/ensurepip out of the base Python
+# package. Install the matching package automatically so a fresh hub or
+# standalone deployment does not stop with the usual "ensurepip is not
+# available" message.
+if ! python3 -c 'import ensurepip' >/dev/null 2>&1; then
+  if ! command -v apt-get >/dev/null 2>&1; then
+    echo "Python venv support is missing and apt-get is unavailable. Install the matching python3-venv package, then rerun this script." >&2
+    exit 1
+  fi
+  PYTHON_MINOR="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+  echo "== Installing Python venv support (python${PYTHON_MINOR}-venv) =="
+  sudo apt-get update -y
+  if ! sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "python${PYTHON_MINOR}-venv"; then
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3-venv
+  fi
+fi
+
 python3 -m venv venv
 # shellcheck disable=SC1091
 source venv/bin/activate
