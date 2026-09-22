@@ -351,8 +351,12 @@ body {
 .reorder-error-toast {
   position: fixed;
   top: 82px;
-  left: 50%;
-  transform: translateX(-50%);
+  /* Right-anchored, not centered — no explicit width, so the box still
+     shrink-wraps to its own text (padding + line-height do all the
+     sizing; there was never a fixed height here) up to max-width, it
+     just now hangs from the right edge instead of the page's horizontal
+     center. */
+  right: 16px;
   z-index: 200;
   max-width: 420px;
   background: var(--panel);
@@ -368,8 +372,8 @@ body {
 }
 
 @keyframes reorder-error-toast-in {
-  from { opacity: 0; transform: translate(-50%, -8px); }
-  to { opacity: 1; transform: translate(-50%, 0); }
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1900,18 +1904,20 @@ input[type="text"].filter-input-inline {
    per DESIGN.md's Toasts / Floating Alerts entry it takes the Card/Modal
    treatment (solid --panel background, 10px radius, a single 1px border
    carrying the semantic color) instead of .flash's translucent wash —
-   same position (centered, clears .topbar) as .reorder-error-toast, so
+   same position (top-right, clears .topbar) as .reorder-error-toast, so
    every alert in the app appears in the same spot; stacks downward when
-   more than one is visible at once instead of side by side. */
+   more than one is visible at once instead of side by side. Right-
+   anchored rather than centered — width/max-width (not a fixed height)
+   still do the sizing, so the stack's box still grows with each toast's
+   own text. */
 .flash-toasts {
   position: fixed;
   top: 82px;
-  left: 50%;
-  transform: translateX(-50%);
+  right: 16px;
   z-index: 1300;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
   gap: 10px;
   width: calc(100% - 32px);
   max-width: 420px;
