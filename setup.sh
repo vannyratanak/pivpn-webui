@@ -133,20 +133,35 @@ EOF
 chmod 600 .env
 unset DB_PASSWORD
 
-echo "== Installing privileged helper scripts (requires sudo) =="
-sudo install -m 0750 -o root -g root deploy/pivpn-webui-ccd-helper.sh /usr/local/sbin/pivpn-webui-ccd-helper.sh
-sudo install -m 0750 -o root -g root deploy/pivpn-webui-log-helper.sh /usr/local/sbin/pivpn-webui-log-helper.sh
-sudo install -m 0750 -o root -g root deploy/pivpn-webui-routes-helper.sh /usr/local/sbin/pivpn-webui-routes-helper.sh
-sudo install -m 0750 -o root -g root deploy/pivpn-webui-client-script-helper.sh /usr/local/sbin/pivpn-webui-client-script-helper.sh
-
 CURRENT_USER="$(whoami)"
 
-SUDOERS_TMP="$(mktemp)"
-sed -e "s/__USER__/${CURRENT_USER}/g" -e "s#__APP_DIR__#${APP_DIR}#g" \
-  deploy/sudoers-pivpn-webui.template > "$SUDOERS_TMP"
-sudo visudo -cf "$SUDOERS_TMP"
-sudo install -m 0440 -o root -g root "$SUDOERS_TMP" /etc/sudoers.d/pivpn-webui
-rm -f "$SUDOERS_TMP"
+# HUB_ONLY_INSTALL=1 (set by setup-hub.sh) means this box runs the Flask
+# app + hub_gateway.py only, no local PiVPN/OpenVPN — every privileged
+# call app/privileged.py's run_root() would make is unconditionally
+# routed to the agent instead once HUB_MODE=true (see that function: it
+# never takes the local code path at all in that mode). These 4 scripts
+# and the sudoers grant letting them run as root exist purely for that
+# local path, so on a hub they'd just be an unused root-privilege surface
+# — skip installing them there. setup-agent.sh installs its own copies
+# (with its own, narrower sudoers grant) on the box that actually needs
+# them: the real PiVPN box, wherever that ends up.
+if [[ "${HUB_ONLY_INSTALL:-0}" != "1" ]]; then
+  echo "== Installing privileged helper scripts (requires sudo) =="
+  sudo install -m 0750 -o root -g root deploy/pivpn-webui-ccd-helper.sh /usr/local/sbin/pivpn-webui-ccd-helper.sh
+  sudo install -m 0750 -o root -g root deploy/pivpn-webui-log-helper.sh /usr/local/sbin/pivpn-webui-log-helper.sh
+  sudo install -m 0750 -o root -g root deploy/pivpn-webui-routes-helper.sh /usr/local/sbin/pivpn-webui-routes-helper.sh
+  sudo install -m 0750 -o root -g root deploy/pivpn-webui-client-script-helper.sh /usr/local/sbin/pivpn-webui-client-script-helper.sh
+
+  SUDOERS_TMP="$(mktemp)"
+  sed -e "s/__USER__/${CURRENT_USER}/g" -e "s#__APP_DIR__#${APP_DIR}#g" \
+    deploy/sudoers-pivpn-webui.template > "$SUDOERS_TMP"
+  sudo visudo -cf "$SUDOERS_TMP"
+  sudo install -m 0440 -o root -g root "$SUDOERS_TMP" /etc/sudoers.d/pivpn-webui
+  rm -f "$SUDOERS_TMP"
+else
+  echo "== Skipping privileged helper scripts + sudoers grant (hub-only install) =="
+  echo "   Run setup-agent.sh on the actual PiVPN box for these."
+fi
 
 echo "== Installing systemd service =="
 SERVICE_TMP="$(mktemp)"
@@ -155,18 +170,22 @@ sed -e "s#__APP_DIR__#${APP_DIR}#g" -e "s/__USER__/${CURRENT_USER}/g" \
 sudo install -m 0644 "$SERVICE_TMP" /etc/systemd/system/pivpn-webui.service
 rm -f "$SERVICE_TMP"
 
-echo "== Installing CRL permission watcher =="
-# PiVPN's own removeOVPN.sh does `cp -a .../pki/crl.pem /etc/openvpn/crl.pem`
-# on every revoke (which Renew also triggers, via revoke+reissue) — `-a`
-# preserves Easy-RSA's restrictive 0600 root:root source permissions, which
-# the unprivileged `openvpn` daemon can't read, silently breaking every
-# client's TLS handshake (`VERIFY ERROR: CRL not loaded`) until something
-# re-chmods it. This watches the file and fixes it within about a second of
-# any change, regardless of what triggered it (this app, raw CLI, cron).
-sudo install -m 0644 deploy/fix-crl-perms.service /etc/systemd/system/fix-crl-perms.service
-sudo install -m 0644 deploy/fix-crl-perms.path /etc/systemd/system/fix-crl-perms.path
-sudo systemctl daemon-reload
-sudo systemctl enable --now fix-crl-perms.path
+if [[ "${HUB_ONLY_INSTALL:-0}" != "1" ]]; then
+  echo "== Installing CRL permission watcher =="
+  # PiVPN's own removeOVPN.sh does `cp -a .../pki/crl.pem /etc/openvpn/crl.pem`
+  # on every revoke (which Renew also triggers, via revoke+reissue) — `-a`
+  # preserves Easy-RSA's restrictive 0600 root:root source permissions, which
+  # the unprivileged `openvpn` daemon can't read, silently breaking every
+  # client's TLS handshake (`VERIFY ERROR: CRL not loaded`) until something
+  # re-chmods it. This watches the file and fixes it within about a second of
+  # any change, regardless of what triggered it (this app, raw CLI, cron).
+  # Same reasoning as the helper scripts above for skipping it on a hub:
+  # /etc/openvpn/crl.pem only ever exists on a box with local PiVPN.
+  sudo install -m 0644 deploy/fix-crl-perms.service /etc/systemd/system/fix-crl-perms.service
+  sudo install -m 0644 deploy/fix-crl-perms.path /etc/systemd/system/fix-crl-perms.path
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now fix-crl-perms.path
+fi
 
 mkdir -p instance
 
@@ -177,18 +196,21 @@ echo "  Then:      http://127.0.0.1:${BIND_PORT}  (bound to localhost only)"
 echo
 echo "For remote/browser access, put nginx + TLS in front of it next:"
 echo "  ./setup-nginx.sh"
-echo
-echo "Before relying on client add/remove/renew, verify the exact pivpn CLI"
-echo "syntax on this machine (run: pivpn -h && pivpn add -h) against what's"
-echo "hardcoded in app/pivpn_ctl.py — PiVPN's flags have changed across versions."
-echo
-echo "Before relying on the Sessions/System log tabs, verify the OpenVPN"
-echo "systemd unit name (run: systemctl list-units | grep openvpn) against"
-echo "OPENVPN_UNIT in deploy/pivpn-webui-log-helper.sh — update and reinstall"
-echo "with 'sudo install -m 0750 -o root -g root deploy/pivpn-webui-log-helper.sh"
-echo "/usr/local/sbin/pivpn-webui-log-helper.sh' if it differs."
-echo
-echo "The CRL permission watcher (fix-crl-perms.path) assumes PiVPN's default"
-echo "crl-verify path, /etc/openvpn/crl.pem — check crl-verify in"
-echo "/etc/openvpn/server.conf matches; update PathModified in"
-echo "deploy/fix-crl-perms.path and reinstall if it doesn't."
+
+if [[ "${HUB_ONLY_INSTALL:-0}" != "1" ]]; then
+  echo
+  echo "Before relying on client add/remove/renew, verify the exact pivpn CLI"
+  echo "syntax on this machine (run: pivpn -h && pivpn add -h) against what's"
+  echo "hardcoded in app/pivpn_ctl.py — PiVPN's flags have changed across versions."
+  echo
+  echo "Before relying on the Sessions/System log tabs, verify the OpenVPN"
+  echo "systemd unit name (run: systemctl list-units | grep openvpn) against"
+  echo "OPENVPN_UNIT in deploy/pivpn-webui-log-helper.sh — update and reinstall"
+  echo "with 'sudo install -m 0750 -o root -g root deploy/pivpn-webui-log-helper.sh"
+  echo "/usr/local/sbin/pivpn-webui-log-helper.sh' if it differs."
+  echo
+  echo "The CRL permission watcher (fix-crl-perms.path) assumes PiVPN's default"
+  echo "crl-verify path, /etc/openvpn/crl.pem — check crl-verify in"
+  echo "/etc/openvpn/server.conf matches; update PathModified in"
+  echo "deploy/fix-crl-perms.path and reinstall if it doesn't."
+fi

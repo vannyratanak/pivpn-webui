@@ -9,10 +9,14 @@
 #
 # Wraps setup.sh (base install: venv/Postgres/admin account/standalone
 # systemd unit — still needed here, since the Flask app itself runs on
-# the hub) plus everything hub-specific on top: HUB_MODE config, TLS for
-# the agent-facing WebSocket, hub_gateway.py's own systemd unit, the
-# background log/client ingestion timers, and (optionally) registering
-# the first agent box.
+# the hub), passing HUB_ONLY_INSTALL=1 so it skips the 4 privileged
+# helper scripts + their sudoers grant + the CRL permission watcher —
+# all local-PiVPN-only concerns a hub with no PiVPN installed never
+# exercises (see setup.sh's own comment on why). Then everything
+# hub-specific on top: HUB_MODE config, TLS for the agent-facing
+# WebSocket, hub_gateway.py's own systemd unit, the background
+# log/client ingestion timers, and (optionally) registering the first
+# agent box.
 #
 # Safe to re-run: every step either already no-ops on a second run
 # (setup.sh's own DB role handling, the systemd/TLS installs below all
@@ -45,7 +49,7 @@ if [[ ! -x venv/bin/python3 || ! -f .env ]]; then
   echo "(The OpenVPN-related prompts below don't matter for a hub — this"
   echo " box has no local PiVPN install — defaults are fine.)"
   echo
-  ./setup.sh
+  HUB_ONLY_INSTALL=1 ./setup.sh
 else
   echo "== Step 1/6: base install already done (venv/.env exist) — skipping setup.sh =="
   echo "   (remove venv/ and .env first if you want to redo it from scratch)"
