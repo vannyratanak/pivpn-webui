@@ -665,10 +665,20 @@ def test_client_sessions_relabeled_ended_session_resorts_below_more_recent_ones(
     # only ever earned by looking ongoing at sort time, even after being
     # relabeled, burying a genuinely more recent (and fully closed)
     # session below it.
+    # Relative to "now", not a hardcoded date — a fixed past date drifts
+    # outside the range=7d window below once enough real time passes (hit
+    # live on 2026-09-22 by a 2026-09-15 fixture landing exactly on the
+    # 7-day boundary), same class of bug already fixed elsewhere in this
+    # file (see the datetime.now()-based fixtures further down).
+    from datetime import datetime, timedelta
+    now = datetime.now()
+    stale_ts = (now - timedelta(hours=4)).strftime("%Y-%m-%d %H:%M:%S")
+    recent_connect_ts = (now - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
+    recent_disconnect_ts = (now - timedelta(hours=1) + timedelta(seconds=18)).strftime("%Y-%m-%d %H:%M:%S")
     db.insert_vpn_events([
-        ("2026-09-15 09:46:39", "connected", "staleclient", "10.66.66.1:1", "", None),
-        ("2026-09-15 13:30:30", "connected", "recentclient", "10.66.66.1:2", "", None),
-        ("2026-09-15 13:30:48", "disconnected", "recentclient", "10.66.66.1:2", "", None),
+        (stale_ts, "connected", "staleclient", "10.66.66.1:1", "", None),
+        (recent_connect_ts, "connected", "recentclient", "10.66.66.1:2", "", None),
+        (recent_disconnect_ts, "disconnected", "recentclient", "10.66.66.1:2", "", None),
     ])
     # Neither client is actually connected right now — this is what makes
     # "staleclient" (log-ongoing but not live-connected) get relabeled.
