@@ -1,4 +1,5 @@
 from app import db, pivpn_ctl
+from app.privileged import PrivilegedCommandError
 from deploy import ingest_logs
 
 # Reuses the exact same real captured lines as test_vpnlog.py, since these
@@ -224,4 +225,24 @@ def test_main_ingests_all_three_and_prunes(temp_db, monkeypatch):
     ingest_logs.main()
 
     assert calls == {"openvpn": 1, "flow": 1, "system": 1}
+    assert pruned == [ingest_logs.RETENTION_DAYS]
+
+
+def test_main_does_not_crash_when_agent_is_unreachable(temp_db, monkeypatch):
+    # Real gap this closes: setup-hub.sh starts the ingestion timer/first
+    # run (step 5) before registering any agent at all (step 6) — the
+    # very first tick always finds nobody connected. Before this, an
+    # unhandled PrivilegedCommandError here crashed the oneshot systemd
+    # service, which made `sudo systemctl start pivpn-webui-log-ingest.service`
+    # (no `|| true`, under `set -euo pipefail`) abort the whole
+    # setup-hub.sh run right at step 5, before step 6 ever ran.
+    def _boom(argv, timeout=None):
+        raise PrivilegedCommandError("hub_gateway.py isn't reachable")
+
+    monkeypatch.setattr(ingest_logs, "run_root", _boom)
+    pruned = []
+    monkeypatch.setattr(db, "prune_old_logs", lambda days: pruned.append(days))
+
+    ingest_logs.main()  # must not raise
+
     assert pruned == [ingest_logs.RETENTION_DAYS]

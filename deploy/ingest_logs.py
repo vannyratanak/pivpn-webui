@@ -34,7 +34,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import config
 from app import db, iplookup
-from app.privileged import run_root
+from app.privileged import PrivilegedCommandError, run_root
 from app.vpnlog import (
     CONNECT_RE,
     DISCONNECT_RE,
@@ -151,10 +151,27 @@ def ingest_system_log() -> int:
     return len(rows)
 
 
+def _best_effort(fn):
+    """Unattended entry point (the systemd timer, or a fresh setup-hub.sh
+    run — see that script's own step ordering: background ingestion is
+    started at step 5, before step 6 registers the first agent at all,
+    so the very first tick here always finds nobody connected yet) — a
+    transient or not-yet-registered agent shouldn't crash-loop this
+    every 10 seconds. Deliberately NOT applied inside routes.py's/api.py's
+    /logs/refresh: that's an interactive click expecting a real answer,
+    including "the agent isn't connected" as an actionable 502, not a
+    silent no-op."""
+    try:
+        return fn()
+    except PrivilegedCommandError as exc:
+        print(f"ingest_logs: {fn.__name__} skipped, agent unreachable: {exc}", file=sys.stderr)
+        return 0
+
+
 def main():
-    n_events = ingest_vpn_events()
-    n_flows = ingest_traffic_flows()
-    n_system = ingest_system_log()
+    n_events = _best_effort(ingest_vpn_events)
+    n_flows = _best_effort(ingest_traffic_flows)
+    n_system = _best_effort(ingest_system_log)
     db.prune_old_logs(RETENTION_DAYS)
     print(f"ingested {n_events} vpn event(s), {n_flows} traffic flow(s), {n_system} system log line(s)")
 
