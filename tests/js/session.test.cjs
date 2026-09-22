@@ -14,7 +14,6 @@ function browser() {
   const document = {
     querySelector(selector) {
       if (selector.includes('idle-timeout-minutes')) return { content: '1.5' };
-      if (selector.includes('csrf-token')) return { content: 'csrf' };
       return null;
     },
     addEventListener(event, handler) { (listeners[event] ||= []).push(handler); },

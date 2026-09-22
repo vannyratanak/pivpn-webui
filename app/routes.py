@@ -6,7 +6,7 @@ from flask_login import current_user, login_required
 
 import config
 from app import db, firewall, pivpn_ctl, vpn_routes
-from app.auth import admin_required, clear_html_jwt_cookie, hash_password, issue_html_jwt_cookie, verify_credentials
+from app.auth import admin_required, clear_html_jwt_cookie, clear_lock_cookie, hash_password, issue_html_jwt_cookie, issue_lock_cookie, peek_locked_username, verify_credentials
 from app.privileged import PrivilegedCommandError
 
 bp = Blueprint("main", __name__)
@@ -69,35 +69,59 @@ LOGIN_LOCKOUT_WINDOW_SECONDS = 300
 def login():
     if current_user.is_authenticated:
         return redirect(url_for("main.clients"))
+
+    # Idle-lock mode: the JS idle timer hit /account/lock, which cleared the
+    # html_jwt but left an idle_lock cookie naming the locked user.  We show
+    # a "resume session" screen with only a password field — the username is
+    # already known — and on success we re-issue the html_jwt WITHOUT bumping
+    # session_generation (it's a resume, not a new login; the existing API
+    # bearer token and any other still-open tabs stay valid).
+    locked_user = peek_locked_username(request)
+
     if request.method == "POST":
         ip = _client_ip()
         if db.count_recent_login_failures(ip, LOGIN_LOCKOUT_WINDOW_SECONDS) >= LOGIN_MAX_ATTEMPTS:
             flash("Too many failed login attempts. Try again in a few minutes.", "error")
-            return render_template("login.html")
-        username = request.form.get("username", "")
+            return render_template("login.html", locked_user=locked_user)
+
+        # In locked mode the username comes from the cookie, not the form,
+        # so a tampered hidden field can't elevate access — verify_credentials
+        # still checks the database, so only valid users pass.
+        username = locked_user if locked_user else request.form.get("username", "")
         password = request.form.get("password", "")
         user = verify_credentials(username, password)
         if user:
             db.clear_login_failures(ip)
-            db.add_audit(user.username, "login", detail=f"from {ip}")
-            # Single-active-session: bumping this immediately invalidates
-            # every other browser cookie or API token this account still
-            # has out there (see auth.py's token_superseded) — the next
-            # request any of them makes just gets treated as logged out.
-            user.session_generation = db.bump_session_generation(int(user.id))
-            resp = redirect(url_for("main.clients"))
-            # Identity now lives in a JWT cookie, not Flask's session —
-            # see auth.py's issue_html_jwt_cookie for why, and
-            # __init__.py's after_request hook for how the old "N hours
-            # since your *last* request" idle-timeout behavior is
-            # preserved despite a JWT's expiry normally being fixed at
-            # issuance.
-            issue_html_jwt_cookie(resp, user)
-            return resp
+            if locked_user:
+                # Resume: keep the existing session generation so the bearer
+                # token (API clients, open tabs) doesn't get invalidated.
+                db.add_audit(user.username, "login", detail=f"resumed from idle lock from {ip}")
+                resp = redirect(url_for("main.clients"))
+                issue_html_jwt_cookie(resp, user)
+                clear_lock_cookie(resp)
+                return resp
+            else:
+                # Full new login: bump generation to invalidate any other
+                # active sessions for this account (single-active-session).
+                db.add_audit(user.username, "login", detail=f"from {ip}")
+                # Single-active-session: bumping this immediately invalidates
+                # every other browser cookie or API token this account still
+                # has out there (see auth.py's token_superseded) — the next
+                # request any of them makes just gets treated as logged out.
+                user.session_generation = db.bump_session_generation(int(user.id))
+                resp = redirect(url_for("main.clients"))
+                # Identity now lives in a JWT cookie, not Flask's session —
+                # see auth.py's issue_html_jwt_cookie for why, and
+                # __init__.py's after_request hook for how the old "N hours
+                # since your *last* request" idle-timeout behavior is
+                # preserved despite a JWT's expiry normally being fixed at
+                # issuance.
+                issue_html_jwt_cookie(resp, user)
+                return resp
         db.record_login_failure(ip)
         db.add_audit(username or "(blank)", "login", result="error", detail=f"bad credentials from {ip}")
         flash("Invalid username or password.", "error")
-    return render_template("login.html")
+    return render_template("login.html", locked_user=locked_user)
 
 
 @bp.route("/logout")
@@ -264,12 +288,12 @@ def account_api_token():
     JavaScript to use against /api/... (see clients.html's own fetch-based
     rendering) — not a new login: deliberately does NOT call
     db.bump_session_generation, so getting one of these never invalidates
-    the cookie session (or any other tab/token) that asked for it. Cookie
-    + CSRF protected like any other POST here; the token itself is then
-    just an ordinary Authorization: Bearer credential from that point on,
-    subject to the exact same expiry and single-active-session checks
-    (see app/__init__.py's token_in_blocklist_loader) as one issued by
-    /api/login."""
+    the cookie session (or any other tab/token) that asked for it.
+    Cookie-authenticated like any other browser POST here; the token
+    itself is then just an ordinary Authorization: Bearer credential from
+    that point on, subject to the exact same expiry and single-active-
+    session checks (see app/__init__.py's token_in_blocklist_loader) as
+    one issued by /api/login."""
     token = create_access_token(
         identity=current_user.username,
         additional_claims={"role": current_user.role, "gen": current_user.session_generation},
@@ -290,6 +314,42 @@ def account_heartbeat():
     issues the cookie with a fresh "la" for any authenticated response,
     this route included."""
     return "", 204
+
+
+@bp.route("/account/lock", methods=["POST"])
+@login_required
+def account_lock():
+    """Idle-lock the session — Cisco/Huawei-style 'screen lock' rather than
+    a full logout.  Called by idle-timeout.js when the idle timer fires.
+
+    Unlike /logout, this does NOT bump session_generation, so the API bearer
+    token (pivpn_webui_api_token in localStorage) and any other open tabs
+    remain valid — the user just needs to re-enter their password on the
+    /login page to lift the lock and get a fresh html_jwt cookie.  The
+    idle_lock cookie (set here, cleared on successful resume) is what tells
+    the login page to show the 'resume session' UI instead of a full form."""
+    username = current_user.username
+    _audit("idle_lock")
+    resp = redirect(url_for("main.login"))
+    clear_html_jwt_cookie(resp)
+    issue_lock_cookie(resp, username)
+    # Prevent __init__.py's after_request hook from re-issuing the html_jwt
+    # right after we just cleared it (same trick as logout()).
+    g.skip_jwt_cookie_refresh = True
+    return resp
+
+
+@bp.route("/account/clear-lock")
+def account_clear_lock():
+    """Clear the idle_lock cookie and go to the normal /login page.
+
+    No authentication required — the html_jwt is already gone when this is
+    reached (that's the point of the lock).  This is how the 'Not you?' link
+    on the locked-session resume screen discards the locked username and
+    offers a clean login form so a different user can sign in."""
+    resp = redirect(url_for("main.login"))
+    clear_lock_cookie(resp)
+    return resp
 
 
 @bp.route("/")
@@ -956,7 +1016,7 @@ def resync_rules():
     return redirect(url_for("main.firewall_rules"))
 
 
-AUTH_ACTIONS = ("login", "logout")
+AUTH_ACTIONS = ("login", "logout", "idle_lock")
 
 
 ALL_LOG_TABS = ("sessions", "client_sessions", "traffic", "system", "activity", "auth")

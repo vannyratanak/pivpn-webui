@@ -86,8 +86,9 @@ document.addEventListener('DOMContentLoaded', () => {
       });
   }
 
-  document.getElementById('client-download-btn').addEventListener('click', () => {
-    ApiClient.call(`/api/clients/${encodeURIComponent(name)}/download`)
+  document.getElementById('client-download-btn').addEventListener('click', (e) => {
+    const btn = e.currentTarget;
+    ApiClient.withBusy(btn, ApiClient.call(`/api/clients/${encodeURIComponent(name)}/download`)
       .then((resp) => (resp.ok ? resp.blob() : Promise.reject()))
       .then((blob) => {
         const url = URL.createObjectURL(blob);
@@ -98,7 +99,7 @@ document.addEventListener('DOMContentLoaded', () => {
         a.click();
         a.remove();
         URL.revokeObjectURL(url);
-      })
+      }))
       .catch(() => showToast(`Could not download ${name}'s profile.`));
   });
 
@@ -112,8 +113,8 @@ document.addEventListener('DOMContentLoaded', () => {
         `Renew ${name}? This revokes the current cert and issues a new one — the old .ovpn will stop working immediately.`,
         'Renew',
         () => {
-          ApiClient.call(`/api/clients/${encodeURIComponent(name)}/renew`, { method: 'POST' })
-            .then((resp) => (resp.ok ? loadClient() : resp.json().then((d) => Promise.reject(d))))
+          ApiClient.withBusy(btn, ApiClient.call(`/api/clients/${encodeURIComponent(name)}/renew`, { method: 'POST' })
+            .then((resp) => (resp.ok ? loadClient() : resp.json().then((d) => Promise.reject(d)))))
             .catch((d) => showToast((d && d.error) || `Could not renew ${name}.`));
         },
       );
@@ -122,23 +123,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (action === 'block') {
       const nowBlocked = !clientBlocked;
-      ApiClient.call(`/api/clients/${encodeURIComponent(name)}/block`, {
+      ApiClient.withBusy(btn, ApiClient.call(`/api/clients/${encodeURIComponent(name)}/block`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ blocked: nowBlocked }),
       })
-        .then((resp) => (resp.ok ? loadClient() : Promise.reject()))
+        .then((resp) => (resp.ok ? loadClient() : Promise.reject())))
         .catch(() => showToast(`Could not ${nowBlocked ? 'block' : 'unblock'} ${name}.`));
       return;
     }
 
     if (action === 'remove') {
       window.askConfirm(`Permanently remove ${name}? This cannot be undone.`, 'Remove', () => {
-        ApiClient.call(`/api/clients/${encodeURIComponent(name)}`, { method: 'DELETE' })
+        ApiClient.withBusy(btn, ApiClient.call(`/api/clients/${encodeURIComponent(name)}`, { method: 'DELETE' })
           .then((resp) => {
             if (!resp.ok) return Promise.reject();
             window.location.href = '/clients';
-          })
+          }))
           .catch(() => showToast(`Could not remove ${name}.`));
       });
     }
@@ -203,8 +204,19 @@ document.addEventListener('DOMContentLoaded', () => {
   function loadRules(showSkeletonWhileLoading) {
     if (showSkeletonWhileLoading) rulesTbody.innerHTML = skeletonRowHtml();
     return ApiClient.call(`/api/clients/${encodeURIComponent(name)}/rules`)
-      .then((resp) => resp.json())
-      .then((data) => render(data.rules || []));
+      .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data })))
+      .then(({ ok, data }) => {
+        // An error body has no "rules" key, so `data.rules || []` used to
+        // silently render "No rules scoped to this client yet." instead
+        // of the real error — technically not a crash (unlike the other
+        // pages' version of this gap), but just as misleading: it looks
+        // like a normal empty state, not a failure.
+        if (!ok) {
+          rulesTbody.innerHTML = `<tr class="empty-row"><td colspan="7" class="empty">${escapeHtml(data.error || 'Could not load rules.')}</td></tr>`;
+          return;
+        }
+        render(data.rules || []);
+      });
   }
 
   rulesTbody.addEventListener('click', (e) => {
@@ -213,15 +225,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const ruleId = btn.dataset.ruleId;
 
     if (btn.dataset.action === 'toggle') {
-      ApiClient.call(`/api/clients/${encodeURIComponent(name)}/rules/${ruleId}/toggle`, { method: 'POST' })
-        .then((resp) => (resp.ok ? loadRules() : Promise.reject()))
+      ApiClient.withBusy(btn, ApiClient.call(`/api/clients/${encodeURIComponent(name)}/rules/${ruleId}/toggle`, { method: 'POST' })
+        .then((resp) => (resp.ok ? loadRules() : Promise.reject())))
         .catch(() => showToast(`Could not toggle rule #${ruleId}.`));
       return;
     }
     if (btn.dataset.action === 'delete') {
       window.askConfirm('Delete this rule?', 'Delete', () => {
-        ApiClient.call(`/api/clients/${encodeURIComponent(name)}/rules/${ruleId}`, { method: 'DELETE' })
-          .then((resp) => (resp.ok ? loadRules() : Promise.reject()))
+        ApiClient.withBusy(btn, ApiClient.call(`/api/clients/${encodeURIComponent(name)}/rules/${ruleId}`, { method: 'DELETE' })
+          .then((resp) => (resp.ok ? loadRules() : Promise.reject())))
           .catch(() => showToast(`Could not delete rule #${ruleId}.`));
       });
     }
@@ -243,41 +255,42 @@ document.addEventListener('DOMContentLoaded', () => {
       .map((cb) => Number(cb.dataset.ruleId));
   }
 
-  document.getElementById('client-bulk-disable-btn').addEventListener('click', () => {
+  document.getElementById('client-bulk-disable-btn').addEventListener('click', (e) => {
     const ids = selectedRuleIds();
     if (!ids.length) return;
-    ApiClient.call(`/api/clients/${encodeURIComponent(name)}/rules/bulk-disable`, {
+    ApiClient.withBusy(e.currentTarget, ApiClient.call(`/api/clients/${encodeURIComponent(name)}/rules/bulk-disable`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ rule_ids: ids }),
     })
-      .then((resp) => (resp.ok ? loadRules() : Promise.reject()))
+      .then((resp) => (resp.ok ? loadRules() : Promise.reject())))
       .catch(() => showToast('Could not disable the selected rule(s).'));
   });
 
-  document.getElementById('client-bulk-delete-btn').addEventListener('click', () => {
+  document.getElementById('client-bulk-delete-btn').addEventListener('click', (e) => {
     const ids = selectedRuleIds();
     if (!ids.length) return;
+    const btn = e.currentTarget;
     window.askConfirm(`Delete ${ids.length} selected rule(s)? This cannot be undone.`, 'Delete', () => {
-      ApiClient.call(`/api/clients/${encodeURIComponent(name)}/rules/bulk-delete`, {
+      ApiClient.withBusy(btn, ApiClient.call(`/api/clients/${encodeURIComponent(name)}/rules/bulk-delete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rule_ids: ids }),
       })
-        .then((resp) => (resp.ok ? loadRules() : Promise.reject()))
+        .then((resp) => (resp.ok ? loadRules() : Promise.reject())))
         .catch(() => showToast('Could not delete the selected rule(s).'));
     });
   });
 
-  document.getElementById('client-apply-rules-btn').addEventListener('click', () => {
-    ApiClient.call(`/api/clients/${encodeURIComponent(name)}/rules/resync`, { method: 'POST' })
-      .then((resp) => (resp.ok ? loadRules() : Promise.reject()))
+  document.getElementById('client-apply-rules-btn').addEventListener('click', (e) => {
+    ApiClient.withBusy(e.currentTarget, ApiClient.call(`/api/clients/${encodeURIComponent(name)}/rules/resync`, { method: 'POST' })
+      .then((resp) => (resp.ok ? loadRules() : Promise.reject())))
       .catch(() => showToast('Could not reapply firewall rules.'));
   });
 
-  saveRulesBtn.addEventListener('click', () => {
-    ApiClient.call(`/api/clients/${encodeURIComponent(name)}/rules/persist`, { method: 'POST' })
-      .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data })))
+  saveRulesBtn.addEventListener('click', (e) => {
+    ApiClient.withBusy(e.currentTarget, ApiClient.call(`/api/clients/${encodeURIComponent(name)}/rules/persist`, { method: 'POST' })
+      .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data }))))
       .then(({ ok, data }) => {
         if (!ok) { showToast(data.error || 'Could not save firewall rules.'); return; }
         loadRules();
@@ -291,6 +304,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   addRuleForm.addEventListener('submit', (e) => {
     e.preventDefault();
+    const submitBtn = addRuleForm.querySelector('[type="submit"]');
     const action = addRuleForm.querySelector('[name="action"]').value;
     const protocol = addRuleForm.querySelector('[name="protocol"]').value;
     const dport = addRuleForm.querySelector('[name="dport"]').value;
@@ -299,13 +313,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const filledDsts = rawDsts.filter((d) => d);
     const dsts = filledDsts.length ? filledDsts : [''];
 
-    Promise.all(dsts.map((dst) =>
+    ApiClient.withBusy(submitBtn, Promise.all(dsts.map((dst) =>
       ApiClient.call(`/api/clients/${encodeURIComponent(name)}/rules`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, protocol, dst, dport, comment }),
       }).then((resp) => resp.json().then((data) => ({ ok: resp.ok, data, dst }))),
-    )).then((results) => {
+    ))).then((results) => {
       const added = results.filter((r) => r.ok).length;
       const skipped = results.filter((r) => !r.ok).map((r) => `${r.dst || 'any'}: ${r.data.error}`);
       if (added) showToast(added > 1 ? `Added ${added} forward rule(s).` : 'Forward rule added.');

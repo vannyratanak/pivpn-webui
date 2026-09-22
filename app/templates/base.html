@@ -3,8 +3,6 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <!-- Used by cookie-authenticated token minting and activity heartbeats. -->
-  <meta name="csrf-token" content="{{ csrf_token() }}">
   {% if current_user.is_authenticated %}
   <!-- Read by idle-timeout.js — absent on the login page itself (nothing
        to time out there), which is also how that script tells whether to

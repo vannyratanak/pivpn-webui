@@ -2,9 +2,8 @@
 // clients-page.js) instead of getting it server-rendered. Manages the
 // Bearer token those calls need: /api/... only ever accepts
 // Authorization: Bearer, never this browser's own httpOnly session
-// cookie (see app/__init__.py's csrf.exempt(api_bp) comment for why that
-// separation matters) — so a page's own JavaScript has to hold a token
-// itself, in localStorage, to be able to call /api/... at all.
+// cookie — so a page's own JavaScript has to hold a token itself, in
+// localStorage, to be able to call /api/... at all.
 //
 // That's a real, deliberate tradeoff, not an oversight: unlike the
 // httpOnly session cookie, anything in localStorage is readable by any
@@ -33,11 +32,7 @@ const ApiClient = (() => {
   // by default) without forcing a full re-login, as long as the cookie
   // session itself is still good.
   async function mintToken() {
-    const csrfMeta = document.querySelector('meta[name="csrf-token"]');
-    const resp = await fetch('/account/api-token', {
-      method: 'POST',
-      headers: { 'X-CSRFToken': csrfMeta ? csrfMeta.content : '' },
-    });
+    const resp = await fetch('/account/api-token', { method: 'POST' });
     if (resp.redirected || resp.status === 401) {
       clearToken();
       window.location.href = '/login';
@@ -87,5 +82,37 @@ const ApiClient = (() => {
     return resp;
   }
 
-  return { call, clearToken };
+  // Disables `el` and marks it visually busy for the life of `promise` —
+  // a click here often kicks off a hub/agent round-trip that can take
+  // several real seconds (see the app's own notes on that), and with
+  // nothing changing on screen in the meantime it reads as "did that even
+  // register?", not "still working" — caught live: a real click landing
+  // twice on Block because the first one looked like it did nothing.
+  // Restoring in .finally() (not just the success path) means a failed
+  // request still leaves the button clickable again, and running this on
+  // a button that a subsequent re-render replaced/detached is harmless —
+  // it just sets properties nothing is looking at anymore.
+  function withBusy(el, promise) {
+    if (el.disabled) return Promise.reject(new Error('busy'));
+    // Only safe to rewrite textContent on a button that's plain text —
+    // an icon-only button (Download's bare <svg>, no text) would have its
+    // icon replaced by a literal "…", and a button with a live child
+    // element (the bulk-action buttons' own rule-count <span>, updated
+    // elsewhere via getElementById) would have that element silently
+    // deleted and never come back. Every button still gets disabled +
+    // the .is-busy dimmed/cursor:progress look either way — the "…"
+    // suffix is an enhancement, not the whole fix.
+    const canRewriteText = el.children.length === 0 && el.textContent.trim();
+    const original = el.textContent;
+    el.disabled = true;
+    el.classList.add('is-busy');
+    if (canRewriteText) el.textContent = original + '…';
+    return promise.finally(() => {
+      el.disabled = false;
+      el.classList.remove('is-busy');
+      if (canRewriteText) el.textContent = original;
+    });
+  }
+
+  return { call, clearToken, withBusy };
 })();

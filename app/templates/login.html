@@ -1,13 +1,35 @@
 {% extends "base.html" %}
-{% block title %}Log in — PiVPN Web UI{% endblock %}
+{% block title %}{% if locked_user %}Session locked — PiVPN Web UI{% else %}Log in — PiVPN Web UI{% endif %}{% endblock %}
 {% block content %}
+{% if not locked_user %}
 <script>
   localStorage.removeItem('pivpn_webui_api_token');
   localStorage.removeItem('pivpn_webui_last_activity');
 </script>
+{% endif %}
 <div class="login-wrap">
+  {% if locked_user %}
+  {# ── Idle-lock / resume mode ─────────────────────────────────────────── #}
   <form class="login-card" method="post">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="login-card-header">
+      <h1>Session locked</h1>
+      <p class="login-card-subtitle">
+        Locked due to inactivity.<br>
+        Enter your password to resume as <strong>{{ locked_user }}</strong>.
+      </p>
+    </div>
+    <label>Password
+      <input type="password" name="password" autocomplete="current-password" required autofocus>
+    </label>
+    <button type="submit">Resume session</button>
+  </form>
+  <p class="login-alt-action">
+    Not {{ locked_user }}?
+    <a href="{{ url_for('main.account_clear_lock') }}">Sign in with a different account</a>
+  </p>
+  {% else %}
+  {# ── Normal login ─────────────────────────────────────────────────────── #}
+  <form class="login-card" method="post">
     <div class="login-card-header">
       <h1>PiVPN Web UI</h1>
       <p class="login-card-subtitle">Sign in to manage this server</p>
@@ -20,5 +42,6 @@
     </label>
     <button type="submit">Log in</button>
   </form>
+  {% endif %}
 </div>
 {% endblock %}

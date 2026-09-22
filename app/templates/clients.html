@@ -20,7 +20,6 @@
       <button type="button" class="btn" onclick="document.getElementById('add-client-dialog').showModal()">Add client</button>
       <button type="button" class="btn" onclick="document.getElementById('import-clients-dialog').showModal()">Import Clients</button>
       <form method="post" action="{{ url_for('main.bulk_remove_clients') }}" id="bulk-remove-form" class="btn-form" hidden>
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit" class="btn btn-danger" id="bulk-remove-btn" disabled>Remove (<span id="bulk-remove-count">0</span>)</button>
       </form>
     </div>
@@ -30,7 +29,6 @@
     <button type="button" class="modal-close-btn" onclick="document.getElementById('add-client-dialog').close()" aria-label="Close">&times;</button>
     <h2>Add client</h2>
     <form method="post" action="{{ url_for('main.add_client') }}" class="inline-form">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <label><span class="label-text">Name<span class="required-star" aria-hidden="true">*</span></span>
         <input type="text" name="name" pattern="[A-Za-z0-9_-]{1,32}" required placeholder="e.g. laptop-anna">
       </label>
@@ -58,7 +56,6 @@
     <p class="hint"><code>name=laptop-anna</code><br><code>name=phone-anna passphrase="correct horse battery staple"</code></p>
 
     <form method="post" action="{{ url_for('main.import_clients') }}" enctype="multipart/form-data" class="inline-form">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <label>File
         <input type="file" name="clients_file" accept=".txt" required>
       </label>

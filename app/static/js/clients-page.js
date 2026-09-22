@@ -1,10 +1,8 @@
-// Clients page — pilot for fetching/mutating data via /api/... (see
-// api-client.js) instead of a fully server-rendered table + plain form
-// POSTs, the way every other page in this app still works. Only this
-// page's core actions (list/add/renew/remove/block/download) are
-// converted; Import Clients and bulk-remove are deliberately left on the
-// old form-POST mechanism for this first pass — see the project's own
-// notes on why (scope, not an oversight).
+// Clients page — fetches/mutates data via /api/... (see api-client.js)
+// instead of a server-rendered table + plain form POSTs. Every action on
+// this page (list/add/renew/remove/block/download/import/bulk-remove)
+// goes through the JSON API now — see window.bulkRemoveClients and the
+// Import Clients form handling below for the last two.
 document.addEventListener('DOMContentLoaded', () => {
   const tbody = document.getElementById('clients-tbody');
   if (!tbody) return;
@@ -79,8 +77,21 @@ document.addEventListener('DOMContentLoaded', () => {
     // refresh would read as more disruptive flicker, not a loading cue.
     if (showSkeletonWhileLoading) tbody.innerHTML = skeletonRowHtml();
     return ApiClient.call('/api/clients')
-      .then((resp) => resp.json())
-      .then((data) => render(data.clients, data.connected_count));
+      .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data })))
+      .then(({ ok, data }) => {
+        // Without this check, a non-2xx body (e.g. {"error": "..."}, no
+        // "clients" key) hit render()'s clients.length straight on,
+        // throwing and leaving the skeleton spinning forever with no
+        // visible explanation — caught live against a dev environment
+        // whose hub/agent link was down. Same failure mode this whole
+        // change is about: no reaction at all reads as broken, not as
+        // "something went wrong, here's why."
+        if (!ok) {
+          tbody.innerHTML = `<tr class="empty-row"><td colspan="7" class="empty">${escapeHtml(data.error || 'Could not load clients.')}</td></tr>`;
+          return;
+        }
+        render(data.clients, data.connected_count);
+      });
   }
 
   function showRowError(row, message) {
@@ -102,7 +113,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const action = btn.dataset.action;
 
     if (action === 'download') {
-      ApiClient.call(`/api/clients/${encodeURIComponent(name)}/download`)
+      ApiClient.withBusy(btn, ApiClient.call(`/api/clients/${encodeURIComponent(name)}/download`)
         .then((resp) => {
           if (!resp.ok) return Promise.reject();
           return resp.blob();
@@ -116,7 +127,7 @@ document.addEventListener('DOMContentLoaded', () => {
           a.click();
           a.remove();
           URL.revokeObjectURL(url);
-        })
+        }))
         .catch(() => showRowError(row, `Could not download ${name}'s profile.`));
       return;
     }
@@ -126,8 +137,8 @@ document.addEventListener('DOMContentLoaded', () => {
         `Renew ${name}? This revokes the current cert and issues a new one — the old .ovpn will stop working immediately.`,
         'Renew',
         () => {
-          ApiClient.call(`/api/clients/${encodeURIComponent(name)}/renew`, { method: 'POST' })
-            .then((resp) => resp.ok ? loadClients() : Promise.reject())
+          ApiClient.withBusy(btn, ApiClient.call(`/api/clients/${encodeURIComponent(name)}/renew`, { method: 'POST' })
+            .then((resp) => resp.ok ? loadClients() : Promise.reject()))
             .catch(() => showRowError(row, `Could not renew ${name}.`));
         },
       );
@@ -136,20 +147,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (action === 'block') {
       const nowBlocked = !row.classList.contains('blocked-row');
-      ApiClient.call(`/api/clients/${encodeURIComponent(name)}/block`, {
+      ApiClient.withBusy(btn, ApiClient.call(`/api/clients/${encodeURIComponent(name)}/block`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ blocked: nowBlocked }),
       })
-        .then((resp) => resp.ok ? loadClients() : Promise.reject())
+        .then((resp) => resp.ok ? loadClients() : Promise.reject()))
         .catch(() => showRowError(row, `Could not ${nowBlocked ? 'block' : 'unblock'} ${name}.`));
       return;
     }
 
     if (action === 'remove') {
       window.askConfirm(`Permanently remove ${name}? This cannot be undone.`, 'Remove', () => {
-        ApiClient.call(`/api/clients/${encodeURIComponent(name)}`, { method: 'DELETE' })
-          .then((resp) => resp.ok ? loadClients() : Promise.reject())
+        ApiClient.withBusy(btn, ApiClient.call(`/api/clients/${encodeURIComponent(name)}`, { method: 'DELETE' })
+          .then((resp) => resp.ok ? loadClients() : Promise.reject()))
           .catch(() => showRowError(row, `Could not remove ${name}.`));
       });
     }
@@ -158,14 +169,15 @@ document.addEventListener('DOMContentLoaded', () => {
   if (addForm) {
     addForm.addEventListener('submit', (e) => {
       e.preventDefault();
+      const submitBtn = addForm.querySelector('[type="submit"]');
       const name = addForm.querySelector('[name="name"]').value.trim();
       const passphrase = addForm.querySelector('[name="passphrase"]').value;
-      ApiClient.call('/api/clients', {
+      ApiClient.withBusy(submitBtn, ApiClient.call('/api/clients', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, passphrase: passphrase || undefined }),
       })
-        .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data })))
+        .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data }))))
         .then(({ ok, data }) => {
           if (!ok) { showRowError(tbody, data.error || `Could not create ${name}.`); return; }
           document.getElementById('add-client-dialog').close();
@@ -185,10 +197,11 @@ document.addEventListener('DOMContentLoaded', () => {
   if (importForm) {
     importForm.addEventListener('submit', (e) => {
       e.preventDefault();
+      const submitBtn = importForm.querySelector('[type="submit"]');
       const fileInput = importForm.querySelector('[name="clients_file"]');
       if (!fileInput.files.length) return;
-      ApiClient.call('/api/clients/import', { method: 'POST', body: new FormData(importForm) })
-        .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data })))
+      ApiClient.withBusy(submitBtn, ApiClient.call('/api/clients/import', { method: 'POST', body: new FormData(importForm) })
+        .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data }))))
         .then(({ ok, data }) => {
           if (!ok) { showRowError(tbody, data.error || 'Could not import that file.'); return; }
           if (data.errors && data.errors.length) {

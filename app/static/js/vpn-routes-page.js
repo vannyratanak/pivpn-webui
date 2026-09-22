@@ -51,8 +51,18 @@ document.addEventListener('DOMContentLoaded', () => {
   function loadRoutes(showSkeletonWhileLoading) {
     if (showSkeletonWhileLoading) tbody.innerHTML = skeletonRowHtml();
     return ApiClient.call('/api/vpn-routes')
-      .then((resp) => resp.json())
-      .then((data) => render(data.routes));
+      .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data })))
+      .then(({ ok, data }) => {
+        // Without this check, a non-2xx body throws inside render()
+        // (data.routes is undefined, .length on that throws) and leaves
+        // the skeleton spinning forever with no visible explanation —
+        // same failure mode as clients-page.js's own version of this.
+        if (!ok) {
+          tbody.innerHTML = `<tr class="empty-row"><td colspan="4" class="empty">${escapeHtml(data.error || 'Could not load routes.')}</td></tr>`;
+          return;
+        }
+        render(data.routes);
+      });
   }
 
   function showRowError(el, message) {
@@ -73,12 +83,12 @@ document.addEventListener('DOMContentLoaded', () => {
       'Remove this route? Connected clients will stop routing this network into the tunnel.',
       'Remove',
       () => {
-        ApiClient.call('/api/vpn-routes', {
+        ApiClient.withBusy(btn, ApiClient.call('/api/vpn-routes', {
           method: 'DELETE',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ network, netmask }),
         })
-          .then((resp) => resp.ok ? loadRoutes() : Promise.reject())
+          .then((resp) => resp.ok ? loadRoutes() : Promise.reject()))
           .catch(() => showRowError(row, `Could not remove ${network}/${netmask}.`));
       },
     );
@@ -87,14 +97,15 @@ document.addEventListener('DOMContentLoaded', () => {
   if (addForm) {
     addForm.addEventListener('submit', (e) => {
       e.preventDefault();
+      const submitBtn = addForm.querySelector('[type="submit"]');
       const network = addForm.querySelector('[name="network"]').value.trim();
       const netmask = addForm.querySelector('[name="netmask"]').value.trim();
-      ApiClient.call('/api/vpn-routes', {
+      ApiClient.withBusy(submitBtn, ApiClient.call('/api/vpn-routes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ network, netmask }),
       })
-        .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data })))
+        .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data }))))
         .then(({ ok, data }) => {
           if (!ok) { showRowError(tbody, data.error || `Could not push ${network}/${netmask}.`); return; }
           document.getElementById('add-route-dialog').close();

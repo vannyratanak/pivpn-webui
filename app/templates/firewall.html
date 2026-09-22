@@ -23,7 +23,6 @@
         <button type="button" class="btn" onclick="document.getElementById('add-rule-dialog').showModal()">Add Rule</button>
         <button type="button" class="btn" onclick="document.getElementById('import-rules-dialog').showModal()">Import Rules</button>
         <form method="post" action="{{ url_for('main.resync_rules') }}" class="btn-form">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <button type="submit" class="btn">Apply Rules</button>
         </form>
         <!-- Always rendered now (used to be conditional on a server-side
@@ -32,17 +31,14 @@
              the hidden attribute itself once it has fetched the real,
              current answer from GET /api/firewall/rules. -->
         <form method="post" action="{{ url_for('main.persist_rules') }}" class="btn-form" hidden>
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <button type="submit" class="btn btn-warn btn-unsaved-jump">Save Rules</button>
         </form>
       </div>
       <div class="btn-group" id="bulk-actions-group" hidden>
         <form method="post" action="{{ url_for('main.bulk_disable_rules') }}" id="bulk-disable-form" class="btn-form">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <button type="submit" class="btn btn-warn" id="bulk-disable-btn" disabled>Disable (<span id="bulk-disable-count">0</span>)</button>
         </form>
         <form method="post" action="{{ url_for('main.bulk_delete_rules') }}" id="bulk-delete-form" class="btn-form">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <button type="submit" class="btn btn-danger" id="bulk-delete-btn" disabled>Delete (<span id="bulk-delete-count">0</span>)</button>
         </form>
       </div>
@@ -63,7 +59,6 @@
     <div data-rule-type-panel="forward">
       <p class="hint">Controls what's allowed through the FORWARD chain — e.g. drop a subnet, or explicitly accept traffic between two ranges.</p>
       <form method="post" action="{{ url_for('main.add_forward') }}" class="inline-form" id="add-forward-form">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <label>Action
           <select name="action">
             <option value="ACCEPT">Forward (ACCEPT)</option>
@@ -105,7 +100,6 @@
     <div data-rule-type-panel="input" hidden>
       <p class="hint">Controls what's allowed to reach this server itself (its web UI, SSH, anything listening here) — not traffic passing through it to somewhere else, that's the FORWARD rule above. A rule that would block your own current connection is refused rather than applied.</p>
       <form method="post" action="{{ url_for('main.add_input') }}" class="inline-form" id="add-input-form">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <label>Action
           <select name="action">
             <option value="ACCEPT">Allow (ACCEPT)</option>
@@ -144,7 +138,6 @@
     <div data-rule-type-panel="portforward" hidden>
       <p class="hint">DNAT: forward an external port to a VPN client's internal IP.</p>
       <form method="post" action="{{ url_for('main.add_portforward') }}" class="inline-form" id="add-portforward-form">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <label><span class="label-text">External port<span class="required-star" aria-hidden="true">*</span></span>
           <input type="text" name="ext_port" required placeholder="8080">
         </label>
@@ -175,7 +168,6 @@
     <div data-rule-type-panel="snat" hidden>
       <p class="hint">Like the automatic outbound NAT, but with a fixed exit IP instead of whatever address the outgoing interface currently has.</p>
       <form method="post" action="{{ url_for('main.add_snat') }}" class="inline-form" id="add-snat-form">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <label>Source <span class="hint">(subnet whose outbound traffic gets rewritten)</span>
           <input type="text" name="src" placeholder="10.202.226.0/24" pattern="{{ ip_cidr_pattern }}" title="An IPv4 address, optionally with a /0-32 CIDR suffix, e.g. 192.168.1.0/24">
         </label>
@@ -407,7 +399,6 @@
     </ul>
 
     <form method="post" action="{{ url_for('main.import_rules') }}" enctype="multipart/form-data" class="inline-form">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <label>File
         <input type="file" name="rules_file" accept=".txt" required>
       </label>

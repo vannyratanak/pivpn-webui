@@ -2,12 +2,12 @@
 for scripts/other systems, alongside the browser UI in routes.py.
 
 Not the same routes as the browser: those render Jinja templates and
-assume a human in a browser (CSRF token in a hidden form field, flash
-messages, redirects). A script wants JSON in, JSON out, every time, with
-a machine-readable error instead of an HTML page. Auth is a JWT bearer
-token (see config.JWT_SECRET_KEY) instead of the session cookie
-Flask-Login issues — see app/__init__.py's csrf.exempt(api_bp) comment
-for why CSRF protection doesn't apply to this blueprint.
+assume a human in a browser (flash messages, redirects). A script wants
+JSON in, JSON out, every time, with a machine-readable error instead of
+an HTML page. Auth is a JWT bearer token (see config.JWT_SECRET_KEY)
+instead of the session cookie Flask-Login issues — see auth.py's
+HTML_JWT_COOKIE_NAME comment for why this blueprint only ever accepts
+the Authorization header, never that cookie.
 """
 from flask import Blueprint, Response, jsonify, request
 from flask_jwt_extended import create_access_token, get_jwt, get_jwt_identity, jwt_required

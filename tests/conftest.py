@@ -86,11 +86,6 @@ def client(monkeypatch):
     from app import create_app
     app = create_app()
     app.config["TESTING"] = True
-    # CSRF middleware itself isn't what these tests are checking — disabling
-    # it here keeps route tests focused on route behavior. Real requests in
-    # production still go through it untouched; this only affects the test
-    # client.
-    app.config["WTF_CSRF_ENABLED"] = False
 
     with app.test_client() as test_client:
         yield test_client

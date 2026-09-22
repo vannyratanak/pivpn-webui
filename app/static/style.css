@@ -1045,6 +1045,13 @@ button:disabled, .btn:disabled {
 }
 button:disabled:hover, .btn:disabled:hover { filter: none; }
 
+/* ApiClient.withBusy's own marker class — same dimmed-disabled look above,
+   but "progress" instead of "not-allowed": the button isn't unavailable,
+   it's mid-request (see that function's own comment for why this exists
+   at all — a click with zero visible reaction for several seconds reads
+   as "didn't register", not "working"). */
+button.is-busy:disabled, .btn.is-busy:disabled { cursor: progress; }
+
 .btn-warn { background: var(--warn); color: #241a00; }
 /* Fixed colors, not var(--danger) — dark mode's token value (#f0556c) is
    too bright for white text (3.38:1, fails 4.5:1), which is why this
@@ -1964,6 +1971,16 @@ input[type="text"].filter-input-inline {
 .login-wrap {
   min-height: 80vh;
   display: flex;
+  /* Without this, flex's row default put the locked-state's
+     .login-alt-action paragraph (a sibling after .login-card, both
+     children of this wrap) beside the card instead of below it —
+     justify-content: center then centered that whole row as a pair,
+     stranding the "Not you?" text off to the side at card-height instead
+     of stacked underneath. Column makes align-items/justify-content mean
+     "center horizontally, then vertically" the way both states actually
+     need. No effect on the plain-login state, which has only one child
+     either way. */
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   padding: 24px;
@@ -1986,11 +2003,13 @@ input[type="text"].filter-input-inline {
   /* Wider than the general .card token's implicit sizing, and its own gap
      scale — this is the page's one and only focal element on an otherwise
      empty viewport, not a stacked section among others, so it earns more
-     breathing room than a dense data-page card would. */
+     breathing room than a dense data-page card would. 20px (DESIGN.md's
+     lg spacing token, the nearest step to the previous off-scale 16px)
+     keeps that same "more room" intent on an actual scale value. */
   width: 360px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 20px;
 }
 
 .login-card-header { text-align: center; }
@@ -2010,12 +2029,39 @@ input[type="text"].filter-input-inline {
 .login-card label {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  /* 4px, matching .inline-form label's own label-above-input gap — same
+     job (a field label stacked above its input), same token, not a
+     login-specific one-off. */
+  gap: 4px;
   font-size: 13px;
   color: var(--muted);
 }
 
 .login-card input { width: 100%; }
+
+/* Spans the same width as the inputs above it instead of shrink-wrapping
+   to its own text — matches .inline-form button's own full-width submit
+   convention (grid-column: 1 / -1 there; a plain width here, since this
+   form isn't a grid) so the one actionable control in the card doesn't
+   read smaller than the fields feeding it. */
+.login-card button[type="submit"] { width: 100%; }
+
+/* "Not you? Sign in with a different account" link shown below the
+   locked-session resume card — same max-width as the card, centered,
+   small muted text, link in brand color. */
+.login-alt-action {
+  width: 360px;
+  margin: 8px auto 0;
+  text-align: center;
+  /* 13px (Caption), not 12px (Label/.hint-only) — DESIGN.md draws that
+     line specifically: Caption covers "structural secondary text that's
+     still part of the content", which this is (a real navigation
+     action, "sign in as someone else"), not a purely annotational aside
+     like a form hint. */
+  font-size: 13px;
+  color: var(--muted);
+}
+.login-alt-action a { color: var(--accent); }
 
 /* Light/dark toggle (static/js/theme-toggle.js). Icon + text-label pill,
    not a bare icon button — the visible "Dark"/"Light" word means the

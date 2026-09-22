@@ -5,13 +5,11 @@ from pathlib import Path
 from flask import Flask, g
 from flask_jwt_extended import JWTManager
 from flask_login import current_user
-from flask_wtf import CSRFProtect
 
 import config
 from app import db
 from app.auth import issue_html_jwt_cookie, login_manager, token_superseded
 
-csrf = CSRFProtect()
 jwt = JWTManager()
 
 
@@ -77,19 +75,12 @@ def create_app():
 
     db.init_db()
     login_manager.init_app(app)
-    csrf.init_app(app)
     jwt.init_app(app)
 
     from app.routes import bp as main_bp
     app.register_blueprint(main_bp)
 
     from app.api import bp as api_bp
-    # Token-authenticated, not cookie-authenticated — CSRF's threat model
-    # (a malicious page tricking a victim's *browser* into firing a
-    # request that rides along their *existing cookie*) doesn't apply
-    # here: an API caller has to already possess the bearer token, which
-    # never sits in a cookie a browser would attach on its own.
-    csrf.exempt(api_bp)
     app.register_blueprint(api_bp)
 
     @app.after_request

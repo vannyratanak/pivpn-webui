@@ -1,7 +1,13 @@
-// Forces a real logout after IDLE_TIMEOUT_MINUTES of no genuine user
-// activity (click/keypress/scroll/touch/mouse-move) — a separate, much
-// shorter clock than the 8h "since your last *request*" cookie window
-// and the 15m API-token silent refresh, both of which stay unaffected.
+// Cisco/Huawei-style idle session lock: after IDLE_TIMEOUT_MINUTES of no
+// genuine user activity (click/keypress/scroll/touch/mouse-move) this script
+// POSTs to /account/lock, which clears the html_jwt auth cookie and sets an
+// idle_lock cookie naming the locked user, then redirects to /login.  The
+// login page detects the lock cookie and shows a "resume session" screen
+// (just a password prompt — the username is already known from the cookie)
+// instead of a full login form.  Unlike /logout, /account/lock does NOT bump
+// session_generation, so the API bearer token in localStorage and any other
+// open tabs stay valid: the user only needs to re-enter their password, not
+// sign in from scratch.
 // See config.py's IDLE_TIMEOUT_MINUTES and auth.py's idle_timed_out for
 // the server-side half of this: the enforcement lives there (a cookie
 // whose "la" claim goes stale stops authenticating, full stop) — this
@@ -52,10 +58,8 @@
 
   function sendHeartbeat() {
     lastHeartbeatSent = Date.now();
-    const csrfMeta = document.querySelector('meta[name="csrf-token"]');
     fetch("/account/heartbeat", {
       method: "POST",
-      headers: { "X-CSRFToken": csrfMeta ? csrfMeta.content : "" },
       credentials: "same-origin",
     }).then((resp) => {
       // fetch() follows redirects transparently, so a session that's
@@ -85,8 +89,24 @@
     lastActivity = Math.max(lastActivity, Number(localStorage.getItem(ACTIVITY_KEY)) || 0);
     if (now - lastActivity >= IDLE_MS) {
       done = true;
-      localStorage.removeItem("pivpn_webui_api_token");
-      window.location.href = "/logout";
+      // Cisco/Huawei-style idle lock: POST /account/lock clears the html_jwt
+      // cookie and sets an idle_lock cookie with the username, then redirects
+      // the server-side response to /login.  We do NOT remove the API bearer
+      // token from localStorage so a resumed session can keep using it — the
+      // token stays valid because /account/lock (unlike /logout) never bumps
+      // session_generation.  If the lock POST itself fails (network down,
+      // already logged out), fall back to a plain redirect to /login anyway.
+      fetch("/account/lock", {
+        method: "POST",
+        credentials: "same-origin",
+        redirect: "follow",
+      })
+        .then((resp) => {
+          window.location.href = resp.url || "/login";
+        })
+        .catch(() => {
+          window.location.href = "/login";
+        });
       return;
     }
     if (lastActivity > lastHeartbeatSent && now - lastHeartbeatSent >= HEARTBEAT_MIN_INTERVAL_MS) {

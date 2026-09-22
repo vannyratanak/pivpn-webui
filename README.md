@@ -169,7 +169,7 @@ firewall logic) is independent of it.
 
 - Plain Flask app (`app/`), real accounts in a `users` table (`Flask-Login`)
   with two roles — admin and moderator, see "User accounts and roles"
-  below — CSRF protection on all forms (`Flask-WTF`).
+  below.
 - Runs as your normal user (the one that installed PiVPN), **not root** —
   `pivpn` itself refuses to run as root. It does, however, need passwordless
   sudo for its own internal privileged steps, same as it would if you were
@@ -893,7 +893,7 @@ endpoints accept multipart files and return JSON, including individual
 failures when only part of an import succeeds.
 
 Login issues an HttpOnly JWT cookie for page navigation. JavaScript obtains
-its bearer token from the cookie- and CSRF-protected `/account/api-token`
+its bearer token from the cookie-authenticated `/account/api-token`
 endpoint and stores it in localStorage. An expired bearer token is refreshed
 once and the request retried while the browser session is still valid.
 Because localStorage is accessible to page scripts, protecting against XSS
@@ -901,7 +901,7 @@ remains essential. A new login invalidates earlier tokens for that account; logg
 revokes the bearer tokens issued during that session.
 
 After **90 seconds without activity** (`IDLE_TIMEOUT_MINUTES=1.5`), the browser
-returns to login. Activity extends that deadline through CSRF-protected
+returns to login. Activity extends that deadline through periodic
 heartbeats, and activity in another tab counts too. A countdown appears in
 the last 10 seconds before idle logout; ordinary bearer-token refresh does not
 trigger a logout warning. The server also rejects browser cookies whose

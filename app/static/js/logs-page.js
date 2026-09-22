@@ -188,8 +188,8 @@
     nextBtn.addEventListener('click', () => { page += 1; loadLogs(false); });
     if (refreshBtn) {
       refreshBtn.addEventListener('click', () => {
-        ApiClient.call('/api/logs/refresh', { method: 'POST' })
-          .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data })))
+        ApiClient.withBusy(refreshBtn, ApiClient.call('/api/logs/refresh', { method: 'POST' })
+          .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data }))))
           .then(({ ok, data }) => {
             if (!ok) { showLoadError(TAB_CONFIG[tab], data.error || 'Could not refresh.'); return; }
             loadLogs(false);

@@ -34,11 +34,11 @@ IDLE_TIMEOUT_MINUTES = float(os.environ.get("IDLE_TIMEOUT_MINUTES", "1.5"))
 # JWT for the API (app/api.py) — a separate credential from the browser's
 # session cookie above, for scripts/other systems calling this app without
 # logging in through a browser. Deliberately its own secret, not a reuse of
-# SECRET_KEY: SECRET_KEY also signs the session cookie and CSRF tokens, so
-# rotating it (e.g. after a suspected leak of one) would otherwise force
-# rotating the other too, for no real reason — they protect different
-# things. Falls back to SECRET_KEY only if JWT_SECRET_KEY was never set,
-# so this stays a zero-config addition for anyone not using the API yet.
+# SECRET_KEY: SECRET_KEY also signs the session cookie, so rotating it
+# (e.g. after a suspected leak of one) would otherwise force rotating the
+# other too, for no real reason — they protect different things. Falls
+# back to SECRET_KEY only if JWT_SECRET_KEY was never set, so this stays a
+# zero-config addition for anyone not using the API yet.
 JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY") or SECRET_KEY
 # Short-lived on purpose — a leaked API token (logged by some intermediary,
 # committed to a script by accident) self-expires quickly. 15 minutes is

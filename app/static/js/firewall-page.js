@@ -173,15 +173,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const ruleId = btn.dataset.ruleId;
 
     if (btn.dataset.action === 'toggle') {
-      ApiClient.call(`/api/firewall/rules/${ruleId}/toggle`, { method: 'POST' })
-        .then((resp) => resp.ok ? loadRules() : Promise.reject())
+      ApiClient.withBusy(btn, ApiClient.call(`/api/firewall/rules/${ruleId}/toggle`, { method: 'POST' })
+        .then((resp) => resp.ok ? loadRules() : Promise.reject()))
         .catch(() => showRowError(btn.closest('tr'), `Could not toggle rule #${ruleId}.`));
       return;
     }
     if (btn.dataset.action === 'delete') {
       window.askConfirm('Delete this rule?', 'Delete', () => {
-        ApiClient.call(`/api/firewall/rules/${ruleId}`, { method: 'DELETE' })
-          .then((resp) => resp.ok ? loadRules() : Promise.reject())
+        ApiClient.withBusy(btn, ApiClient.call(`/api/firewall/rules/${ruleId}`, { method: 'DELETE' })
+          .then((resp) => resp.ok ? loadRules() : Promise.reject()))
           .catch(() => showRowError(btn.closest('tr'), `Could not delete rule #${ruleId}.`));
       });
     }
@@ -199,12 +199,13 @@ document.addEventListener('DOMContentLoaded', () => {
       const el = form.querySelector(`[name="${name}"]`);
       if (el) body[name] = el.value;
     });
-    ApiClient.call(endpoint, {
+    const submitBtn = form.querySelector('[type="submit"]');
+    ApiClient.withBusy(submitBtn, ApiClient.call(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
-      .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data })))
+      .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data }))))
       .then(({ ok, data }) => {
         if (!ok) { showRowError(form, data.error || 'Could not add that rule.'); return; }
         document.getElementById('add-rule-dialog').close();

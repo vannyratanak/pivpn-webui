@@ -16,11 +16,20 @@ login_manager.login_view = "main.login"
 # The browser's own identity cookie — a JWT, not a Flask session. Kept as
 # its own cookie (not flask_jwt_extended's JWT_TOKEN_LOCATION=cookies
 # setting) so app/api.py's blueprint keeps authenticating purely via the
-# Authorization header, exactly as before: letting a cookie also satisfy
-# @jwt_required() there would reopen the CSRF hole that blueprint's own
-# csrf.exempt() was deliberately relying on that header-only requirement
-# to stay closed (see app/__init__.py's comment on that exempt() call).
+# Authorization header, exactly as before: a cookie is attached to a
+# request automatically by the browser, a bearer header never is — letting
+# a cookie also satisfy @jwt_required() there would let a forged cross-site
+# request ride along on it, which is exactly the class of attack a bearer-
+# only API is naturally immune to as long as it stays header-only.
 HTML_JWT_COOKIE_NAME = "html_jwt"
+# Short-lived cookie that marks a session as "idle-locked" (screen-locked,
+# Cisco-style) — set by /account/lock when the idle timer fires, cleared on
+# the next successful credential check.  It is NOT the auth cookie: it only
+# remembers the username so the login page can offer a "resume as <user>"
+# prompt instead of a blank form.  httpOnly so JS cannot read it; Lax/Secure
+# matches the html_jwt cookie.  Max-age is SESSION_LIFETIME_HOURS so a
+# locked screen doesn't show a stale username after a full natural expiry.
+LOCK_COOKIE_NAME = "idle_lock"
 
 
 class User(UserMixin):
@@ -56,9 +65,9 @@ def issue_html_jwt_cookie(response, user):
     SESSION_COOKIE_SECURE (see config.py's own comment on why that one
     real exception — plain-HTTP LAN mode — needs it set to false).
     SameSite=Lax: sent on normal top-level navigation, not on a
-    cross-site page's background POST — the CSRF token already required
-    in every form's hidden field is the real defense against that case;
-    this is defense in depth, not a replacement for it."""
+    cross-site page's background POST — this is what actually stops a
+    forged cross-site request from riding along on this cookie, now that
+    there's no separate CSRF token layered on top of it."""
     token = create_access_token(
         identity=user.username,
         # "la" = last-active-at (unix seconds). Stamped fresh every time
@@ -77,6 +86,29 @@ def issue_html_jwt_cookie(response, user):
 
 def clear_html_jwt_cookie(response):
     response.delete_cookie(HTML_JWT_COOKIE_NAME)
+
+
+def issue_lock_cookie(response, username: str):
+    """Set the idle-lock cookie for `username`.  Called by /account/lock
+    just before clearing the html_jwt; tells the login page who to show in
+    the 'resume session' banner so the user only needs to re-enter their
+    password, not their username too."""
+    response.set_cookie(
+        LOCK_COOKIE_NAME, username,
+        httponly=True, secure=config.SESSION_COOKIE_SECURE, samesite="Lax",
+        max_age=config.SESSION_LIFETIME_HOURS * 3600,
+    )
+
+
+def clear_lock_cookie(response):
+    response.delete_cookie(LOCK_COOKIE_NAME)
+
+
+def peek_locked_username(req) -> str | None:
+    """Return the username stored in the lock cookie, or None if absent.
+    Used by login() to decide whether to render the 'resume session' variant
+    of the login page — no authentication, just a plain cookie read."""
+    return req.cookies.get(LOCK_COOKIE_NAME) or None
 
 
 def token_superseded(claims: dict, row: dict) -> bool:
@@ -104,8 +136,7 @@ def load_user_from_jwt_cookie(req):
     current_user gets populated now. Every request re-verifies the JWT
     cookie's signature fresh — there's no server-side session state for
     identity at all (Flask's own session cookie still exists, but only
-    for flash() messages and CSRF token storage, both unrelated to who's
-    logged in)."""
+    for flash() messages, unrelated to who's logged in)."""
     token = req.cookies.get(HTML_JWT_COOKIE_NAME)
     if not token:
         return None

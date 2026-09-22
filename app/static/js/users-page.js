@@ -67,8 +67,17 @@ document.addEventListener('DOMContentLoaded', () => {
   function loadUsers(showSkeletonWhileLoading) {
     if (showSkeletonWhileLoading) tbody.innerHTML = skeletonRowHtml();
     return ApiClient.call('/api/users')
-      .then((resp) => resp.json())
-      .then((data) => render(data.users));
+      .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data })))
+      .then(({ ok, data }) => {
+        // Without this check, a non-2xx body throws inside render() and
+        // leaves the skeleton spinning forever with no explanation —
+        // same fix already applied to clients-page.js/vpn-routes-page.js.
+        if (!ok) {
+          tbody.innerHTML = `<tr class="empty-row"><td colspan="${colCount}" class="empty">${escapeHtml(data.error || 'Could not load users.')}</td></tr>`;
+          return;
+        }
+        render(data.users);
+      });
   }
 
   // Styled toast, matching clients-page.js's showRowError/
@@ -94,12 +103,13 @@ document.addEventListener('DOMContentLoaded', () => {
   if (addForm) {
     addForm.addEventListener('submit', (e) => {
       e.preventDefault();
+      const submitBtn = addForm.querySelector('[type="submit"]');
       const username = addForm.querySelector('[name="username"]').value.trim();
       const password = addForm.querySelector('[name="password"]').value;
       const confirm = addForm.querySelector('[name="confirm"]').value;
       const role = addForm.querySelector('[name="role"]').value;
       if (password !== confirm) { showError('Passwords did not match.'); return; }
-      postJson('/api/users', { method: 'POST' }, { username, password, role }).then(({ ok, data }) => {
+      ApiClient.withBusy(submitBtn, postJson('/api/users', { method: 'POST' }, { username, password, role })).then(({ ok, data }) => {
         if (!ok) { showError(data.error || `Could not create ${username}.`); return; }
         document.getElementById('add-user-dialog').close();
         addForm.reset();
@@ -112,11 +122,12 @@ document.addEventListener('DOMContentLoaded', () => {
   if (changeForm) {
     changeForm.addEventListener('submit', (e) => {
       e.preventDefault();
+      const submitBtn = changeForm.querySelector('[type="submit"]');
       const current_password = changeForm.querySelector('[name="current_password"]').value;
       const password = changeForm.querySelector('[name="password"]').value;
       const confirm = changeForm.querySelector('[name="confirm"]').value;
       if (password !== confirm) { showError('Passwords did not match.'); return; }
-      postJson('/api/account/password', { method: 'POST' }, { current_password, password }).then(({ ok, data }) => {
+      ApiClient.withBusy(submitBtn, postJson('/api/account/password', { method: 'POST' }, { current_password, password })).then(({ ok, data }) => {
         if (!ok) { showError(data.error || 'Could not change password.'); return; }
         document.getElementById('change-password-dialog').close();
         changeForm.reset();
@@ -147,8 +158,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (btn.dataset.action === 'delete') {
       window.askConfirm(`Permanently remove ${username}? This cannot be undone.`, 'Delete', () => {
-        ApiClient.call(`/api/users/${userId}`, { method: 'DELETE' })
-          .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data })))
+        ApiClient.withBusy(btn, ApiClient.call(`/api/users/${userId}`, { method: 'DELETE' })
+          .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data }))))
           .then(({ ok, data }) => {
             if (!ok) { showError(data.error || `Could not remove ${username}.`); return; }
             loadUsers();
@@ -160,11 +171,12 @@ document.addEventListener('DOMContentLoaded', () => {
   if (resetForm) {
     resetForm.addEventListener('submit', (e) => {
       e.preventDefault();
+      const submitBtn = resetForm.querySelector('[type="submit"]');
       const userId = resetForm.dataset.userId;
       const password = resetForm.querySelector('[name="password"]').value;
       const confirm = resetForm.querySelector('[name="confirm"]').value;
       if (password !== confirm) { showError('Passwords did not match.'); return; }
-      postJson(`/api/users/${userId}/reset-password`, { method: 'POST' }, { password }).then(({ ok, data }) => {
+      ApiClient.withBusy(submitBtn, postJson(`/api/users/${userId}/reset-password`, { method: 'POST' }, { password })).then(({ ok, data }) => {
         if (!ok) { showError(data.error || 'Could not reset password.'); return; }
         resetDialog.close();
       });
