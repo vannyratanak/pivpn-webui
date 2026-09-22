@@ -25,6 +25,12 @@ APP_DIR = Path(__file__).resolve().parent
 CA_CERT = APP_DIR / "instance" / "hub-ca.crt"
 CA_KEY = APP_DIR / "instance" / "hub-ca.key"
 AGENTS_DIR = APP_DIR / "instance" / "agents"
+# The hub's own server cert (setup-hub-tls.sh) — a completely separate
+# file from CA_CERT/CA_KEY above (that's what signs *agent* certs; this
+# is what the agent verifies to confirm it's really talking to the hub).
+# Needed here only to remind register() to mention copying it too — see
+# that function's own comment on why this was missing before.
+HUB_GATEWAY_CERT = APP_DIR / "instance" / "hub-gateway.crt"
 
 
 def _sign_agent_cert(name: str) -> tuple[Path, Path] | None:
@@ -60,6 +66,9 @@ def _sign_agent_cert(name: str) -> tuple[Path, Path] | None:
     return crt, key
 
 
+_SEP = "=" * 70
+
+
 def register(name: str):
     db.init_db()  # safe to call even before the Flask app has ever started — CREATE TABLE IF NOT EXISTS
     try:
@@ -68,7 +77,10 @@ def register(name: str):
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"Registered server #{server_id} ({name!r}). Add this to that box's agent .env:\n")
+    print(_SEP)
+    print(f"STEP 1 — Registered server #{server_id} ({name!r}).")
+    print("Add these two lines to that box's agent .env:")
+    print(_SEP)
     print(f"AGENT_SERVER_ID={server_id}")
     print(f"AGENT_TOKEN={token}")
 
@@ -77,19 +89,61 @@ def register(name: str):
         _print_cert_instructions(name, *cert_pair)
     else:
         print()
+        print(_SEP)
         print("(No hub CA found at instance/hub-ca.crt — skipping mutual-TLS cert.")
         print(" Run ./setup-hub-tls.sh, then re-run this command, if you want one.)")
+        print(_SEP)
 
 
 def _print_cert_instructions(name: str, crt: Path, key: Path):
+    """Real gap this closes: this used to only mention the agent's own
+    crt/key pair, on the assumption whoever's registering an agent
+    already separately remembers hub-gateway.crt from step 3 of
+    setup-hub.sh — often run long before, or by someone else entirely.
+    Missing that file gives a confusing runtime symptom (agent.py fails
+    with "[Errno 2] No such file or directory" on HUB_TLS_CERT), not an
+    obvious "you forgot a file" error. Printing all 3 files this agent
+    actually needs, in one place, at the one moment (registration) that
+    naturally precedes running setup-agent.sh on it, means nothing has
+    to be pieced together from an earlier, easy-to-forget step.
+
+    Split into clearly separated STEP blocks (not just one paragraph) —
+    live feedback: the scp command and the .env lines read as one
+    confusing wall of text otherwise, easy to mix up which line belongs
+    to which step."""
     print()
-    print("This hub has mutual-TLS set up (instance/hub-ca.crt) — copy these")
-    print("two files to that box (the .key especially must stay private):")
-    print(f"  scp {crt} {key} <agent-user>@<agent-host>:~/pivpn-webui/instance/")
-    print()
-    print("...and add to that box's agent .env:")
-    print(f"AGENT_TLS_CERT=<path where you copied it>/{name}.crt")
-    print(f"AGENT_TLS_KEY=<path where you copied it>/{name}.key")
+    print(_SEP)
+    if HUB_GATEWAY_CERT.exists():
+        print("STEP 2 — Copy these 3 files to that box (the .key files especially")
+        print("must stay private):")
+        print(_SEP)
+        print(f"scp {HUB_GATEWAY_CERT} {crt} {key} \\")
+        print("  <agent-user>@<agent-host>:~/pivpn-webui/instance/")
+        print()
+        print(_SEP)
+        print("STEP 3 — Add these 3 lines to that box's agent .env:")
+        print(_SEP)
+        print(f"HUB_TLS_CERT=<path where you copied it>/hub-gateway.crt")
+        print(f"AGENT_TLS_CERT=<path where you copied it>/{name}.crt")
+        print(f"AGENT_TLS_KEY=<path where you copied it>/{name}.key")
+        print(_SEP)
+    else:
+        # A CA can exist (instance/hub-ca.crt/.key, checked by the
+        # caller before this function is even called) without the hub's
+        # own server cert existing — two independent files from the same
+        # setup-hub-tls.sh run, in principle deletable separately.
+        print(f"WARNING — {HUB_GATEWAY_CERT} not found. The agent needs this to")
+        print("verify the hub over wss://, but this hub has no server cert yet.")
+        print("Run ./setup-hub-tls.sh first, then come back and copy these 2 files:")
+        print(_SEP)
+        print(f"scp {crt} {key} <agent-user>@<agent-host>:~/pivpn-webui/instance/")
+        print()
+        print(_SEP)
+        print("STEP 3 — Add these 2 lines to that box's agent .env:")
+        print(_SEP)
+        print(f"AGENT_TLS_CERT=<path where you copied it>/{name}.crt")
+        print(f"AGENT_TLS_KEY=<path where you copied it>/{name}.key")
+        print(_SEP)
 
 
 def issue_cert(name: str):
