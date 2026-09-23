@@ -15,6 +15,10 @@ cd "$APP_DIR"
 
 echo "== PiVPN Web UI setup =="
 
+# WHOIS lookups run in the WebUI process, so this dependency belongs on
+# the application host (standalone server or hub), not on a remote agent.
+./deploy/install-whois.sh
+
 if ! command -v pivpn >/dev/null 2>&1; then
   echo "Warning: 'pivpn' not found on PATH. Client management won't work until it is." >&2
 fi

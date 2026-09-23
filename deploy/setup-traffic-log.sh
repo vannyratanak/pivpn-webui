@@ -79,12 +79,6 @@ else
   echo "netfilter-persistent not found — this rule will NOT survive a reboot until you persist it another way." >&2
 fi
 
-if ! command -v whois >/dev/null 2>&1; then
-  echo "Installing 'whois' (needed for the Traffic tab's Organization column)..."
-  DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y whois
-  echo "'whois' installed."
-fi
-
 echo
 echo "Verify with a real connection from a connected client, then:"
 echo "  journalctl -k -g '$LOG_PREFIX' --since '10 min ago' --no-pager -o short-iso"

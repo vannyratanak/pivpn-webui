@@ -55,6 +55,10 @@ else
   echo "   (remove venv/ and .env first if you want to redo it from scratch)"
 fi
 
+echo
+echo "== Ensuring WHOIS is installed on the hub (organization lookups run here) =="
+./deploy/install-whois.sh
+
 # shellcheck disable=SC1091
 source venv/bin/activate
 

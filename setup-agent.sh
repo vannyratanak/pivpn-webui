@@ -227,10 +227,6 @@ echo "== Step 6/7: per-destination traffic logging (Logs page's Traffic tab) =="
 # script only warns about that, doesn't require it) gets a friendly skip
 # instead of aborting the rest of this setup over it.
 if [[ -r /etc/openvpn/server.conf ]]; then
-  if ! command -v whois >/dev/null 2>&1; then
-    echo "Installing whois (so the Traffic tab's Organization column isn't blank)..."
-    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y whois
-  fi
   sudo ./deploy/setup-traffic-log.sh
 else
   echo "No /etc/openvpn/server.conf found — skipping (PiVPN doesn't appear to be"
