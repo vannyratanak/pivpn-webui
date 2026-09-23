@@ -184,6 +184,61 @@ def test_get_ip_org_whois_binary_missing_returns_none_not_raise(tmp_path, monkey
     assert iplookup.get_ip_org("1.1.1.1") is None
 
 
+def _backdate_cache_entry(ip, days_ago):
+    conn = db.get_conn()
+    try:
+        conn.execute(
+            "UPDATE ip_org_cache SET looked_up_at = "
+            "to_char(now() - make_interval(days => %s), 'YYYY-MM-DD HH24:MI:SS') "
+            "WHERE ip = %s",
+            (days_ago, ip),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_get_ip_org_null_entry_not_retried_within_cooldown(tmp_path, monkeypatch):
+    _use_temp_db(tmp_path, monkeypatch)
+    db.cache_ip_org("1.1.1.1", None)
+    _backdate_cache_entry("1.1.1.1", db._IP_ORG_NULL_RETRY_DAYS - 1)
+
+    def fail_if_called(*a, **k):
+        raise AssertionError("still inside the retry cooldown, whois must not be called")
+
+    monkeypatch.setattr(subprocess, "run", fail_if_called)
+    assert iplookup.get_ip_org("1.1.1.1") is None
+
+
+def test_get_ip_org_null_entry_retried_after_cooldown(tmp_path, monkeypatch):
+    # The self-heal case this exists for: a NULL cached before `whois` was
+    # installed on a fresh agent host shouldn't be stuck blank forever.
+    _use_temp_db(tmp_path, monkeypatch)
+    db.cache_ip_org("1.1.1.1", None)
+    _backdate_cache_entry("1.1.1.1", db._IP_ORG_NULL_RETRY_DAYS + 1)
+    calls = []
+
+    def run(argv, capture_output, text, timeout):
+        calls.append(argv)
+        return subprocess.CompletedProcess(args=argv, returncode=0, stdout=WHOIS_QUAD9, stderr="")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    assert iplookup.get_ip_org("1.1.1.1") == "Quad9"
+    assert len(calls) == 1
+
+
+def test_get_ip_org_resolved_entry_never_retried_even_past_cooldown(tmp_path, monkeypatch):
+    _use_temp_db(tmp_path, monkeypatch)
+    db.cache_ip_org("9.9.9.9", "Quad9")
+    _backdate_cache_entry("9.9.9.9", db._IP_ORG_NULL_RETRY_DAYS + 30)
+
+    def fail_if_called(*a, **k):
+        raise AssertionError("a resolved org is a permanent cache entry, cooldown doesn't apply")
+
+    monkeypatch.setattr(subprocess, "run", fail_if_called)
+    assert iplookup.get_ip_org("9.9.9.9") == "Quad9"
+
+
 def test_get_ip_orgs_bulk_dedups_private_cached_and_malformed_without_whois(tmp_path, monkeypatch):
     _use_temp_db(tmp_path, monkeypatch)
     db.cache_ip_org("9.9.9.9", "Quad9")  # pre-warm one entry, as if a prior request cached it

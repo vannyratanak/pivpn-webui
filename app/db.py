@@ -193,10 +193,15 @@ CREATE TABLE IF NOT EXISTS users (
 
 -- Destination IP -> organization, for the Traffic log (see
 -- app/iplookup.py). org-to-IP-block ownership essentially never changes,
--- so this is a permanent cache, not a TTL'd one — org IS NULL means "we
--- already looked this IP up and found nothing usable," which is itself
--- worth remembering so a persistently-unresolvable IP only ever costs one
--- real WHOIS query, not one per page load.
+-- so a resolved org is a permanent cache entry, not a TTL'd one. A NULL
+-- org is different: it can mean either "WHOIS answered but had nothing
+-- usable" (also effectively permanent) or "the lookup itself failed" (no
+-- `whois` binary installed, a network hiccup, a rate-limited registry —
+-- all transient). Since those two cases are indistinguishable from here,
+-- get_cached_ip_org() below treats a NULL entry as stale after
+-- _IP_ORG_NULL_RETRY_DAYS and lets it be retried, instead of caching a
+-- one-time infra failure (e.g. a fresh agent host that hadn't run
+-- deploy/setup-traffic-log.sh's `whois` install yet) forever.
 CREATE TABLE IF NOT EXISTS ip_org_cache (
     ip TEXT PRIMARY KEY,
     org TEXT,
@@ -881,13 +886,25 @@ def list_audit_page(
         conn.close()
 
 
+# See the ip_org_cache comment above: a resolved org is cached forever,
+# but a NULL (lookup failed/found nothing) is only trusted for this long
+# before a caller is allowed to retry it.
+_IP_ORG_NULL_RETRY_DAYS = 7
+
+
 def get_cached_ip_org(ip: str) -> tuple[bool, str | None]:
-    """(found, org) — found=False means this IP has never been looked up
-    at all (org=None alone can't distinguish that from "looked up, found
-    nothing"), which is exactly what a cache-fill caller needs to know."""
+    """(found, org) — found=False means either this IP has never been
+    looked up at all, or its last lookup was a NULL that's now past
+    _IP_ORG_NULL_RETRY_DAYS (org=None alone can't distinguish "never
+    looked up" from "looked up, found nothing", which is exactly what a
+    cache-fill caller needs to know)."""
     conn = get_conn()
     try:
-        row = conn.execute("SELECT org FROM ip_org_cache WHERE ip = %s", (ip,)).fetchone()
+        row = conn.execute(
+            "SELECT org FROM ip_org_cache WHERE ip = %s "
+            "AND (org IS NOT NULL OR looked_up_at::timestamp > now() - make_interval(days => %s))",
+            (ip, _IP_ORG_NULL_RETRY_DAYS),
+        ).fetchone()
         return (True, row["org"]) if row else (False, None)
     finally:
         conn.close()
