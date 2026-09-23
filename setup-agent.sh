@@ -101,10 +101,19 @@ else
   # check there first and offer it as the default instead of demanding
   # a full path be retyped every time. Still overridable, for anyone who
   # put them somewhere else.
+  # "blank to skip" only means "skip" when there's no default filled in
+  # — once a found file IS shown in [brackets], blank instead means
+  # "use that file", which is the opposite thing and confusing to read
+  # the same way. So once a default exists, blank accepts it and typing
+  # the literal word "skip" is the only way to opt out instead.
   DEFAULT_HUB_CRT="$APP_DIR/instance/hub-gateway.crt"
   if [[ -f "$DEFAULT_HUB_CRT" ]]; then
-    read -rp "Path to the hub's copied hub-gateway.crt, if HUB_URL is wss:// [$DEFAULT_HUB_CRT]: " HUB_TLS_CERT
-    HUB_TLS_CERT="${HUB_TLS_CERT:-$DEFAULT_HUB_CRT}"
+    read -rp "Path to the hub's copied hub-gateway.crt — Enter to use this, or type 'skip' if HUB_URL is ws:// [$DEFAULT_HUB_CRT]: " HUB_TLS_CERT
+    if [[ "$HUB_TLS_CERT" == "skip" ]]; then
+      HUB_TLS_CERT=""
+    else
+      HUB_TLS_CERT="${HUB_TLS_CERT:-$DEFAULT_HUB_CRT}"
+    fi
   else
     read -rp "Path to the hub's copied hub-gateway.crt, if HUB_URL is wss:// (blank if ws://): " HUB_TLS_CERT
   fi
@@ -119,8 +128,12 @@ else
   AGENT_CRT_GUESS="$(find "$APP_DIR/instance" -maxdepth 1 -name '*.crt' \
     ! -name 'hub-gateway.crt' ! -name 'hub-ca.crt' 2>/dev/null | head -1)"
   if [[ -n "$AGENT_CRT_GUESS" ]]; then
-    read -rp "Path to this agent's own .crt, if the hub uses mutual TLS (blank to skip) [$AGENT_CRT_GUESS]: " AGENT_TLS_CERT
-    AGENT_TLS_CERT="${AGENT_TLS_CERT:-$AGENT_CRT_GUESS}"
+    read -rp "Path to this agent's own .crt — Enter to use this, or type 'skip' for no mutual TLS [$AGENT_CRT_GUESS]: " AGENT_TLS_CERT
+    if [[ "$AGENT_TLS_CERT" == "skip" ]]; then
+      AGENT_TLS_CERT=""
+    else
+      AGENT_TLS_CERT="${AGENT_TLS_CERT:-$AGENT_CRT_GUESS}"
+    fi
   else
     read -rp "Path to this agent's own .crt, if the hub uses mutual TLS (blank to skip): " AGENT_TLS_CERT
   fi
