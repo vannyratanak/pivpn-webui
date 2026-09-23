@@ -249,6 +249,22 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (action === 'renew') {
+      if (!renewDialog || !renewForm) {
+        // Same stale-template gap as the guard on renewForm's own submit
+        // handler below — falls back to the old plain-confirm behavior
+        // (passwordless renew only) instead of being stuck with a
+        // half-broken button.
+        window.askConfirm(
+          `Renew ${name}? This revokes the current cert and issues a new one — the old .ovpn will stop working immediately.`,
+          'Renew',
+          () => {
+            ApiClient.withBusy(btn, ApiClient.call(`/api/clients/${encodeURIComponent(name)}/renew`, { method: 'POST' })
+              .then((resp) => resp.ok ? refreshRow(row, name) : Promise.reject()))
+              .catch(() => showRowError(row, `Could not renew ${name}.`));
+          },
+        );
+        return;
+      }
       pendingRenewRow = row;
       renewForm.reset();
       document.getElementById('renew-client-name').textContent = name;
@@ -306,25 +322,34 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  renewForm.addEventListener('submit', (e) => {
-    e.preventDefault();
-    const row = pendingRenewRow;
-    const name = row.dataset.clientName;
-    const passphrase = renewForm.querySelector('[name="passphrase"]').value;
-    const submitBtn = renewForm.querySelector('[type="submit"]');
-    ApiClient.withBusy(submitBtn, ApiClient.call(`/api/clients/${encodeURIComponent(name)}/renew`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ passphrase: passphrase || undefined }),
-    })
-      .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data }))))
-      .then(({ ok, data }) => {
-        if (!ok) { showRowError(row, data.error || `Could not renew ${name}.`); return; }
-        renewDialog.close();
-        renewForm.reset();
-        refreshRow(row, name);
-      });
-  });
+  // Guarded like addForm/importForm below — real crash caught live: a
+  // stale gunicorn worker still serving the pre-Renew-dialog template
+  // (Jinja templates need a full restart to pick up changes; static JS
+  // reloads immediately from disk on its own, so the two can briefly
+  // disagree right after a deploy) meant this element didn't exist yet,
+  // and an unguarded renewForm.addEventListener() threw on page load —
+  // taking the *entire* Clients page's init down with it, not just Renew.
+  if (renewForm) {
+    renewForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const row = pendingRenewRow;
+      const name = row.dataset.clientName;
+      const passphrase = renewForm.querySelector('[name="passphrase"]').value;
+      const submitBtn = renewForm.querySelector('[type="submit"]');
+      ApiClient.withBusy(submitBtn, ApiClient.call(`/api/clients/${encodeURIComponent(name)}/renew`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ passphrase: passphrase || undefined }),
+      })
+        .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data }))))
+        .then(({ ok, data }) => {
+          if (!ok) { showRowError(row, data.error || `Could not renew ${name}.`); return; }
+          renewDialog.close();
+          renewForm.reset();
+          refreshRow(row, name);
+        });
+    });
+  }
 
   // Import Clients — a real multipart file upload (FormData built straight
   // from the form, so the file input's contents come along for free), not

@@ -135,8 +135,27 @@ document.addEventListener('DOMContentLoaded', () => {
     const action = btn.dataset.action;
 
     if (action === 'renew') {
-      document.getElementById('renew-client-form').reset();
-      document.getElementById('renew-client-dialog').showModal();
+      const dialog = document.getElementById('renew-client-dialog');
+      const form = document.getElementById('renew-client-form');
+      if (!dialog || !form) {
+        // Real crash caught live (Clients-list page): a stale gunicorn
+        // worker still serving the pre-Renew-dialog template (Jinja
+        // needs a full restart to pick up changes; static JS reloads
+        // immediately on its own) meant this element didn't exist yet.
+        // Falls back to the old plain-confirm behavior instead.
+        window.askConfirm(
+          `Renew ${name}? This revokes the current cert and issues a new one — the old .ovpn will stop working immediately.`,
+          'Renew',
+          () => {
+            ApiClient.withBusy(btn, ApiClient.call(`/api/clients/${encodeURIComponent(name)}/renew`, { method: 'POST' })
+              .then((resp) => (resp.ok ? loadClient() : Promise.reject())))
+              .catch(() => showToast(`Could not renew ${name}.`));
+          },
+        );
+        return;
+      }
+      form.reset();
+      dialog.showModal();
       return;
     }
 
@@ -164,25 +183,28 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  document.getElementById('renew-client-form').addEventListener('submit', (e) => {
-    e.preventDefault();
-    const renewForm = e.target;
-    const renewDialog = document.getElementById('renew-client-dialog');
-    const passphrase = renewForm.querySelector('[name="passphrase"]').value;
-    const submitBtn = renewForm.querySelector('[type="submit"]');
-    ApiClient.withBusy(submitBtn, ApiClient.call(`/api/clients/${encodeURIComponent(name)}/renew`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ passphrase: passphrase || undefined }),
-    })
-      .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data }))))
-      .then(({ ok, data }) => {
-        if (!ok) { showToast(data.error || `Could not renew ${name}.`); return; }
-        renewDialog.close();
-        renewForm.reset();
-        loadClient();
-      });
-  });
+  const renewClientForm = document.getElementById('renew-client-form');
+  if (renewClientForm) {
+    renewClientForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const renewForm = e.target;
+      const renewDialog = document.getElementById('renew-client-dialog');
+      const passphrase = renewForm.querySelector('[name="passphrase"]').value;
+      const submitBtn = renewForm.querySelector('[type="submit"]');
+      ApiClient.withBusy(submitBtn, ApiClient.call(`/api/clients/${encodeURIComponent(name)}/renew`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ passphrase: passphrase || undefined }),
+      })
+        .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data }))))
+        .then(({ ok, data }) => {
+          if (!ok) { showToast(data.error || `Could not renew ${name}.`); return; }
+          renewDialog.close();
+          renewForm.reset();
+          loadClient();
+        });
+    });
+  }
 
   // --- rules table
 
