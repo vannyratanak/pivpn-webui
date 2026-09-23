@@ -94,13 +94,46 @@ else
   # existed. Expanding any leading `~` to $HOME right after each read
   # fixes this regardless of what the user types, instead of relying on
   # everyone remembering to type an absolute path.
-  read -rp "Path to the hub's copied hub-gateway.crt, if HUB_URL is wss:// (blank if ws://): " HUB_TLS_CERT
+  #
+  # manage_servers.py's own printed instructions already tell whoever's
+  # copying these files to drop them straight into this box's
+  # instance/ — the one and only place they're ever told to go — so
+  # check there first and offer it as the default instead of demanding
+  # a full path be retyped every time. Still overridable, for anyone who
+  # put them somewhere else.
+  DEFAULT_HUB_CRT="$APP_DIR/instance/hub-gateway.crt"
+  if [[ -f "$DEFAULT_HUB_CRT" ]]; then
+    read -rp "Path to the hub's copied hub-gateway.crt, if HUB_URL is wss:// [$DEFAULT_HUB_CRT]: " HUB_TLS_CERT
+    HUB_TLS_CERT="${HUB_TLS_CERT:-$DEFAULT_HUB_CRT}"
+  else
+    read -rp "Path to the hub's copied hub-gateway.crt, if HUB_URL is wss:// (blank if ws://): " HUB_TLS_CERT
+  fi
   HUB_TLS_CERT="${HUB_TLS_CERT/#\~/$HOME}"
-  read -rp "Path to this agent's own .crt, if the hub uses mutual TLS (blank to skip): " AGENT_TLS_CERT
+
+  # The agent's own cert is named after whatever <name> was used at
+  # `manage_servers.py register <name>` — this box has no way to know
+  # that string, but it can still look in instance/ for whichever .crt
+  # actually landed there (excluding the hub's own hub-gateway.crt/
+  # hub-ca.crt, which live in that same folder for unrelated reasons)
+  # and offer that as the default.
+  AGENT_CRT_GUESS="$(find "$APP_DIR/instance" -maxdepth 1 -name '*.crt' \
+    ! -name 'hub-gateway.crt' ! -name 'hub-ca.crt' 2>/dev/null | head -1)"
+  if [[ -n "$AGENT_CRT_GUESS" ]]; then
+    read -rp "Path to this agent's own .crt, if the hub uses mutual TLS (blank to skip) [$AGENT_CRT_GUESS]: " AGENT_TLS_CERT
+    AGENT_TLS_CERT="${AGENT_TLS_CERT:-$AGENT_CRT_GUESS}"
+  else
+    read -rp "Path to this agent's own .crt, if the hub uses mutual TLS (blank to skip): " AGENT_TLS_CERT
+  fi
   AGENT_TLS_CERT="${AGENT_TLS_CERT/#\~/$HOME}"
   AGENT_TLS_KEY=""
   if [[ -n "$AGENT_TLS_CERT" ]]; then
-    read -rp "Path to this agent's own .key: " AGENT_TLS_KEY
+    AGENT_KEY_GUESS="${AGENT_TLS_CERT%.crt}.key"
+    if [[ -f "$AGENT_KEY_GUESS" ]]; then
+      read -rp "Path to this agent's own .key [$AGENT_KEY_GUESS]: " AGENT_TLS_KEY
+      AGENT_TLS_KEY="${AGENT_TLS_KEY:-$AGENT_KEY_GUESS}"
+    else
+      read -rp "Path to this agent's own .key: " AGENT_TLS_KEY
+    fi
     AGENT_TLS_KEY="${AGENT_TLS_KEY/#\~/$HOME}"
   fi
   read -rp "Path PiVPN writes .ovpn files to [$HOME/ovpns]: " OVPN_DIR
