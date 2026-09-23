@@ -80,8 +80,9 @@ else
 fi
 
 if ! command -v whois >/dev/null 2>&1; then
-  echo "Note: 'whois' isn't installed — the Traffic tab will still show" >&2
-  echo "rows, just with a blank Organization column until you 'apt install whois'." >&2
+  echo "Installing 'whois' (needed for the Traffic tab's Organization column)..."
+  DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y whois
+  echo "'whois' installed."
 fi
 
 echo
