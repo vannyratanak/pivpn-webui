@@ -135,15 +135,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const action = btn.dataset.action;
 
     if (action === 'renew') {
-      window.askConfirm(
-        `Renew ${name}? This revokes the current cert and issues a new one — the old .ovpn will stop working immediately.`,
-        'Renew',
-        () => {
-          ApiClient.withBusy(btn, ApiClient.call(`/api/clients/${encodeURIComponent(name)}/renew`, { method: 'POST' })
-            .then((resp) => (resp.ok ? loadClient() : resp.json().then((d) => Promise.reject(d)))))
-            .catch((d) => showToast((d && d.error) || `Could not renew ${name}.`));
-        },
-      );
+      document.getElementById('renew-client-form').reset();
+      document.getElementById('renew-client-dialog').showModal();
       return;
     }
 
@@ -169,6 +162,26 @@ document.addEventListener('DOMContentLoaded', () => {
           .catch(() => showToast(`Could not remove ${name}.`));
       });
     }
+  });
+
+  document.getElementById('renew-client-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const renewForm = e.target;
+    const renewDialog = document.getElementById('renew-client-dialog');
+    const passphrase = renewForm.querySelector('[name="passphrase"]').value;
+    const submitBtn = renewForm.querySelector('[type="submit"]');
+    ApiClient.withBusy(submitBtn, ApiClient.call(`/api/clients/${encodeURIComponent(name)}/renew`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ passphrase: passphrase || undefined }),
+    })
+      .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data }))))
+      .then(({ ok, data }) => {
+        if (!ok) { showToast(data.error || `Could not renew ${name}.`); return; }
+        renewDialog.close();
+        renewForm.reset();
+        loadClient();
+      });
   });
 
   // --- rules table

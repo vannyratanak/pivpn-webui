@@ -289,10 +289,17 @@ def remove_client(name: str) -> None:
         raise PivpnError((result.stdout + result.stderr).strip() or "pivpn revoke failed")
 
 
-def renew_client(name: str) -> Path | None:
+def renew_client(name: str, passphrase: str | None = None) -> Path | None:
     """Revoke + reissue under the same name (see module docstring). Same
     HUB_MODE caveat as add_client's return value — None there, not a
     hub-local path to a file that isn't on the hub.
+
+    passphrase: the new cert's passphrase (None/blank = passwordless) —
+    deliberately NOT the old cert's passphrase reused, and doesn't need
+    to be; a forgotten one can't be recovered anyway (it's baked into how
+    the private key itself was encrypted), so this always reissues a
+    fresh key, same as revoke+re-add would. This is the actual "reset
+    the client's password" path admins want, one click instead of two.
 
     Not atomic: if add_client fails after remove_client already succeeded,
     the client is left with zero valid access rather than just stuck on
@@ -300,7 +307,7 @@ def renew_client(name: str) -> Path | None:
     name = _validate_name(name)
     remove_client(name)
     try:
-        return add_client(name)
+        return add_client(name, passphrase=passphrase)
     except PivpnError as exc:
         raise PivpnRenewPartialFailure(
             f"'{name}' was revoked, but issuing the new certificate failed: {exc} "

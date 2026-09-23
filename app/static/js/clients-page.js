@@ -9,9 +9,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const countHint = document.querySelector('.card-header-title-group .hint');
   const addForm = document.querySelector('#add-client-dialog form');
+  const renewDialog = document.getElementById('renew-client-dialog');
+  const renewForm = document.getElementById('renew-client-form');
   let clientsPager = null;
   let totalCount = 0;
   let connectedCount = 0;
+  // Set right before renewDialog.showModal(), read by renewForm's own
+  // submit handler below — a plain closure variable rather than a DOM
+  // dataset, since what's actually needed (the row, for refreshRow())
+  // is an element reference, not a serializable string. The dialog's own
+  // submit button gets the busy state, not the row's Renew button —
+  // opening the dialog isn't itself a request.
+  let pendingRenewRow = null;
 
   function escapeHtml(value) {
     const div = document.createElement('div');
@@ -240,15 +249,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (action === 'renew') {
-      window.askConfirm(
-        `Renew ${name}? This revokes the current cert and issues a new one — the old .ovpn will stop working immediately.`,
-        'Renew',
-        () => {
-          ApiClient.withBusy(btn, ApiClient.call(`/api/clients/${encodeURIComponent(name)}/renew`, { method: 'POST' })
-            .then((resp) => resp.ok ? refreshRow(row, name) : Promise.reject()))
-            .catch(() => showRowError(row, `Could not renew ${name}.`));
-        },
-      );
+      pendingRenewRow = row;
+      renewForm.reset();
+      document.getElementById('renew-client-name').textContent = name;
+      renewDialog.showModal();
       return;
     }
 
@@ -301,6 +305,26 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
   }
+
+  renewForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const row = pendingRenewRow;
+    const name = row.dataset.clientName;
+    const passphrase = renewForm.querySelector('[name="passphrase"]').value;
+    const submitBtn = renewForm.querySelector('[type="submit"]');
+    ApiClient.withBusy(submitBtn, ApiClient.call(`/api/clients/${encodeURIComponent(name)}/renew`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ passphrase: passphrase || undefined }),
+    })
+      .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data }))))
+      .then(({ ok, data }) => {
+        if (!ok) { showRowError(row, data.error || `Could not renew ${name}.`); return; }
+        renewDialog.close();
+        renewForm.reset();
+        refreshRow(row, name);
+      });
+  });
 
   // Import Clients — a real multipart file upload (FormData built straight
   // from the form, so the file input's contents come along for free), not

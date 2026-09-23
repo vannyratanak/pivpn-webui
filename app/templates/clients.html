@@ -41,6 +41,20 @@
     </form>
   </dialog>
 
+  <dialog id="renew-client-dialog" class="modal" onclick="closeDialogIfClickedOutside(event, this)">
+    <button type="button" class="modal-close-btn" onclick="document.getElementById('renew-client-dialog').close()" aria-label="Close">&times;</button>
+    <h2>Renew <span id="renew-client-name"></span></h2>
+    <p class="hint">This revokes the current cert and issues a new one — the old .ovpn will stop working immediately. Use this to reset a client's forgotten password: there's no way to recover or change the old one, only issue a fresh cert with a new one.</p>
+    <form id="renew-client-form" class="inline-form">
+      <label>New passphrase <span class="hint">(optional — leave blank for a passwordless cert)</span>
+        <input type="password" name="passphrase" autocomplete="new-password">
+      </label>
+      <div class="btn-group">
+        <button type="submit">Renew</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="import-clients-dialog" class="modal file-import-modal" aria-labelledby="import-clients-title" aria-describedby="import-clients-description" onclick="closeDialogIfClickedOutside(event, this)">
     <button type="button" class="modal-close-btn" onclick="document.getElementById('import-clients-dialog').close()" aria-label="Close import clients">&times;</button>
     <header class="file-import-header">

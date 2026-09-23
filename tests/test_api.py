@@ -278,17 +278,45 @@ def test_add_client_failure_returns_400_with_message(client, monkeypatch):
 
 def test_renew_client_success(client, monkeypatch):
     token = _login(client).get_json()["access_token"]
-    monkeypatch.setattr("app.api.pivpn_ctl.renew_client", lambda name: None)
+    monkeypatch.setattr("app.api.pivpn_ctl.renew_client", lambda name, passphrase=None: None)
     monkeypatch.setattr("app.api._refresh_client_status_cache", lambda: None)
     resp = client.post("/api/clients/laptop-anna/renew", headers=_auth_header(token))
     assert resp.status_code == 200
     assert resp.get_json() == {"renewed": "laptop-anna"}
 
 
+def test_renew_client_passes_a_new_passphrase_through(client, monkeypatch):
+    token = _login(client).get_json()["access_token"]
+    calls = {}
+    monkeypatch.setattr(
+        "app.api.pivpn_ctl.renew_client",
+        lambda name, passphrase=None: calls.update(name=name, passphrase=passphrase),
+    )
+    monkeypatch.setattr("app.api._refresh_client_status_cache", lambda: None)
+    resp = client.post(
+        "/api/clients/laptop-anna/renew", json={"passphrase": "new-s3cret"}, headers=_auth_header(token)
+    )
+    assert resp.status_code == 200
+    assert calls == {"name": "laptop-anna", "passphrase": "new-s3cret"}
+
+
+def test_renew_client_with_no_passphrase_is_passwordless(client, monkeypatch):
+    token = _login(client).get_json()["access_token"]
+    calls = {}
+    monkeypatch.setattr(
+        "app.api.pivpn_ctl.renew_client",
+        lambda name, passphrase=None: calls.update(name=name, passphrase=passphrase),
+    )
+    monkeypatch.setattr("app.api._refresh_client_status_cache", lambda: None)
+    resp = client.post("/api/clients/laptop-anna/renew", headers=_auth_header(token))
+    assert resp.status_code == 200
+    assert calls == {"name": "laptop-anna", "passphrase": None}
+
+
 def test_renew_client_partial_failure_is_flagged_distinctly(client, monkeypatch):
     token = _login(client).get_json()["access_token"]
 
-    def _boom(name):
+    def _boom(name, passphrase=None):
         raise pivpn_ctl.PivpnRenewPartialFailure(f"'{name}' was revoked but re-add failed.")
 
     monkeypatch.setattr("app.api.pivpn_ctl.renew_client", _boom)
@@ -310,7 +338,7 @@ def test_renew_client_partial_failure_still_refreshes_the_cache(client, monkeypa
     # the now-stale expiration.
     token = _login(client).get_json()["access_token"]
 
-    def _boom(name):
+    def _boom(name, passphrase=None):
         raise pivpn_ctl.PivpnRenewPartialFailure(f"'{name}' was revoked but re-add failed.")
 
     monkeypatch.setattr("app.api.pivpn_ctl.renew_client", _boom)
@@ -894,10 +922,17 @@ def test_client_sessions_tab_client_filter_is_exact_not_substring(client):
 
 
 def test_traffic_tab_search_matches_across_full_history(client):
+    # Relative to "now", not a hardcoded date — see the date-drift fix
+    # earlier in this file (test_client_sessions_relabeled_ended_session_
+    # resorts_below_more_recent_ones) for the same class of bug.
+    from datetime import datetime, timedelta
+    now = datetime.now()
+    ts1 = (now - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
+    ts2 = (now - timedelta(hours=1) + timedelta(seconds=5)).strftime("%Y-%m-%d %H:%M:%S")
     db.insert_traffic_flows([
-        ("2026-09-16 10:00:00", "10.202.226.2", "1.1.1.1", None, "mobile",
+        (ts1, "10.202.226.2", "1.1.1.1", None, "mobile",
          "TCP", "1234", "443", "tun0", "ens18"),
-        ("2026-09-16 10:00:05", "10.202.226.3", "2.2.2.2", None, "laptop",
+        (ts2, "10.202.226.3", "2.2.2.2", None, "laptop",
          "TCP", "1235", "443", "tun0", "ens18"),
     ])
     token = _admin_token(client)
@@ -909,10 +944,14 @@ def test_traffic_tab_search_matches_across_full_history(client):
 
 
 def test_traffic_tab_client_filter_is_exact_not_substring(client):
+    from datetime import datetime, timedelta
+    now = datetime.now()
+    ts1 = (now - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
+    ts2 = (now - timedelta(hours=1) + timedelta(seconds=5)).strftime("%Y-%m-%d %H:%M:%S")
     db.insert_traffic_flows([
-        ("2026-09-16 10:00:00", "10.202.226.2", "1.1.1.1", None, "laptop",
+        (ts1, "10.202.226.2", "1.1.1.1", None, "laptop",
          "TCP", "1234", "443", "tun0", "ens18"),
-        ("2026-09-16 10:00:05", "10.202.226.3", "2.2.2.2", None, "laptop2",
+        (ts2, "10.202.226.3", "2.2.2.2", None, "laptop2",
          "TCP", "1235", "443", "tun0", "ens18"),
     ])
     token = _admin_token(client)
@@ -930,8 +969,11 @@ def test_traffic_tab_pagination_reaches_rows_past_the_old_300_cap(client):
     # option) to prove page 3 reaches the oldest, distinct row in a
     # genuine partial last page — real pagination, not just "shows some
     # rows".
+    from datetime import datetime, timedelta
+    now = datetime.now()
     db.insert_traffic_flows([
-        (f"2026-09-16 10:{i:02d}:00", "10.202.226.2", "1.1.1.1", None, f"client{i}",
+        ((now - timedelta(hours=1) + timedelta(minutes=i)).strftime("%Y-%m-%d %H:%M:%S"),
+         "10.202.226.2", "1.1.1.1", None, f"client{i}",
          "TCP", "1234", "443", "tun0", "ens18")
         for i in range(21)
     ])
@@ -946,13 +988,17 @@ def test_traffic_tab_pagination_reaches_rows_past_the_old_300_cap(client):
 
 
 def test_sessions_tab_pagination_and_search(client):
+    from datetime import datetime, timedelta
+    now = datetime.now()
+    ts1 = (now - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
+    ts2 = (now - timedelta(hours=1) + timedelta(seconds=5)).strftime("%Y-%m-%d %H:%M:%S")
     db.insert_vpn_events([
-        ("2026-09-16 10:00:00", "connected", "mobile", "10.66.66.1:1", "", None),
-        ("2026-09-16 10:00:05", "connected", "laptop", "10.66.66.1:2", "", None),
+        (ts1, "connected", "mobile", "10.66.66.1:1", "", None),
+        (ts2, "connected", "laptop", "10.66.66.1:2", "", None),
     ])
     token = _admin_token(client)
-    # range=7d: these fixed timestamps age past the default 1h window as
-    # real wall-clock time moves on — not what this test is about.
+    # range=7d: relative timestamps above (not a hardcoded date) so this
+    # doesn't age out — not what this test is about.
     resp = client.get("/api/logs?tab=sessions&q=laptop&range=7d", headers=_auth_header(token))
     assert resp.status_code == 200
     body = resp.get_json()
@@ -961,17 +1007,21 @@ def test_sessions_tab_pagination_and_search(client):
 
 
 def test_client_sessions_tab_search(client, monkeypatch):
+    from datetime import datetime, timedelta
+    now = datetime.now()
+    ts1 = (now - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
+    ts2 = (now - timedelta(hours=1) + timedelta(seconds=5)).strftime("%Y-%m-%d %H:%M:%S")
     db.insert_vpn_events([
-        ("2026-09-16 10:00:00", "connected", "mobile", "10.66.66.1:1", "", None),
-        ("2026-09-16 10:00:05", "connected", "laptop", "10.66.66.1:2", "", None),
+        (ts1, "connected", "mobile", "10.66.66.1:1", "", None),
+        (ts2, "connected", "laptop", "10.66.66.1:2", "", None),
     ])
     monkeypatch.setattr(
         "app.api.pivpn_ctl.list_connected_clients",
         lambda: {"mobile": {}, "laptop": {}},
     )
     token = _admin_token(client)
-    # range=7d: same fixed-timestamp-vs-wall-clock reasoning as
-    # test_sessions_tab_pagination_and_search above.
+    # range=7d: relative timestamps above (not a hardcoded date), same
+    # class of fix as test_sessions_tab_pagination_and_search above.
     resp = client.get("/api/logs?tab=client_sessions&q=laptop&range=7d", headers=_auth_header(token))
     assert resp.status_code == 200
     clients = [e["client"] for e in resp.get_json()["entries"]]

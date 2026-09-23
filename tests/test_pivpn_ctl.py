@@ -92,6 +92,48 @@ def test_renew_client_success_returns_new_path(monkeypatch):
     assert pivpn_ctl.renew_client("renewtest") is fake_path
 
 
+def test_renew_client_passes_a_new_passphrase_through_to_pivpn_add(monkeypatch):
+    # The real point of letting renew take a passphrase at all: resetting
+    # a client's forgotten password is only possible by issuing a brand
+    # new cert (the old one's password can't be recovered or changed
+    # without already knowing it) — this is that path, so the new
+    # passphrase actually has to reach the `pivpn add` call, not just be
+    # accepted and silently dropped.
+    monkeypatch.setattr(pivpn_ctl, "_require_pivpn_binary", lambda: None)
+    fake_path = _FakeOvpnPath()
+    monkeypatch.setattr(pivpn_ctl, "client_ovpn_path", lambda name: fake_path)
+    add_argv = []
+
+    def fake_run_pivpn(argv, timeout=30):
+        if argv[1] == "revoke":
+            return _fake_completed("", returncode=0)
+        add_argv.extend(argv)
+        fake_path.created = True
+        return _fake_completed("", returncode=0)
+
+    monkeypatch.setattr(pivpn_ctl, "_run_pivpn", fake_run_pivpn)
+    pivpn_ctl.renew_client("renewtest", passphrase="new-s3cret")
+    assert add_argv[:4] == ["pivpn", "add", "-p", "new-s3cret"]
+
+
+def test_renew_client_with_no_passphrase_is_passwordless(monkeypatch):
+    monkeypatch.setattr(pivpn_ctl, "_require_pivpn_binary", lambda: None)
+    fake_path = _FakeOvpnPath()
+    monkeypatch.setattr(pivpn_ctl, "client_ovpn_path", lambda name: fake_path)
+    add_argv = []
+
+    def fake_run_pivpn(argv, timeout=30):
+        if argv[1] == "revoke":
+            return _fake_completed("", returncode=0)
+        add_argv.extend(argv)
+        fake_path.created = True
+        return _fake_completed("", returncode=0)
+
+    monkeypatch.setattr(pivpn_ctl, "_run_pivpn", fake_run_pivpn)
+    pivpn_ctl.renew_client("renewtest")
+    assert add_argv[:3] == ["pivpn", "add", "nopass"]
+
+
 def test_add_client_returns_none_in_hub_mode_not_a_hub_local_path(monkeypatch):
     # client_ovpn_path(name) computes a path on whichever machine calls
     # it — in HUB_MODE that's the hub, not the agent that actually has the

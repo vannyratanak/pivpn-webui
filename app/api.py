@@ -207,9 +207,13 @@ def add_client():
 @bp.route("/clients/<name>/renew", methods=["POST"])
 @jwt_required()
 def renew_client(name):
-    """Mirrors routes.py's renew_client() view."""
+    """Mirrors routes.py's renew_client() view. POST {"passphrase": optional}
+    — the new cert's password, not the old (forgotten) one; see
+    pivpn_ctl.renew_client's own docstring for why that's not a thing."""
+    data = request.get_json(silent=True) or {}
+    passphrase = (data.get("passphrase") or "").strip() or None
     try:
-        pivpn_ctl.renew_client(name)
+        pivpn_ctl.renew_client(name, passphrase=passphrase)
     except pivpn_ctl.PivpnRenewPartialFailure as exc:
         # Distinct from a generic renew failure: the old cert is already
         # revoked (irreversible), not just still in place — see
