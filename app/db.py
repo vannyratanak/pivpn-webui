@@ -918,6 +918,16 @@ def cache_ip_org(ip: str, org: str | None):
             "ON CONFLICT (ip) DO UPDATE SET org = excluded.org, looked_up_at = to_char(now(), 'YYYY-MM-DD HH24:MI:SS')",
             (ip, org),
         )
+        # Traffic rows store dst_org at ingestion time. If an earlier WHOIS
+        # attempt failed, refreshing the cache alone would leave every
+        # existing row for this destination blank forever, so repair those
+        # rows as soon as a later retry resolves the organization.
+        if org:
+            conn.execute(
+                "UPDATE traffic_flows SET dst_org = %s "
+                "WHERE dst = %s AND (dst_org IS NULL OR dst_org <> %s)",
+                (org, ip, org),
+            )
         conn.commit()
     finally:
         conn.close()
