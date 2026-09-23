@@ -217,6 +217,10 @@
   </div>
 
   <section data-activity-section="client_sessions">
+    <p class="chart-caption">Total time {{ name }} was connected each day in this range.</p>
+    <div class="chart-block" id="client-session-timeline">
+      <!-- Populated by client-detail-page.js's renderSessionTimeline(). -->
+    </div>
     <div class="table-scroll">
     <table id="client-activity-sessions-table">
       <thead>
@@ -235,6 +239,10 @@
   </section>
 
   <section data-activity-section="traffic" hidden>
+    <p class="chart-caption">Top destinations {{ name }} sent traffic to in this range, by number of connections.</p>
+    <div class="chart-block" id="client-dest-chart">
+      <!-- Populated by client-detail-page.js's renderDestChart(). -->
+    </div>
     <div class="table-scroll">
     <table id="client-activity-traffic-table">
       <thead>

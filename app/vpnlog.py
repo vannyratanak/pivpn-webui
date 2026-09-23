@@ -46,8 +46,21 @@ _MAX_CONCURRENT_RESOLVES = 8
 CONNECT_RE = re.compile(
     r"\[(?P<name>[^\]]+)\] Peer Connection Initiated with \[AF_INET6?\](?P<addr>[0-9a-fA-F:.]+):(?P<port>\d+)"
 )
+
+# Two distinct shapes both mean "this client's session just ended":
+# - SIGTERM: a clean client-initiated disconnect.
+# - "[name] Inactivity timeout (--ping-restart), restarting": the server's
+#   own keepalive noticing a client that went silent (network drop, sleep,
+#   crash) and force-closing it — this is what actually catches a client
+#   that never sends a clean disconnect at all, real end time instead of
+#   the "Ended (exact time unknown)" stale-reconnect fallback in
+#   list_client_sessions below. The (?P=name) backreference excludes the
+#   *server's own* relay-keepalive line ("[relay-server] Inactivity
+#   timeout...", no leading "name/addr:port " prefix at all) from ever
+#   matching here — found live in this server's own system log.
 DISCONNECT_RE = re.compile(
-    r"^(?P<name>[^/\s]+)/(?P<addr>[0-9a-fA-F:.]+):(?P<port>\d+) SIGTERM"
+    r"^(?P<name>[^/\s]+)/(?P<addr>[0-9a-fA-F:.]+):(?P<port>\d+) "
+    r"(?:SIGTERM|\[(?P=name)\] Inactivity timeout \(--ping-restart\), restarting)"
 )
 
 # journalctl -o short-iso lines look like: "2026-08-17T10:22:31+0700 host proc[pid]: message"

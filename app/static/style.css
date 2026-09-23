@@ -1267,6 +1267,65 @@ button.is-busy:disabled, .btn.is-busy:disabled { cursor: progress; }
   border-radius: 4px;
 }
 
+/* Client detail page's Activity charts (session timeline, traffic
+   destinations) — plain divs sized with inline %, not a canvas/svg
+   library; see client-detail-page.js's own comment on why. */
+.chart-block {
+  margin-bottom: 16px;
+  min-height: 20px;
+}
+.chart-caption {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.chart-empty {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+.dest-chart-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.dest-chart-row + .dest-chart-row {
+  margin-top: 7px;
+}
+.dest-chart-label {
+  flex: 0 0 160px;
+  width: 160px;
+  font-size: 12px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dest-chart-bar-wrap {
+  flex: 1 1 auto;
+  height: 14px;
+  border-radius: 4px;
+  background: var(--panel-2);
+  overflow: hidden;
+}
+.dest-chart-bar {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 4px;
+}
+.dest-chart-count {
+  flex: 0 0 auto;
+  min-width: 22px;
+  text-align: right;
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .pagination {
   display: flex;
   align-items: center;

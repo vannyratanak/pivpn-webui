@@ -72,6 +72,33 @@ def test_connect_re_does_not_match_disconnect_line():
     assert CONNECT_RE.search(msg) is None
 
 
+# Real lines captured live from a production install (the "mobile" client
+# reconnecting frequently enough that OpenVPN's own single-CN-per-client
+# behavior silently dropped its prior session with no SIGTERM ever logged
+# for it — see app/vpnlog.py's own comment on DISCONNECT_RE for why the
+# server's --ping-restart keepalive noticing that dead session is the real
+# fix, not a client name coincidence).
+
+REAL_JOURNAL_PING_RESTART_DISCONNECT = (
+    "mobile/10.66.66.1:26998 [mobile] Inactivity timeout (--ping-restart), restarting"
+)
+REAL_JOURNAL_RELAY_PING_RESTART = "[relay-server] Inactivity timeout (--ping-restart), restarting"
+
+
+def test_disconnect_re_matches_ping_restart_inactivity_timeout():
+    m = DISCONNECT_RE.search(REAL_JOURNAL_PING_RESTART_DISCONNECT)
+    assert m is not None
+    assert m.group("name") == "mobile"
+    assert m.group("addr") == "10.66.66.1"
+    assert m.group("port") == "26998"
+
+
+def test_disconnect_re_does_not_match_the_servers_own_relay_keepalive_line():
+    # No leading "name/addr:port " prefix at all — this is the server's own
+    # connection to the relay tunnel, not a client's session ending.
+    assert DISCONNECT_RE.search(REAL_JOURNAL_RELAY_PING_RESTART) is None
+
+
 def test_format_duration_normal():
     assert _format_duration("2026-08-21 12:37:38", "2026-08-21 12:45:30") == "7m 52s"
 

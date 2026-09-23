@@ -485,6 +485,158 @@ document.addEventListener('DOMContentLoaded', () => {
     traffic: { tbodyId: 'client-activity-traffic-tbody', colCount: 4, rowHtml: trafficRowHtml, emptyMessage: 'No traffic flows found for this client yet.' },
   };
 
+  // --- Charts: a quick visual read of the same data the tables below
+  // already show — not a replacement for them (no exact values on hover,
+  // no pagination). Plain divs sized with inline %, no charting library
+  // (matches this app's existing no-dependencies-if-avoidable stance —
+  // see firewall-reorder.js's own comment on the same point) — each is
+  // small enough that a library would cost more than it saves here.
+  //
+  // Fetched independently of the table's own paginated request, always at
+  // CHART_PAGE_SIZE regardless of the table's page/page size, so the
+  // chart reflects the whole selected range rather than whatever page the
+  // table happens to be showing right now.
+  const CHART_PAGE_SIZE = 100;
+  const RANGE_HOURS = { '1h': 1, '6h': 6, '12h': 12, '1d': 24, '7d': 24 * 7 };
+
+  function chartFetch(tab) {
+    const params = new URLSearchParams({
+      tab, client: name, range: activityRangeSelect.value, page: '1', page_size: String(CHART_PAGE_SIZE),
+    });
+    return ApiClient.call(`/api/logs?${params.toString()}`)
+      .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data })))
+      .then(({ ok, data }) => (ok ? (data.entries || []) : []));
+  }
+
+  // Server timestamps are plain 'YYYY-MM-DD HH:MM:SS' strings (no
+  // timezone) — parsed here as if they're in the browser's own local
+  // timezone, same assumption the rest of this app already makes by just
+  // displaying them as-is (a self-hosted admin tool where the server and
+  // the admin viewing it are typically in the same timezone anyway). Fine
+  // for a rough visual chart; not meant to be millisecond-precise.
+  function parseServerTs(ts) {
+    if (!ts) return null;
+    const ms = new Date(ts.replace(' ', 'T')).getTime();
+    return Number.isNaN(ms) ? null : ms;
+  }
+
+  const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+  function formatDurationMs(ms) {
+    const totalSeconds = Math.max(0, Math.round(ms / 1000));
+    const h = Math.floor(totalSeconds / 3600);
+    const m = Math.floor((totalSeconds % 3600) / 60);
+    const s = totalSeconds % 60;
+    if (h > 0) return `${h}h ${m}m`;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
+  }
+
+  // One row per calendar day covering the selected range (Last 7 days ->
+  // 7 rows, oldest at top through today at the bottom) — each row's bar is
+  // the total time this client was connected that day, summed across every
+  // session that started on it. A session is attributed whole to the day
+  // it *started* rather than split across midnight — real sessions here
+  // are seconds to a few hours, so that simplification never meaningfully
+  // changes which day looks busiest, and this chart isn't meant to be
+  // to-the-second precise anyway. Same horizontal label/bar/value row
+  // style as the destinations chart below (renderDestChart).
+  function renderSessionTimeline(sessions) {
+    const container = document.getElementById('client-session-timeline');
+    if (!container) return;
+    const rangeEnd = Date.now();
+    const rangeHours = RANGE_HOURS[activityRangeSelect.value] || RANGE_HOURS['7d'];
+
+    // Exactly N calendar-day rows ending today (7d -> 7 rows, today plus
+    // the 6 days before it) — not "floor(rangeStart) through today", which
+    // adds a stray extra day up front whenever rangeStart itself falls
+    // partway through a day rather than exactly on a midnight boundary
+    // (always, for a rolling "last N days" window).
+    const dayMs = 24 * 3600 * 1000;
+    const numDays = Math.max(1, Math.ceil(rangeHours / 24));
+    const today = new Date(rangeEnd);
+    today.setHours(0, 0, 0, 0);
+    const buckets = [];
+    for (let i = numDays - 1; i >= 0; i--) {
+      const d = today.getTime() - i * dayMs;
+      buckets.push({ dayStart: d, dayEnd: d + dayMs, ms: 0 });
+    }
+
+    sessions.forEach((s) => {
+      const start = parseServerTs(s.start);
+      if (start == null) return;
+      // A session with no `end` is one of two very different things (see
+      // vpnlog.py's list_client_sessions): genuinely still connected right
+      // now (ongoing: true) — that one legitimately counts toward "now" —
+      // or a stale reconnect where no matching disconnect event was ever
+      // logged (ongoing: false, status_note "Ended (exact time unknown)").
+      // The second one already ended; we just don't know exactly when, so
+      // it contributes nothing to the total rather than being guessed as
+      // "ran until right now" (that guess was inflating today's total by
+      // however many hours ago it actually started).
+      if (!s.ongoing && !s.end) return;
+      const end = s.ongoing ? rangeEnd : parseServerTs(s.end);
+      if (end == null || end <= start) return;
+      const bucket = buckets.find((b) => start >= b.dayStart && start < b.dayEnd);
+      if (bucket) bucket.ms += (end - start);
+    });
+
+    if (!buckets.some((b) => b.ms > 0)) {
+      container.innerHTML = '<p class="chart-empty">No sessions in this range to chart.</p>';
+      return;
+    }
+    const max = Math.max(...buckets.map((b) => b.ms), 1);
+    const rows = buckets.map((b) => {
+      const date = new Date(b.dayStart);
+      // A day with real connected time still gets a visible sliver even
+      // when it's tiny next to the range's busiest day — 0% would look
+      // indistinguishable from a day with no sessions at all.
+      const pct = b.ms > 0 ? Math.max((b.ms / max) * 100, 2) : 0;
+      return `
+        <div class="dest-chart-row">
+          <span class="dest-chart-label">${DAY_LABELS[date.getDay()]} ${date.getDate()}</span>
+          <span class="dest-chart-bar-wrap"><span class="dest-chart-bar" style="width:${pct}%"></span></span>
+          <span class="dest-chart-count">${b.ms > 0 ? escapeHtml(formatDurationMs(b.ms)) : '—'}</span>
+        </div>`;
+    }).join('');
+    container.innerHTML = rows;
+  }
+
+  function renderDestChart(flows) {
+    const container = document.getElementById('client-dest-chart');
+    if (!container) return;
+    if (!flows.length) {
+      container.innerHTML = '<p class="chart-empty">No traffic in this range to chart.</p>';
+      return;
+    }
+    const counts = new Map();
+    flows.forEach((f) => {
+      const key = f.dst_org || f.dst || 'Unknown';
+      counts.set(key, (counts.get(key) || 0) + 1);
+    });
+    // Top 6 destinations by flow count — a full breakdown of every
+    // distinct destination belongs to the table below this chart, not
+    // squeezed into a bar for each one.
+    const top = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 6);
+    const max = top[0][1];
+    container.innerHTML = top.map(([label, count]) => `
+      <div class="dest-chart-row">
+        <span class="dest-chart-label" title="${escapeHtml(label)}">${escapeHtml(label)}</span>
+        <span class="dest-chart-bar-wrap"><span class="dest-chart-bar" style="width:${(count / max) * 100}%"></span></span>
+        <span class="dest-chart-count">${count}</span>
+      </div>`).join('');
+  }
+
+  const CHART_LOADERS = {
+    client_sessions: () => chartFetch('client_sessions').then(renderSessionTimeline),
+    traffic: () => chartFetch('traffic').then(renderDestChart),
+  };
+
+  function loadActivityChart() {
+    const loader = CHART_LOADERS[activityTab];
+    if (loader) loader();
+  }
+
   function activitySkeletonRowHtml(colCount) {
     const cells = Array(colCount).fill('<td><span class="skeleton-bar"></span></td>').join('');
     return `<tr class="skeleton-row">${cells}</tr>`.repeat(4);
@@ -532,10 +684,15 @@ document.addEventListener('DOMContentLoaded', () => {
       const newSection = activitySection(activityTab);
       if (newSection) newSection.hidden = false;
       loadActivity(true);
+      loadActivityChart();
     });
   });
 
-  activityRangeSelect.addEventListener('change', () => { activityPage = 1; loadActivity(false); });
+  // Chart only reloads on a tab switch or a range change — not on Prev/
+  // Next/page-size, which only affect which slice of the same range the
+  // *table* below is currently showing; the chart already covers the
+  // whole range every time regardless of the table's own pagination.
+  activityRangeSelect.addEventListener('change', () => { activityPage = 1; loadActivity(false); loadActivityChart(); });
   activityPageSizeSelect.addEventListener('change', () => { activityPage = 1; loadActivity(false); });
   activityPrevBtn.addEventListener('click', () => { activityPage = Math.max(1, activityPage - 1); loadActivity(false); });
   activityNextBtn.addEventListener('click', () => { activityPage += 1; loadActivity(false); });
@@ -543,4 +700,5 @@ document.addEventListener('DOMContentLoaded', () => {
   loadClient(true);
   loadRules(true);
   loadActivity(true);
+  loadActivityChart();
 });
