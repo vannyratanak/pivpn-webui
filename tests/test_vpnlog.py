@@ -33,7 +33,9 @@ REAL_JOURNAL_DISCONNECT = (
 
 def test_split_journal_line_parses_real_connect_line():
     ts, msg = _split_journal_line(REAL_JOURNAL_CONNECT)
-    assert ts == "2026-08-21 13:20:11"
+    # +0700 converted to UTC (13:20:11 - 7h) — see _format_ts's own
+    # comment for why this converts instead of just dropping the offset.
+    assert ts == "2026-08-21 06:20:11"
     assert msg == "[macbook-phanne] Peer Connection Initiated with [AF_INET]10.66.66.1:2642"
 
 

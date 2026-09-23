@@ -31,7 +31,7 @@ this is a "best effort" view, not something else depends on it.
 import concurrent.futures
 import re
 import subprocess
-from datetime import datetime
+from datetime import datetime, timezone
 
 import config
 from app import db, hub_client, pivpn_ctl
@@ -84,10 +84,20 @@ FLOW_RE = re.compile(
 def _format_ts(ts: str) -> str:
     """journalctl -o short-iso gives '2026-08-17T10:22:31+0700' — reformat
     to the same 'YYYY-MM-DD HH:MM:SS' style used elsewhere in the app (see
-    db.add_audit). The offset is dropped rather than shown, since it's just
-    the box's own local timezone repeated on every single row."""
+    db.add_audit), converting to UTC first.
+
+    Converting (not just dropping the offset) matters because this app can
+    manage boxes in different timezones — found live: a test agent's
+    system clock was UTC while the admin viewing the page was +07, and the
+    old "just drop the offset" version stored raw box-local wall-clock
+    time with no indication of which zone it was ever in. Every stored
+    timestamp in this app is UTC now (see also db.add_audit,
+    db.prune_old_logs, api.py's log-range cutoff) — the frontend converts
+    back to the viewer's own local time for display (see
+    static/js/time-format.js)."""
     try:
-        return datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S%z").strftime("%Y-%m-%d %H:%M:%S")
+        dt = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S%z")
+        return dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     except ValueError:
         return ts
 

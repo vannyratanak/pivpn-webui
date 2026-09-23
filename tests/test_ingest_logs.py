@@ -175,7 +175,9 @@ def test_ingest_system_log_stores_ts_process_and_message(temp_db, monkeypatch):
     assert count == 1
     rows, total = db.list_system_log_page()
     assert total == 1
-    assert rows[0]["ts"] == "2026-08-21 13:20:11"
+    # +0700 converted to UTC (13:20:11 - 7h) — see _format_ts's own
+    # comment for why this converts instead of just dropping the offset.
+    assert rows[0]["ts"] == "2026-08-21 06:20:11"
     assert rows[0]["process"] == "ovpn-server"
     assert rows[0]["message"] == "[macbook-phanne] Peer Connection Initiated with [AF_INET]10.66.66.1:2642"
 

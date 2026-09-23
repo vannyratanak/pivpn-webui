@@ -877,8 +877,8 @@ def test_client_sessions_relabeled_ended_session_resorts_below_more_recent_ones(
     # live on 2026-09-22 by a 2026-09-15 fixture landing exactly on the
     # 7-day boundary), same class of bug already fixed elsewhere in this
     # file (see the datetime.now()-based fixtures further down).
-    from datetime import datetime, timedelta
-    now = datetime.now()
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
     stale_ts = (now - timedelta(hours=4)).strftime("%Y-%m-%d %H:%M:%S")
     recent_connect_ts = (now - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
     recent_disconnect_ts = (now - timedelta(hours=1) + timedelta(seconds=18)).strftime("%Y-%m-%d %H:%M:%S")
@@ -906,8 +906,8 @@ def test_client_sessions_relabeled_ended_session_resorts_below_more_recent_ones(
 def test_client_sessions_tab_client_filter_is_exact_not_substring(client):
     # The client detail page's own session-log tab passes client=<name> —
     # unlike q, an exact match: "laptop" must not also pull in "laptop2".
-    from datetime import datetime, timedelta
-    now = datetime.now()
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
     ts_a = (now - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
     ts_b = (now - timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S")
     db.insert_vpn_events([
@@ -925,8 +925,8 @@ def test_traffic_tab_search_matches_across_full_history(client):
     # Relative to "now", not a hardcoded date — see the date-drift fix
     # earlier in this file (test_client_sessions_relabeled_ended_session_
     # resorts_below_more_recent_ones) for the same class of bug.
-    from datetime import datetime, timedelta
-    now = datetime.now()
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
     ts1 = (now - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
     ts2 = (now - timedelta(hours=1) + timedelta(seconds=5)).strftime("%Y-%m-%d %H:%M:%S")
     db.insert_traffic_flows([
@@ -944,8 +944,8 @@ def test_traffic_tab_search_matches_across_full_history(client):
 
 
 def test_traffic_tab_client_filter_is_exact_not_substring(client):
-    from datetime import datetime, timedelta
-    now = datetime.now()
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
     ts1 = (now - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
     ts2 = (now - timedelta(hours=1) + timedelta(seconds=5)).strftime("%Y-%m-%d %H:%M:%S")
     db.insert_traffic_flows([
@@ -969,8 +969,8 @@ def test_traffic_tab_pagination_reaches_rows_past_the_old_300_cap(client):
     # option) to prove page 3 reaches the oldest, distinct row in a
     # genuine partial last page — real pagination, not just "shows some
     # rows".
-    from datetime import datetime, timedelta
-    now = datetime.now()
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
     db.insert_traffic_flows([
         ((now - timedelta(hours=1) + timedelta(minutes=i)).strftime("%Y-%m-%d %H:%M:%S"),
          "10.202.226.2", "1.1.1.1", None, f"client{i}",
@@ -988,8 +988,8 @@ def test_traffic_tab_pagination_reaches_rows_past_the_old_300_cap(client):
 
 
 def test_sessions_tab_pagination_and_search(client):
-    from datetime import datetime, timedelta
-    now = datetime.now()
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
     ts1 = (now - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
     ts2 = (now - timedelta(hours=1) + timedelta(seconds=5)).strftime("%Y-%m-%d %H:%M:%S")
     db.insert_vpn_events([
@@ -1007,8 +1007,8 @@ def test_sessions_tab_pagination_and_search(client):
 
 
 def test_client_sessions_tab_search(client, monkeypatch):
-    from datetime import datetime, timedelta
-    now = datetime.now()
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
     ts1 = (now - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
     ts2 = (now - timedelta(hours=1) + timedelta(seconds=5)).strftime("%Y-%m-%d %H:%M:%S")
     db.insert_vpn_events([
@@ -1029,8 +1029,8 @@ def test_client_sessions_tab_search(client, monkeypatch):
 
 
 def test_logs_range_filters_out_events_older_than_the_window(client):
-    from datetime import datetime, timedelta
-    now = datetime.now()
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
     recent_ts = now.strftime("%Y-%m-%d %H:%M:%S")
     old_ts = (now - timedelta(days=2)).strftime("%Y-%m-%d %H:%M:%S")
     db.insert_vpn_events([
@@ -1062,9 +1062,9 @@ def test_activity_tab_range_and_search_filter(client):
     # Activity/User Auth read audit_log directly (no separate ingestion
     # table), but go through the exact same q/range/page parsing as
     # Sessions/Client Sessions/Traffic — this locks that in.
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
     conn = db.get_conn()
-    old_ts = (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%d %H:%M:%S")
+    old_ts = (datetime.now(timezone.utc) - timedelta(days=3)).strftime("%Y-%m-%d %H:%M:%S")
     conn.execute(
         "INSERT INTO audit_log (ts, actor, action, target, result) VALUES (%s, %s, %s, %s, %s)",
         (old_ts, "admin", "client_add", "old-client", "ok"),

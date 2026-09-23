@@ -884,7 +884,7 @@ _LOG_RANGE_HOURS = {"1h": 1, "6h": 6, "12h": 12, "1d": 24, "7d": 24 * 7}
 @bp.route("/logs", methods=["GET"])
 @jwt_required()
 def logs():
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
 
     from app import vpnlog
     from app.privileged import PrivilegedCommandError
@@ -901,7 +901,11 @@ def logs():
     log_range = request.args.get("range") or "1h"
     if log_range not in _LOG_RANGE_HOURS:
         log_range = "1h"
-    since = (datetime.now() - timedelta(hours=_LOG_RANGE_HOURS[log_range])).strftime("%Y-%m-%d %H:%M:%S")
+    # UTC — every stored ts is UTC now (see vpnlog._format_ts's own
+    # comment), so the cutoff has to be too, or "last 1 hour" would
+    # silently mean something else depending on the hub process's own
+    # local timezone.
+    since = (datetime.now(timezone.utc) - timedelta(hours=_LOG_RANGE_HOURS[log_range])).strftime("%Y-%m-%d %H:%M:%S")
     try:
         page = max(1, int(request.args.get("page", 1)))
     except ValueError:

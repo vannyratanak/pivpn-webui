@@ -503,16 +503,16 @@ document.addEventListener('DOMContentLoaded', () => {
       ? '<span class="badge badge-connected">ongoing</span>'
       : s.status_note
         ? `<span class="cell-note">${escapeHtml(s.status_note)}</span>`
-        : escapeHtml(s.end || '—');
+        : escapeHtml(formatServerTs(s.end) || '—');
     const addressCell = s.real_address
       ? `${escapeHtml(s.real_address)}<span class="cell-note hint-block">via relay (${escapeHtml(s.address)})</span>`
       : escapeHtml(s.address || '—');
-    return `<tr><td>${escapeHtml(s.start || '—')}</td><td>${endCell}</td><td>${escapeHtml(s.duration || '—')}</td><td>${addressCell}</td></tr>`;
+    return `<tr><td>${escapeHtml(formatServerTs(s.start) || '—')}</td><td>${endCell}</td><td>${escapeHtml(s.duration || '—')}</td><td>${addressCell}</td></tr>`;
   }
 
   function trafficRowHtml(f) {
     const dst = escapeHtml(f.dst) + (f.dport ? ':' + escapeHtml(f.dport) : '');
-    return `<tr><td>${escapeHtml(f.ts)}</td><td>${dst}</td><td>${escapeHtml(f.dst_org || '—')}</td><td>${escapeHtml(f.proto)}</td></tr>`;
+    return `<tr><td>${escapeHtml(formatServerTs(f.ts))}</td><td>${dst}</td><td>${escapeHtml(f.dst_org || '—')}</td><td>${escapeHtml(f.proto)}</td></tr>`;
   }
 
   const ACTIVITY_CONFIG = {
@@ -543,15 +543,17 @@ document.addEventListener('DOMContentLoaded', () => {
       .then(({ ok, data }) => (ok ? (data.entries || []) : []));
   }
 
-  // Server timestamps are plain 'YYYY-MM-DD HH:MM:SS' strings (no
-  // timezone) — parsed here as if they're in the browser's own local
-  // timezone, same assumption the rest of this app already makes by just
-  // displaying them as-is (a self-hosted admin tool where the server and
-  // the admin viewing it are typically in the same timezone anyway). Fine
-  // for a rough visual chart; not meant to be millisecond-precise.
+  // Server timestamps are plain 'YYYY-MM-DD HH:MM:SS' strings that are
+  // always UTC (see app/vpnlog.py's _format_ts) — appending 'Z' is what
+  // tells Date to parse it as UTC instead of the browser's own local
+  // timezone. Getting this wrong is exactly the bug that inflated this
+  // chart's numbers by however many hours a managed box's own clock
+  // happened to differ from the viewer's: a box on UTC logging "02:42"
+  // was being read as 02:42 in the viewer's own +07 zone instead of the
+  // 09:42 +07 it actually was.
   function parseServerTs(ts) {
     if (!ts) return null;
-    const ms = new Date(ts.replace(' ', 'T')).getTime();
+    const ms = new Date(ts.replace(' ', 'T') + 'Z').getTime();
     return Number.isNaN(ms) ? null : ms;
   }
 

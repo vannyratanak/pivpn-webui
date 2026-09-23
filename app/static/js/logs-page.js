@@ -21,7 +21,7 @@
       : e.event === 'disconnected'
         ? '<span class="badge badge-inactive">disconnected</span>'
         : '<span class="badge badge-inactive">other</span>';
-    return `<tr><td>${escapeHtml(e.ts)}</td><td>${badge}</td><td>${escapeHtml(e.client)}</td><td>${escapeHtml(e.address)}</td><td>${escapeHtml(e.detail)}</td></tr>`;
+    return `<tr><td>${escapeHtml(formatServerTs(e.ts))}</td><td>${badge}</td><td>${escapeHtml(e.client)}</td><td>${escapeHtml(e.address)}</td><td>${escapeHtml(e.detail)}</td></tr>`;
   }
 
   function clientSessionsRow(s) {
@@ -29,31 +29,31 @@
       ? '<span class="badge badge-connected">ongoing</span>'
       : s.status_note
         ? `<span class="cell-note">${escapeHtml(s.status_note)}</span>`
-        : escapeHtml(s.end || '—');
+        : escapeHtml(formatServerTs(s.end) || '—');
     const addressCell = s.real_address
       ? `${escapeHtml(s.real_address)}<span class="cell-note hint-block">via relay (${escapeHtml(s.address)})</span>`
       : escapeHtml(s.address || '—');
-    return `<tr><td>${escapeHtml(s.client)}</td><td>${escapeHtml(s.start || '—')}</td><td>${endCell}</td><td>${escapeHtml(s.duration || '—')}</td><td>${addressCell}</td></tr>`;
+    return `<tr><td>${escapeHtml(s.client)}</td><td>${escapeHtml(formatServerTs(s.start) || '—')}</td><td>${endCell}</td><td>${escapeHtml(s.duration || '—')}</td><td>${addressCell}</td></tr>`;
   }
 
   function trafficRow(f) {
     const src = escapeHtml(f.src) + (f.sport ? ':' + escapeHtml(f.sport) : '');
     const dst = escapeHtml(f.dst) + (f.dport ? ':' + escapeHtml(f.dport) : '');
-    return `<tr><td>${escapeHtml(f.ts)}</td><td>${escapeHtml(f.client)}</td><td>${src}</td><td>${dst}</td><td>${escapeHtml(f.dst_org || '—')}</td><td>${escapeHtml(f.proto)}</td><td>${escapeHtml(f.dport || '—')}</td></tr>`;
+    return `<tr><td>${escapeHtml(formatServerTs(f.ts))}</td><td>${escapeHtml(f.client)}</td><td>${src}</td><td>${dst}</td><td>${escapeHtml(f.dst_org || '—')}</td><td>${escapeHtml(f.proto)}</td><td>${escapeHtml(f.dport || '—')}</td></tr>`;
   }
 
   function systemRow(e) {
-    return `<tr><td>${escapeHtml(e.ts)}</td><td>${escapeHtml(e.process || '—')}</td><td>${escapeHtml(e.message)}</td></tr>`;
+    return `<tr><td>${escapeHtml(formatServerTs(e.ts))}</td><td>${escapeHtml(e.process || '—')}</td><td>${escapeHtml(e.message)}</td></tr>`;
   }
 
   function activityRow(e) {
     const cls = e.result === 'error' ? ' class="blocked-row"' : '';
-    return `<tr${cls}><td>${escapeHtml(e.ts)}</td><td>${escapeHtml(e.actor)}</td><td>${escapeHtml(e.action)}</td><td>${escapeHtml(e.target || '')}</td><td>${escapeHtml(e.result)}</td><td>${escapeHtml(e.detail || '')}</td></tr>`;
+    return `<tr${cls}><td>${escapeHtml(formatServerTs(e.ts))}</td><td>${escapeHtml(e.actor)}</td><td>${escapeHtml(e.action)}</td><td>${escapeHtml(e.target || '')}</td><td>${escapeHtml(e.result)}</td><td>${escapeHtml(e.detail || '')}</td></tr>`;
   }
 
   function authRow(e) {
     const cls = e.result === 'error' ? ' class="blocked-row"' : '';
-    return `<tr${cls}><td>${escapeHtml(e.ts)}</td><td>${escapeHtml(e.actor)}</td><td>${escapeHtml(e.action)}</td><td>${escapeHtml(e.result)}</td><td>${escapeHtml(e.detail || '')}</td></tr>`;
+    return `<tr${cls}><td>${escapeHtml(formatServerTs(e.ts))}</td><td>${escapeHtml(e.actor)}</td><td>${escapeHtml(e.action)}</td><td>${escapeHtml(e.result)}</td><td>${escapeHtml(e.detail || '')}</td></tr>`;
   }
 
   // Mirrors the exact empty-state text + colspan each tab's own template

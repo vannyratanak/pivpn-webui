@@ -19,7 +19,7 @@ change, not a structural rewrite of every call site.
 """
 import contextlib
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import psycopg2
 import psycopg2.errors
@@ -749,20 +749,22 @@ AUDIT_LOG_RETENTION_DAYS = 90
 
 
 def add_audit(actor: str, action: str, target: str = "", result: str = "ok", detail: str = ""):
-    # Cutoff/insert timestamp both computed in Python (datetime.now(),
-    # the box's actual local time, Asia/Phnom_Penh) rather than a SQL
-    # date function — same reasoning as before: everything this column
-    # is ever compared against elsewhere in the app is also a
-    # Python-formatted string in this exact format, so there's one
-    # single source of truth for "now" instead of the app and the
-    # database needing to agree on a timezone.
+    # Cutoff/insert timestamp both computed in Python (datetime.now(timezone.utc))
+    # rather than a SQL date function — same reasoning as before: everything
+    # this column is ever compared against elsewhere in the app is also a
+    # Python-formatted string in this exact format, so there's one single
+    # source of truth for "now" instead of the app and the database
+    # needing to agree on a timezone. UTC specifically (not the hub
+    # process's own local time) so this stays comparable with
+    # vpnlog._format_ts's ingested timestamps, which can come from a
+    # managed box in a different timezone than the hub itself.
     conn = get_conn()
     try:
-        cutoff = (datetime.now() - timedelta(days=AUDIT_LOG_RETENTION_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=AUDIT_LOG_RETENTION_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
         conn.execute("DELETE FROM audit_log WHERE ts < %s", (cutoff,))
         conn.execute(
             "INSERT INTO audit_log (ts, actor, action, target, result, detail) VALUES (%s,%s,%s,%s,%s,%s)",
-            (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), actor, action, target, result, (detail or "")[:500]),
+            (datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"), actor, action, target, result, (detail or "")[:500]),
         )
         conn.commit()
     finally:
@@ -1110,7 +1112,7 @@ def list_system_log_page(
 
 
 def _token_expiry() -> str:
-    return (datetime.now() + timedelta(days=config.AGENT_TOKEN_TTL_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
+    return (datetime.now(timezone.utc) + timedelta(days=config.AGENT_TOKEN_TTL_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def create_server(name: str) -> tuple[int, str]:
@@ -1169,7 +1171,7 @@ def verify_server_token(server_id: int, token: str) -> str:
         ).fetchone()
         if not row or not check_password_hash(row["token_hash"], token):
             return "invalid"
-        if row["token_expires_at"] and row["token_expires_at"] < datetime.now().strftime("%Y-%m-%d %H:%M:%S"):
+        if row["token_expires_at"] and row["token_expires_at"] < datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"):
             return "expired"
         return "ok"
     finally:
@@ -1210,7 +1212,7 @@ def prune_old_logs(days: int):
     whichever runs first wins, harmlessly.)"""
     conn = get_conn()
     try:
-        cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
         conn.execute("DELETE FROM vpn_events WHERE ts < %s", (cutoff,))
         conn.execute("DELETE FROM traffic_flows WHERE ts < %s", (cutoff,))
         conn.execute("DELETE FROM system_log_lines WHERE ts < %s", (cutoff,))

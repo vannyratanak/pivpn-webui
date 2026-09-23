@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import config
 from app import db
@@ -63,7 +63,7 @@ def test_add_audit_and_query(tmp_path, monkeypatch):
 def test_add_audit_prunes_rows_older_than_retention(tmp_path, monkeypatch):
     _use_temp_db(tmp_path, monkeypatch)
     conn = db.get_conn()
-    old_ts = (datetime.now() - timedelta(days=db.AUDIT_LOG_RETENTION_DAYS + 1)).strftime("%Y-%m-%d %H:%M:%S")
+    old_ts = (datetime.now(timezone.utc) - timedelta(days=db.AUDIT_LOG_RETENTION_DAYS + 1)).strftime("%Y-%m-%d %H:%M:%S")
     conn.execute(
         "INSERT INTO audit_log (ts, actor, action, result) VALUES (%s, %s, %s, %s)",
         (old_ts, "admin", "login", "ok"),
@@ -79,7 +79,7 @@ def test_add_audit_prunes_rows_older_than_retention(tmp_path, monkeypatch):
 def test_add_audit_keeps_rows_within_retention(tmp_path, monkeypatch):
     _use_temp_db(tmp_path, monkeypatch)
     conn = db.get_conn()
-    recent_ts = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
+    recent_ts = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
     conn.execute(
         "INSERT INTO audit_log (ts, actor, action, result) VALUES (%s, %s, %s, %s)",
         (recent_ts, "admin", "login", "ok"),
@@ -112,7 +112,7 @@ def test_list_audit_page_search_matches_across_fields(tmp_path, monkeypatch):
 def test_list_audit_page_since_filters_by_cutoff(tmp_path, monkeypatch):
     _use_temp_db(tmp_path, monkeypatch)
     conn = db.get_conn()
-    old_ts = (datetime.now() - timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S")
+    old_ts = (datetime.now(timezone.utc) - timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S")
     conn.execute(
         "INSERT INTO audit_log (ts, actor, action, result) VALUES (%s, %s, %s, %s)",
         (old_ts, "admin", "old-action", "ok"),
@@ -120,7 +120,7 @@ def test_list_audit_page_since_filters_by_cutoff(tmp_path, monkeypatch):
     conn.commit()
     conn.close()
     db.add_audit("admin", "recent-action", result="ok")
-    cutoff = (datetime.now() - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
     rows, total = db.list_audit_page(since=cutoff)
     assert total == 1
     assert rows[0]["action"] == "recent-action"
@@ -353,7 +353,7 @@ def test_verify_server_token_expired_is_rejected(tmp_path, monkeypatch):
     conn = db.get_conn()
     conn.execute(
         "UPDATE servers SET token_expires_at = %s WHERE id = %s",
-        ((datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S"), server_id),
+        ((datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S"), server_id),
     )
     conn.commit()
     conn.close()
