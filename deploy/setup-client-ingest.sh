@@ -3,7 +3,7 @@
 # not root/sudo — matches that script's convention) to enable background
 # client status ingestion: GET /api/clients and GET /api/clients/<name>
 # move from calling the agent live on every request to reading pre-fetched
-# rows from the database, populated by deploy/ingest_clients.py every 10
+# rows from the database, populated by deploy/ingest_clients.py every 2
 # seconds via a systemd timer. See that script's docstring and
 # app/db.py's client_status_cache comment for why — in HUB_MODE, that live
 # call is a real multi-second WebSocket round-trip through the hub/agent

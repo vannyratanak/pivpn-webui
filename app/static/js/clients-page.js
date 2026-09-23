@@ -406,7 +406,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // stale/wrong for a status column. Patches every row in place (same
   // updateRowInPlace as the action handlers above), never a full
   // tbody rebuild, so this can't reintroduce the whole-table flicker.
-  const POLL_INTERVAL_MS = 10 * 1000;
+  const POLL_INTERVAL_MS = 2 * 1000;
   function pollClients() {
     if (document.visibilityState === 'hidden') return; // no point paying for a hub round-trip nobody's looking at
     ApiClient.call('/api/clients')

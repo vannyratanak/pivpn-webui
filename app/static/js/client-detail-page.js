@@ -471,7 +471,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // loadClient()'s existing full-refresh is fine to reuse here (unlike
   // the rules table, there's no pagination/filter state a rebuild could
   // clobber).
-  const POLL_INTERVAL_MS = 10 * 1000;
+  const POLL_INTERVAL_MS = 2 * 1000;
   setInterval(() => {
     if (document.visibilityState === 'hidden') return;
     loadClient();

@@ -295,7 +295,7 @@ CREATE TABLE IF NOT EXISTS servers (
 );
 
 -- Client list/status snapshot, refreshed by deploy/ingest_clients.py
--- (systemd timer, every 10s) — same story as vpn_events/traffic_flows
+-- (systemd timer, every 2s) — same story as vpn_events/traffic_flows
 -- above but for GET /api/clients and /api/clients/<name>, which used to
 -- call pivpn_ctl.list_clients()/list_client_ips()/list_connected_clients()
 -- live on every single request. In HUB_MODE those are real multi-second

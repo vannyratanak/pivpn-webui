@@ -228,6 +228,7 @@ echo "== Step 6/7: per-destination traffic logging (Logs page's Traffic tab) =="
 # instead of aborting the rest of this setup over it.
 if [[ -r /etc/openvpn/server.conf ]]; then
   sudo ./deploy/setup-traffic-log.sh
+  sudo ./deploy/tune-openvpn-liveness.sh
 else
   echo "No /etc/openvpn/server.conf found — skipping (PiVPN doesn't appear to be"
   echo "installed on this box yet). Run 'sudo ./deploy/setup-traffic-log.sh' by hand"

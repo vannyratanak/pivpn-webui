@@ -24,7 +24,7 @@ unprivileged user the main app runs as. Also called directly (not via the
 timer) right after a client add/renew/remove/import in app/api.py, the
 same way deploy/ingest_logs.py's functions are called directly from
 POST /logs/refresh — so a client you just added or removed shows up
-immediately instead of waiting for the next 10s tick.
+immediately instead of waiting for the next 2s tick.
 
 Full-snapshot, not incremental: unlike ingest_logs.py's journalctl-cursor
 approach (only ever new lines since last run), there's no "new since last
