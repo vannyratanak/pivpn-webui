@@ -142,6 +142,56 @@ async def _dispatch(message: dict) -> dict:
         return {"ok": False, "error": f"unexpected agent error: {exc}"}
 
 
+def _read_local_connected_snapshot() -> dict | None:
+    """Read the local OpenVPN status file, returning None if the source
+    itself is unavailable (an empty session set is a valid snapshot)."""
+    out = privileged.run_root([config.CCD_HELPER, "status"])
+    if not any(line.startswith("TIME\t") for line in out.splitlines()):
+        return None
+    sessions = pivpn_ctl._parse_status_log(out)
+    try:
+        tcp_test = privileged.run_root([config.CCD_HELPER, "status-tcp-test"])
+        sessions.update(pivpn_ctl._parse_status_log(tcp_test))
+    except Exception:
+        pass
+    return sessions
+
+
+async def _push_connection_changes(websocket, send_lock: asyncio.Lock):
+    """Watch OpenVPN's one-second status snapshot locally and push only
+    connect/disconnect changes over the already-open agent WebSocket. This
+    keeps status updates independent of browser requests and avoids a
+    repeated hub-to-agent round trip for every open page."""
+    previous = None
+    warned = False
+    while True:
+        try:
+            sessions = await asyncio.to_thread(_read_local_connected_snapshot)
+            if sessions is None:
+                raise RuntimeError("OpenVPN status file is unavailable")
+            fingerprint = tuple(sorted(
+                (name, info.get("real_address"), info.get("virtual_address"), info.get("since"))
+                for name, info in sessions.items()
+            ))
+            if fingerprint != previous:
+                async with send_lock:
+                    await websocket.send(json.dumps({
+                        "type": "client_status_snapshot",
+                        "sessions": sessions,
+                    }))
+                previous = fingerprint
+                if warned:
+                    log.info("OpenVPN status updates resumed")
+                    warned = False
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            if not warned:
+                log.warning("could not push OpenVPN status update: %s", exc)
+                warned = True
+        await asyncio.sleep(1)
+
+
 def _build_tls_context() -> ssl.SSLContext | None:
     """None for a plain ws:// HUB_URL (websockets.connect ignores ssl=None
     and just doesn't use TLS at all). For wss://, HUB_TLS_CERT pins trust
@@ -177,16 +227,22 @@ async def _run_until_disconnected():
             log.error("hub rejected this agent (%s) — check AGENT_SERVER_ID/AGENT_TOKEN in .env", ack.get("error"))
             sys.exit(1)
         log.info("connected to hub as server #%s", config.AGENT_SERVER_ID)
-
-        async for raw in websocket:
-            try:
-                message = json.loads(raw)
-                request_id = message["id"]
-            except (json.JSONDecodeError, KeyError, TypeError):
-                log.warning("hub sent an unparseable request: %r", raw)
-                continue
-            response = await _dispatch(message)
-            await websocket.send(json.dumps({**response, "id": request_id}))
+        send_lock = asyncio.Lock()
+        status_task = asyncio.create_task(_push_connection_changes(websocket, send_lock))
+        try:
+            async for raw in websocket:
+                try:
+                    message = json.loads(raw)
+                    request_id = message["id"]
+                except (json.JSONDecodeError, KeyError, TypeError):
+                    log.warning("hub sent an unparseable request: %r", raw)
+                    continue
+                response = await _dispatch(message)
+                async with send_lock:
+                    await websocket.send(json.dumps({**response, "id": request_id}))
+        finally:
+            status_task.cancel()
+            await asyncio.gather(status_task, return_exceptions=True)
 
 
 async def main():

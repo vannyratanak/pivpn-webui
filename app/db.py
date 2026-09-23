@@ -295,7 +295,7 @@ CREATE TABLE IF NOT EXISTS servers (
 );
 
 -- Client list/status snapshot, refreshed by deploy/ingest_clients.py
--- (systemd timer, every 2s) — same story as vpn_events/traffic_flows
+-- (systemd timer, every 10s) — same story as vpn_events/traffic_flows
 -- above but for GET /api/clients and /api/clients/<name>, which used to
 -- call pivpn_ctl.list_clients()/list_client_ips()/list_connected_clients()
 -- live on every single request. In HUB_MODE those are real multi-second
@@ -586,6 +586,36 @@ def replace_client_status_cache(rows: list[dict]):
                     r["name"], r["status"], r["expiration"], r["list_position"], r["ip"],
                     r["session_real_address"], r["session_virtual_address"],
                     r["session_bytes_recv"], r["session_bytes_sent"], r["session_since"],
+                ),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def apply_client_connection_snapshot(sessions: dict[str, dict]):
+    """Apply a complete live-session snapshot pushed by the authenticated
+    OpenVPN agent. The slower client-ingest timer remains the fallback for
+    client metadata and for periods when the agent connection is down."""
+    conn = get_conn()
+    try:
+        conn.execute(
+            "UPDATE client_status_cache SET session_real_address=NULL, "
+            "session_virtual_address=NULL, session_bytes_recv=NULL, "
+            "session_bytes_sent=NULL, session_since=NULL, "
+            "updated_at=to_char(now(), 'YYYY-MM-DD HH24:MI:SS')"
+        )
+        for name, session in sessions.items():
+            conn.execute(
+                "UPDATE client_status_cache SET session_real_address=%s, "
+                "session_virtual_address=%s, session_bytes_recv=%s, "
+                "session_bytes_sent=%s, session_since=%s, "
+                "updated_at=to_char(now(), 'YYYY-MM-DD HH24:MI:SS') "
+                "WHERE lower(name)=lower(%s)",
+                (
+                    session.get("real_address"), session.get("virtual_address"),
+                    session.get("bytes_recv"), session.get("bytes_sent"),
+                    session.get("since"), name,
                 ),
             )
         conn.commit()

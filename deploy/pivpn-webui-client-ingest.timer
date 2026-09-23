@@ -1,9 +1,9 @@
 [Unit]
-Description=Run PiVPN Web UI client status ingestion every 2 seconds
+Description=Run PiVPN Web UI client status ingestion every 10 seconds
 
 [Timer]
-OnBootSec=2s
-OnUnitActiveSec=2s
+OnBootSec=10s
+OnUnitActiveSec=10s
 AccuracySec=1s
 Unit=pivpn-webui-client-ingest.service
 

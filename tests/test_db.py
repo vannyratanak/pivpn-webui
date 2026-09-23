@@ -51,6 +51,25 @@ def test_delete_rule(tmp_path, monkeypatch):
     assert db.list_rules() == []
 
 
+def test_apply_client_connection_snapshot_updates_and_clears_session(tmp_path, monkeypatch):
+    _use_temp_db(tmp_path, monkeypatch)
+    db.replace_client_status_cache([{
+        "name": "client1", "status": "Valid", "expiration": "", "list_position": 0,
+        "ip": "10.8.0.2", "session_real_address": None,
+        "session_virtual_address": None, "session_bytes_recv": None,
+        "session_bytes_sent": None, "session_since": None,
+    }])
+
+    db.apply_client_connection_snapshot({"client1": {
+        "real_address": "192.0.2.10:54321", "virtual_address": "10.8.0.2",
+        "bytes_recv": "100", "bytes_sent": "200", "since": "2026-09-23 07:00:00",
+    }})
+    assert db.get_client_status_cache("client1")["session"]["since"] == "2026-09-23 07:00:00"
+
+    db.apply_client_connection_snapshot({})
+    assert db.get_client_status_cache("client1")["session"] is None
+
+
 def test_add_audit_and_query(tmp_path, monkeypatch):
     _use_temp_db(tmp_path, monkeypatch)
     db.add_audit("admin", "login", result="ok", detail="from 127.0.0.1")

@@ -127,9 +127,40 @@ async def handle_agent(websocket):
         async for raw in websocket:
             try:
                 message = json.loads(raw)
-                request_id = message["id"]
-            except (json.JSONDecodeError, KeyError, TypeError):
+            except (json.JSONDecodeError, TypeError):
                 log.warning("server #%s sent an unparseable response: %r", server_id, raw)
+                continue
+            if not isinstance(message, dict):
+                log.warning("server #%s sent a non-object message", server_id)
+                continue
+            if message.get("type") == "client_status_snapshot":
+                sessions = message.get("sessions")
+                if (
+                    server_id == config.DEFAULT_SERVER_ID
+                    and isinstance(sessions, dict)
+                    and len(sessions) <= 4096
+                ):
+                    safe_sessions = {
+                        name: {
+                            key: value for key, value in session.items()
+                            if key in {
+                                "real_address", "virtual_address", "bytes_recv",
+                                "bytes_sent", "since",
+                            }
+                            and (value is None or isinstance(value, str))
+                            and (value is None or len(value) <= 256)
+                        }
+                        for name, session in sessions.items()
+                        if isinstance(name, str)
+                        and 1 <= len(name) <= 32
+                        and all(ch.isalnum() or ch in "_-" for ch in name)
+                        and isinstance(session, dict)
+                    }
+                    await asyncio.to_thread(db.apply_client_connection_snapshot, safe_sessions)
+                continue
+            request_id = message.get("id")
+            if not isinstance(request_id, str):
+                log.warning("server #%s sent a message without a request id", server_id)
                 continue
             future = pending.pop(request_id, None)
             if future is not None and not future.done():
