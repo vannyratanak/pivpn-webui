@@ -411,25 +411,42 @@ document.addEventListener('DOMContentLoaded', () => {
   let hadStream = false;
   let pendingClientChange = false;
   let fallbackTimer;
-  const clientStream = OverviewStream((event, topics) => {
-    if (event === 'ready') {
-      if (hadStream) loadClients(false); // reconnect: resynchronize
-      hadStream = true;
-      if (pendingClientChange) { pendingClientChange = false; loadClients(false); }
-    } else if (event === 'changed' && topics.includes('snapshot')) {
-      if (initialLoaded) loadClients(false); else pendingClientChange = true;
+  let clientStream = null;
+  // Always fetch the page data even if the shared live-stream script failed
+  // to load (for example, while a browser still has an older cached template).
+  loadClients(true).finally(() => { initialLoaded = true; if (clientStream) clearTimeout(fallbackTimer); });
+  try {
+    if (typeof window.OverviewStream === 'function') {
+      clientStream = window.OverviewStream((event, topics) => {
+        if (event === 'ready') {
+          if (hadStream) loadClients(false); // reconnect: resynchronize
+          hadStream = true;
+          if (pendingClientChange) { pendingClientChange = false; loadClients(false); }
+        } else if (event === 'changed' && topics.includes('snapshot')) {
+          if (initialLoaded) loadClients(false); else pendingClientChange = true;
+        }
+      }, () => {});
+      clientStream.start();
     }
-  }, () => {});
+  } catch (error) {
+    console.warn('Clients live updates unavailable; using periodic refresh.', error);
+  }
+  if (!clientStream) {
+    // Rare fallback for a missing/broken stream helper; normal operation stays
+    // push-driven and makes no repeating API requests.
+    fallbackTimer = setInterval(() => { if (!document.hidden) loadClients(false); }, 30000);
+  }
   document.addEventListener('visibilitychange', () => {
+    if (!clientStream) return;
     if (document.hidden) clientStream.stop(); else clientStream.start();
   });
-  window.addEventListener('pagehide', () => clientStream.stop());
-  window.addEventListener('pageshow', () => { if (!document.hidden) clientStream.start(); });
+  window.addEventListener('pagehide', () => { if (clientStream) clientStream.stop(); clearInterval(fallbackTimer); });
+  window.addEventListener('pageshow', () => { if (clientStream && !document.hidden) clientStream.start(); });
 
-  loadClients(true).finally(() => { initialLoaded = true; clearTimeout(fallbackTimer); });
-  clientStream.start();
   // Preserve initial page rendering if the live service is temporarily down.
-  fallbackTimer = setTimeout(() => {
-    if (!initialLoaded) loadClients(true).finally(() => { initialLoaded = true; clearTimeout(fallbackTimer); });
-  }, 3000);
+  if (clientStream) {
+    fallbackTimer = setTimeout(() => {
+      if (!initialLoaded) loadClients(true).finally(() => { initialLoaded = true; clearTimeout(fallbackTimer); });
+    }, 3000);
+  }
 });
