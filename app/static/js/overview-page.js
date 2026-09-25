@@ -68,7 +68,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const connected = clients.filter((c) => c.session).length;
     const counts = { total: clients.length, connected, blocked: clients.filter((c) => c.blocked).length, expiring: clients.filter((c) => c.certificate_state === 'expiring').length };
     Object.entries(counts).forEach(([key, value]) => text(`count-${key}`, value));
-    text('server', data.server_name);
     text('feedback', '');
     text('freshness', data.last_client_update ? `Last row update: ${formatServerTs(data.last_client_update)}` : 'No update timestamp available');
     el('freshness').title = data.freshness_note;

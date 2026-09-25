@@ -33,8 +33,10 @@ button.ov-metric { justify-content: stretch; justify-items: start; }
 .ov-donut circle:nth-of-type(2) { stroke: var(--ok); transform: rotate(-90deg); transform-origin: center; }
 .ov-donut text { fill: var(--text); font-size: 34px; font-weight: 650; }
 .ov-donut text.ov-donut-caption { fill: var(--muted); font-size: 12px; font-weight: 400; }
-.ov-legend { display: grid; gap: 4px; }
-.ov-legend button { display: flex; align-items: center; gap: 10px; background: transparent; color: var(--text); border: 0; height: auto; padding: 10px 0; text-align: left; }
+.ov-legend { display: grid; }
+.ov-legend button { display: flex; align-items: center; gap: 10px; background: transparent; color: var(--text); border: 0; box-shadow: none; border-radius: 8px; height: auto; margin: 0 -8px; padding: 10px 8px; width: calc(100% + 16px); text-align: left; }
+.ov-legend button:not(:last-child) { border-bottom: 1px solid var(--surface-line); }
+.ov-legend button:hover { background: var(--panel-2); filter: none; box-shadow: none; }
 .ov-legend strong { margin-left: auto; }
 .ov-dot { height: 9px; width: 9px; border-radius: 50%; background: var(--ok); }
 .ov-dot-offline { background: var(--muted); }

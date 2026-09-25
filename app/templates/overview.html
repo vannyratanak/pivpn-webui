@@ -5,7 +5,7 @@
 {% block content %}
 <div id="overview-root" data-admin="{{ 'true' if current_user.is_admin else 'false' }}">
   <div class="page-header-row">
-    <div class="page-heading"><p class="ov-eyebrow" id="ov-server">PiVPN server</p><h1>Overview</h1><p class="page-description">Connections, activity, and access across your VPN.</p></div>
+    <div class="page-heading"><h1>Overview</h1><p class="page-description">Connections, activity, and access across your VPN.</p></div>
     <div class="btn-group ov-controls"><button type="button" class="btn btn-secondary" id="ov-print" disabled>Print report</button><button type="button" class="btn" id="ov-refresh">Refresh</button></div>
   </div>
   <p id="ov-feedback" role="status" class="hint">Loading overview…</p>
