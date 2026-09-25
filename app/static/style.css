@@ -628,62 +628,13 @@ h2 { font-size: 16px; margin: 0 0 12px; color: var(--text); }
   width: auto;
 }
 
-/* Logs page's search box is wrapped in a <form> (it submits to the
-   server, unlike other pages' client-side-only search inputs) — the flex
-   sizing above targets the input itself, which only works when it's a
-   direct flex child of .page-header-row, so the form needs its own
-   matching flex-basis instead, with the input filling it. */
-.page-header-row .search-form {
-  flex: 0 0 33.3333%;
-}
-
 @media (max-width: 520px) {
   .page-header-row { flex-wrap: wrap; row-gap: 10px; }
   .page-header-row h1,
   .page-header-title-group,
-  .page-header-row input[type="text"].filter-input-inline,
-  .page-header-row .search-form {
+  .page-header-row input[type="text"].filter-input-inline {
     flex-basis: 100%;
   }
-}
-
-.collapsible summary {
-  cursor: pointer;
-  list-style: none;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  /* .card has 20px of padding around everything, which otherwise sits outside
-     this element's own clickable box — pull summary out to the card's edges
-     on all sides and pad it back in, so the whole visible header bar (edges
-     included, above and below the title text) is part of the clickable
-     toggle, not just the text/chevron in the middle. */
-  margin: -20px -20px -20px;
-  padding: 20px 20px 20px;
-}
-
-.collapsible summary::-webkit-details-marker { display: none; }
-
-.collapsible summary h2 { margin: 0; }
-
-.collapsible summary::after {
-  content: '';
-  flex-shrink: 0;
-  width: 14px;
-  height: 14px;
-  margin-left: 12px;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'><path fill='none' stroke='%238a93a8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' d='M6 8l4 4 4-4'/></svg>");
-  background-repeat: no-repeat;
-  background-size: 14px;
-  transition: transform 0.15s ease;
-}
-
-.collapsible[open] summary::after {
-  transform: rotate(180deg);
-}
-
-.collapsible > :not(summary) {
-  margin-top: 20px;
 }
 
 .hint { color: var(--muted); font-size: 12px; font-weight: normal; }
@@ -1182,7 +1133,6 @@ button.is-busy:disabled, .btn.is-busy:disabled { cursor: progress; }
   z-index: 1200;
 }
 .dropdown-menu[hidden] { display: none; }
-.dropdown-item-form { display: block; }
 .dropdown-item {
   display: block;
   width: 100%;
@@ -1581,19 +1531,6 @@ th {
 #clients-table tbody tr[data-client-name] input[type="checkbox"] {
   cursor: default;
 }
-/* A DB-tracked rule discover_cli_rules() couldn't find live anymore (see
-   routes.py's firewall_rules() and the flash-warning it raises) —
-   highlights the specific row(s) the warning is talking about, since the
-   warning text alone (a bare rule id) gives no visual way to tell which
-   row that is, especially among visually-identical duplicates. */
-.missing-live-row { background: rgba(var(--warn-rgb), 0.08); }
-.missing-live-badge {
-  display: inline-block;
-  margin-top: 2px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--warn);
-}
 /* Dim only the data cells, not the whole row — opacity on the <tr> itself
    would also fade the Enable/Delete buttons in the last cell, since opacity
    compounds through descendants and can't be un-done by a child's own
@@ -1715,31 +1652,6 @@ dialog.modal code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   line-height: 1.6;
   word-break: break-all;
-}
-
-.import-example-table {
-  font-size: 12px;
-}
-
-.import-example-table th,
-.import-example-table td {
-  padding: 6px 8px;
-}
-
-/* Import dialogs' step-by-step help — plain .hint text wrapped as a list
-   reads as one dense paragraph; this keeps the same muted styling but
-   breaks it into scannable, one-idea-per-line bullets instead. */
-.import-help-list {
-  margin: 4px 0 10px;
-  padding-left: 20px;
-}
-
-.import-help-list li {
-  margin-bottom: 6px;
-}
-
-.import-help-list li:last-child {
-  margin-bottom: 0;
 }
 
 .badge {
@@ -1923,13 +1835,10 @@ input[type="text"].filter-input-inline {
   background-size: 14px;
 }
 
-/* Light-mode versions of the 4 hardcoded-color icons above — same SVGs,
+/* Light-mode versions of the 3 hardcoded-color icons above — same SVGs,
    stroke swapped from %238a93a8 (dark theme's --muted) to %23475569
    (light theme's --muted). See the comment near the `select` rule for why
    these can't just reference the custom property directly. */
-[data-theme="light"] .collapsible summary::after {
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'><path fill='none' stroke='%23475569' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' d='M6 8l4 4 4-4'/></svg>");
-}
 [data-theme="light"] select {
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'><path fill='none' stroke='%23475569' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' d='M6 8l4 4 4-4'/></svg>");
 }
@@ -2048,101 +1957,6 @@ input[type="text"].filter-input-inline {
   cursor: pointer;
 }
 .flash-toast-close:hover { background: var(--panel-2); filter: none; box-shadow: none; }
-
-.login-wrap {
-  min-height: 80vh;
-  display: flex;
-  /* Without this, flex's row default put the locked-state's
-     .login-alt-action paragraph (a sibling after .login-card, both
-     children of this wrap) beside the card instead of below it —
-     justify-content: center then centered that whole row as a pair,
-     stranding the "Not you?" text off to the side at card-height instead
-     of stacked underneath. Column makes align-items/justify-content mean
-     "center horizontally, then vertically" the way both states actually
-     need. No effect on the plain-login state, which has only one child
-     either way. */
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-}
-
-/* Width-matches and centers the flash banner to the login card
-   specifically — everywhere else .flashes intentionally spans the full
-   .content width, which reads as a mismatched full-page banner floating
-   above this page's one narrow, centered card. */
-.flashes:has(+ .login-wrap) {
-  max-width: 360px;
-  margin: 0 auto 16px;
-}
-
-.login-card {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 32px;
-  /* Wider than the general .card token's implicit sizing, and its own gap
-     scale — this is the page's one and only focal element on an otherwise
-     empty viewport, not a stacked section among others, so it earns more
-     breathing room than a dense data-page card would. 20px (DESIGN.md's
-     lg spacing token, the nearest step to the previous off-scale 16px)
-     keeps that same "more room" intent on an actual scale value. */
-  width: 360px;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
-.login-card-header { text-align: center; }
-
-/* Matches the documented Display token (see the global h1 rule above)
-   instead of the previous undocumented 18px override — this *is* the
-   page's one h1, so it reads at the size DESIGN.md's type ramp defines
-   for a page title, not a smaller ad-hoc size with no written reason. */
-.login-card h1 { margin: 0 0 6px; }
-
-.login-card-subtitle {
-  margin: 0;
-  font-size: 13px;
-  color: var(--muted);
-}
-
-.login-card label {
-  display: flex;
-  flex-direction: column;
-  /* 4px, matching .inline-form label's own label-above-input gap — same
-     job (a field label stacked above its input), same token, not a
-     login-specific one-off. */
-  gap: 4px;
-  font-size: 13px;
-  color: var(--muted);
-}
-
-.login-card input { width: 100%; }
-
-/* Spans the same width as the inputs above it instead of shrink-wrapping
-   to its own text — matches .inline-form button's own full-width submit
-   convention (grid-column: 1 / -1 there; a plain width here, since this
-   form isn't a grid) so the one actionable control in the card doesn't
-   read smaller than the fields feeding it. */
-.login-card button[type="submit"] { width: 100%; }
-
-/* "Not you? Sign in with a different account" link shown below the
-   locked-session resume card — same max-width as the card, centered,
-   small muted text, link in brand color. */
-.login-alt-action {
-  width: 360px;
-  margin: 8px auto 0;
-  text-align: center;
-  /* 13px (Caption), not 12px (Label/.hint-only) — DESIGN.md draws that
-     line specifically: Caption covers "structural secondary text that's
-     still part of the content", which this is (a real navigation
-     action, "sign in as someone else"), not a purely annotational aside
-     like a form hint. */
-  font-size: 13px;
-  color: var(--muted);
-}
-.login-alt-action a { color: var(--accent); }
 
 /* Light/dark toggle (static/js/theme-toggle.js). Icon + text-label pill,
    not a bare icon button — the visible "Dark"/"Light" word means the

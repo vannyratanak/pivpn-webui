@@ -417,7 +417,6 @@ def _regenerate_script_for_ip(ip, client_ips=None):
     shared between the two blueprints."""
     if not ip:
         return
-    from app.privileged import PrivilegedCommandError
     client_ips = client_ips if client_ips is not None else pivpn_ctl.list_client_ips()
     for name, client_ip in client_ips.items():
         if client_ip == ip:
@@ -718,6 +717,7 @@ def reorder_rule(rule_id):
     _audit("firewall_rule_reorder", f"rule#{rule_id} {place} rule#{target_id}")
     return jsonify(ok=True)
 
+
 @bp.route("/firewall/forward", methods=["POST"])
 @jwt_required()
 def add_forward():
@@ -886,7 +886,7 @@ def remove_vpn_route():
 
 _ALL_LOG_TABS = ("sessions", "client_sessions", "traffic", "system", "activity", "auth")
 _MODERATOR_LOG_TABS = ("client_sessions", "traffic", "auth")
-_AUTH_ACTIONS = ("login", "logout")
+_AUTH_ACTIONS = ("login", "logout", "idle_lock")
 _LOG_RANGE_HOURS = {"1h": 1, "6h": 6, "12h": 12, "1d": 24, "7d": 24 * 7}
 
 
@@ -896,7 +896,6 @@ def logs():
     from datetime import datetime, timedelta, timezone
 
     from app import vpnlog
-    from app.privileged import PrivilegedCommandError
 
     is_admin = get_jwt().get("role") == "admin"
     allowed_tabs = _ALL_LOG_TABS if is_admin else _MODERATOR_LOG_TABS
@@ -978,7 +977,6 @@ def logs_refresh():
     anywhere; each ingestion function is already a no-op wherever there's
     nothing new (see that view's own docstring for the full reasoning)."""
     from deploy import ingest_logs
-    from app.privileged import PrivilegedCommandError
     try:
         ingest_logs.ingest_vpn_events()
         ingest_logs.ingest_traffic_flows()

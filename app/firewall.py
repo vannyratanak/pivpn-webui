@@ -1,7 +1,7 @@
 """iptables rule management: general FORWARD accept/drop rules, DNAT
 port-forwarding, and a per-VPN-client block toggle.
 
-All rules are persisted in sqlite (see db.py) so they can be reapplied after
+All rules are persisted in Postgres (see db.py) so they can be reapplied after
 a reboot or an accidental `iptables -F`. Every apply is idempotent (delete
 then add) so re-running sync never produces duplicate rules.
 """
@@ -93,7 +93,7 @@ _OWNED_TAG_RE = re.compile(r"^pivpn-webui:(\d+)$")
 # (0, 1, 2, ...), so forward/input/nat rows land on the same numbers and
 # interleave in the combined list instead of grouping, even though each
 # chain's own relative order is still correct. Regrouping for display
-# only (via a stable sort — see routes.py's firewall_rules()) doesn't
+# only (via a stable sort — see api.py's firewall_rules()) doesn't
 # touch anything's actual position/live order, just how the one combined
 # table presents them.
 KIND_DISPLAY_ORDER = {
@@ -152,7 +152,7 @@ def _valid_ip(a):
 
 
 # HTML5 `pattern` strings for the Add Rule forms' IP/CIDR text inputs (see
-# routes.py's jinja globals) — a client-side approximation of _valid_addr/
+# __init__.py's jinja globals) — a client-side approximation of _valid_addr/
 # _valid_ip above, not a replacement: these are plain IPv4-only regexes
 # (every example/placeholder in this app is IPv4; ipaddress.ip_network
 # above also accepts IPv6, so a real IPv6 CIDR would still be rejected
@@ -1720,10 +1720,10 @@ def discover_cli_rules() -> tuple[int, list[dict]]:
     Deliberately not auto-deleted from the DB even when detected: unlike
     adopting a new CLI rule (purely additive, safe to do unattended), this
     branch is a *delete* against data that might be right and the check
-    that's wrong — routes.py surfaces it as a warning instead, and the
-    existing Delete button (already tolerant of the live side being gone
-    — see its own _unapply try/except) is what actually removes the row,
-    once a human's confirmed it.
+    that's wrong — api.py's firewall_options() surfaces it as a warning
+    instead, and the existing Delete button (already tolerant of the live
+    side being gone — see its own _unapply try/except) is what actually
+    removes the row, once a human's confirmed it.
 
     Adopting a rule doesn't re-add it immediately — its DB row gets a
     `position` interpolated from where it actually sits among the chain's

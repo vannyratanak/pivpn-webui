@@ -151,10 +151,9 @@ def create_app():
             issue_html_jwt_cookie(response, current_user)
         return response
 
-    from app.firewall import IP_CIDR_PATTERN, IP_PATTERN, KIND_DISPLAY_LABEL
+    from app.firewall import IP_CIDR_PATTERN, IP_PATTERN
     app.jinja_env.globals["ip_cidr_pattern"] = IP_CIDR_PATTERN
     app.jinja_env.globals["ip_pattern"] = IP_PATTERN
-    app.jinja_env.globals["kind_display_label"] = KIND_DISPLAY_LABEL
     app.jinja_env.globals["idle_timeout_minutes"] = config.IDLE_TIMEOUT_MINUTES
 
     with app.app_context():

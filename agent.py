@@ -218,17 +218,21 @@ async def _push_journal_stream(
             )
             flush_at = asyncio.get_running_loop().time() + 0.5
             while True:
-                timeout = max(0.01, flush_at - asyncio.get_running_loop().time())
+                # With no pending batch, block until a journal entry arrives.
+                # Only the half-second batching window needs a timeout.
+                timeout = max(0.01, flush_at - asyncio.get_running_loop().time()) if batch else None
                 try:
                     raw = await asyncio.wait_for(proc.stdout.readline(), timeout=timeout)
                 except asyncio.TimeoutError:
                     raw = None
                 if raw == b"":
-                    raise RuntimeError(f"flow journal follower exited ({await proc.wait()})")
+                    raise RuntimeError(f"{stream_name} journal follower exited ({await proc.wait()})")
                 if raw:
                     try:
                         event = json.loads(raw)
                     except (json.JSONDecodeError, UnicodeDecodeError):
+                        continue
+                    if not isinstance(event, dict):
                         continue
                     event_cursor = event.get("__CURSOR")
                     message = event.get("MESSAGE")
@@ -236,6 +240,12 @@ async def _push_journal_stream(
                     if (isinstance(event_cursor, str) and len(event_cursor) <= 2048
                             and isinstance(message, str) and len(message) <= 8192
                             and isinstance(realtime_us, str) and realtime_us.isdigit()):
+                        # Follow the kernel without journalctl's grep option
+                        # (it can exit when no matches exist); filter locally.
+                        if action == 'flow-follow' and 'VPNFLOW' not in message:
+                            continue
+                        if not batch:
+                            flush_at = asyncio.get_running_loop().time() + 0.5
                         batch.append({"cursor": event_cursor, "message": message, "realtime_us": realtime_us})
                 if batch and (len(batch) >= 50 or raw is None or asyncio.get_running_loop().time() >= flush_at):
                     batch_id = uuid.uuid4().hex
@@ -245,7 +255,7 @@ async def _push_journal_stream(
                         }))
                     ack_id, ok = await asyncio.wait_for(ack_queue.get(), timeout=30)
                     if ack_id != batch_id or not ok:
-                        raise RuntimeError("hub did not acknowledge traffic batch")
+                        raise RuntimeError(f"hub did not acknowledge {stream_name} batch")
                     # This is the only cursor advanced in memory. If anything
                     # fails before the hub commits, restarting the follower
                     # replays from the previous acknowledged position.
@@ -278,9 +288,10 @@ def _build_tls_context() -> ssl.SSLContext | None:
     gets a real CA-signed cert instead."""
     if not config.HUB_URL.startswith("wss://"):
         return None
-    ctx = ssl.create_default_context()
     if config.HUB_TLS_CERT:
         ctx = ssl.create_default_context(cafile=config.HUB_TLS_CERT)
+    else:
+        ctx = ssl.create_default_context()
     if config.AGENT_TLS_CERT and config.AGENT_TLS_KEY:
         # Mutual TLS — see hub_gateway.py's GATEWAY_CLIENT_CA for what
         # this proves to the hub on connect. Both unset (the default)

@@ -2,7 +2,7 @@
 (server.conf), via pivpn-webui-routes-helper.sh — see that script for the
 actual privileged file edit + service restart.
 
-Deliberately not stored in sqlite like firewall.py's rules: server.conf
+Deliberately not stored in Postgres like firewall.py's rules: server.conf
 itself is already the single source of truth for what's pushed to clients,
 so there's nothing to keep in sync — list_routes() just reads it live.
 That includes routes never added through this app (e.g. edited into

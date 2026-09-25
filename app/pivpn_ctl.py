@@ -93,9 +93,6 @@ def validate_name(name: str) -> str:
     return name
 
 
-_validate_name = validate_name  # internal alias, kept short at call sites below
-
-
 def _require_pivpn_binary() -> None:
     """In HUB_MODE, `pivpn` living on PATH is the *agent's* box's problem,
     not this (hub) process's — checking the hub's own PATH here would
@@ -224,7 +221,7 @@ def add_client(name: str, passphrase: str | None = None) -> Path | None:
     that actually need the bytes must go through read_client_ovpn(name)
     instead, which already knows to ask the agent. Returns None in that
     case rather than a Path that merely looks valid."""
-    name = _validate_name(name)
+    name = validate_name(name)
     _require_pivpn_binary()
     with _add_client_lock():
         if _client_ovpn_exists(name):
@@ -282,7 +279,7 @@ def import_clients(text: str) -> tuple[int, list[str]]:
 
 
 def remove_client(name: str) -> None:
-    name = _validate_name(name)
+    name = validate_name(name)
     _require_pivpn_binary()
     result = _run_pivpn(["pivpn", "revoke", "-y", name])
     if result.returncode != 0:
@@ -304,7 +301,7 @@ def renew_client(name: str, passphrase: str | None = None) -> Path | None:
     Not atomic: if add_client fails after remove_client already succeeded,
     the client is left with zero valid access rather than just stuck on
     the old cert — see PivpnRenewPartialFailure."""
-    name = _validate_name(name)
+    name = validate_name(name)
     remove_client(name)
     try:
         return add_client(name, passphrase=passphrase)

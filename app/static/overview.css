@@ -1,6 +1,5 @@
 body.console-page.overview-page { height: auto; min-height: 100dvh; overflow-y: auto; }
 body.overview-page .content { flex: 0 0 auto; overflow: visible; }
-.ov-eyebrow { color: var(--muted); font-size: 11px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; margin: 0 0 8px; }
 .ov-health { display: flex; flex-wrap: wrap; gap: 20px 48px; padding: 20px 0; border-top: 1px solid var(--surface-line); border-bottom: 1px solid var(--surface-line); }
 .ov-health > div { display: grid; gap: 5px; }
 .ov-health strong { font-size: 13px; font-weight: 600; }

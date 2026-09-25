@@ -123,7 +123,7 @@ def _print_cert_instructions(name: str, crt: Path, key: Path):
         print(_SEP)
         print("STEP 3 — Add these 3 lines to that box's agent .env:")
         print(_SEP)
-        print(f"HUB_TLS_CERT=<path where you copied it>/hub-gateway.crt")
+        print("HUB_TLS_CERT=<path where you copied it>/hub-gateway.crt")
         print(f"AGENT_TLS_CERT=<path where you copied it>/{name}.crt")
         print(f"AGENT_TLS_KEY=<path where you copied it>/{name}.key")
         print(_SEP)

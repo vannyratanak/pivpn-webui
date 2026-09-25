@@ -1123,18 +1123,21 @@ def test_activity_tab_range_and_search_filter(client):
     assert "fresh-client" not in targets
 
 
-def test_auth_tab_only_shows_login_logout_actions(client):
+def test_auth_tab_shows_login_logout_and_idle_lock_actions(client):
     # Seeded directly rather than via /api/login — that endpoint doesn't
     # audit logins itself (only the browser's routes.py login() does);
     # this test is only about the auth tab's own action-filtering, not
     # about who calls db.add_audit("login", ...).
     token = _admin_token(client)
     db.add_audit("admin", "login", detail="from 1.2.3.4")
+    db.add_audit("admin", "idle_lock")
     db.add_audit("admin", "client_add", target="laptop-anna", result="ok")
     resp = client.get("/api/logs?tab=auth&range=7d", headers=_auth_header(token))
     assert resp.status_code == 200
     entries = resp.get_json()["entries"]
-    assert any(e["action"] == "login" for e in entries)
+    actions = {e["action"] for e in entries}
+    assert "login" in actions
+    assert "idle_lock" in actions  # regression: this action was silently excluded (see api.py's _AUTH_ACTIONS)
     assert not any(e["target"] == "laptop-anna" for e in entries)
 
 

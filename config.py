@@ -15,9 +15,12 @@ ADMIN_PASSWORD_HASH = os.environ.get("ADMIN_PASSWORD_HASH")
 # Flask session cookies never expire unless marked permanent) stays valid
 # forever if it ever leaks: a stolen laptop, a shared computer, an XSS
 # elsewhere in the same browser profile. Sliding window, not a fixed
-# absolute one — combined with Flask's SESSION_REFRESH_EACH_REQUEST
-# (default on), the cookie's expiry renews on every request, so this is
-# "N hours since your *last* request," not "N hours since you logged in."
+# absolute one — identity now lives in the html_jwt cookie, whose expiry
+# would normally be fixed at issuance, so __init__.py's after_request hook
+# re-issues that cookie on every authenticated response. That hook, not
+# Flask's own SESSION_REFRESH_EACH_REQUEST (which only ever applied to the
+# session cookie this replaced), is what keeps this "N hours since your
+# *last* request," not "N hours since you logged in."
 SESSION_LIFETIME_HOURS = int(os.environ.get("SESSION_LIFETIME_HOURS", "8"))
 
 # A second, much shorter clock layered on top of SESSION_LIFETIME_HOURS —

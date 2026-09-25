@@ -268,14 +268,15 @@ def sort_client_sessions(sessions: list[dict]) -> None:
     within both the ongoing and ended groups.
 
     A free function, not folded into list_client_sessions below, because
-    routes.py's live-connected-status cross-check can flip a session's
-    `ongoing` flag *after* list_client_sessions has already returned and
-    sorted (a session the log parser thought was still open, relabeled
-    "Ended (exact time unknown)" once it's confirmed not actually
-    connected — see that cross-check's own comment). That correction has
-    to re-run this same sort, or the relabeled session keeps the top-
-    pinned position it only ever earned by looking ongoing in the first
-    place, instead of falling back into its real chronological spot."""
+    api.py's live-connected-status cross-check (in its logs() view) can
+    flip a session's `ongoing` flag *after* list_client_sessions has
+    already returned and sorted (a session the log parser thought was
+    still open, relabeled "Ended (exact time unknown)" once it's confirmed
+    not actually connected — see that cross-check's own comment). That
+    correction has to re-run this same sort, or the relabeled session
+    keeps the top-pinned position it only ever earned by looking ongoing
+    in the first place, instead of falling back into its real
+    chronological spot."""
     sessions.sort(key=lambda s: s["start"] or "", reverse=True)
     sessions.sort(key=lambda s: not s["ongoing"])
 

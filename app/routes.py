@@ -55,7 +55,7 @@ def _regenerate_script_for_ip(ip, client_ips=None):
             break
 
 
-# Failed attempts are tracked per source IP in sqlite (see db.py — a
+# Failed attempts are tracked per source IP in Postgres (see db.py — a
 # plain in-process counter wouldn't be seen by both gunicorn workers).
 # 5 tries / 5 minutes: generous enough that a real admin mistyping their
 # own password never gets meaningfully locked out, but enough to blunt
@@ -1035,9 +1035,6 @@ def resync_rules():
     flash("Firewall rules reapplied from the database.", "success")
     _audit("firewall_resync")
     return redirect(url_for("main.firewall_rules"))
-
-
-AUTH_ACTIONS = ("login", "logout", "idle_lock")
 
 
 ALL_LOG_TABS = ("sessions", "client_sessions", "traffic", "system", "activity", "auth")

@@ -477,21 +477,6 @@ def list_rules(enabled_only: bool = False) -> list[dict]:
         conn.close()
 
 
-def set_positions(mapping: dict[int, float]):
-    """Bulk position update for a reorder swap — both rows change together,
-    in one transaction, so a crash mid-write can't leave two rules sharing
-    (or missing) a position."""
-    conn = get_conn()
-    try:
-        conn.executemany(
-            "UPDATE firewall_rules SET position=%s WHERE id=%s",
-            [(pos, rule_id) for rule_id, pos in mapping.items()],
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-
 def get_rule(rule_id: int):
     conn = get_conn()
     try:
@@ -677,15 +662,6 @@ def delete_rule(rule_id: int):
     conn = get_conn()
     try:
         conn.execute("DELETE FROM firewall_rules WHERE id=%s", (rule_id,))
-        conn.commit()
-    finally:
-        conn.close()
-
-
-def set_enabled(rule_id: int, enabled: bool):
-    conn = get_conn()
-    try:
-        conn.execute("UPDATE firewall_rules SET enabled=%s WHERE id=%s", (1 if enabled else 0, rule_id))
         conn.commit()
     finally:
         conn.close()
@@ -909,19 +885,6 @@ def clear_login_failures(ip: str):
     try:
         conn.execute("DELETE FROM login_failures WHERE ip = %s", (ip,))
         conn.commit()
-    finally:
-        conn.close()
-
-
-def list_audit_by_actions(actions: tuple[str, ...], limit: int = 200) -> list[dict]:
-    conn = get_conn()
-    try:
-        placeholders = ",".join("%s" for _ in actions)
-        rows = conn.execute(
-            f"SELECT * FROM audit_log WHERE action IN ({placeholders}) ORDER BY id DESC LIMIT %s",
-            (*actions, limit),
-        ).fetchall()
-        return [dict(r) for r in rows]
     finally:
         conn.close()
 
