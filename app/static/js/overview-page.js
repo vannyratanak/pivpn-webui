@@ -107,14 +107,14 @@ document.addEventListener('DOMContentLoaded', () => {
       text('activity-error', '');
       text('activity-total', data.total);
       text('previous', `${data.previous_total} recorded in the previous period`);
-      text('coverage', `${data.coverage_note}${data.earliest_record ? ` Earliest retained event: ${data.earliest_record} UTC.` : ' No retained events available.'}`);
+      text('coverage', `${data.coverage_note}${data.earliest_record ? ` Earliest retained event: ${formatServerTs(data.earliest_record)}.` : ' No retained events available.'}`);
       text('comparison', data.comparison_note);
       const max = Math.max(1, ...data.buckets.map((b) => b.count));
       const focusedBar = [...el('bars').children].indexOf(document.activeElement);
-      el('bars').innerHTML = data.buckets.map((b) => `<div class="ov-bar-column" tabindex="0" role="img" aria-label="${escape(b.start)} to ${escape(b.end)} UTC: ${b.count} recorded starts"><span class="ov-bar" style="height:${b.count / max * 100}%"></span><span class="ov-bar-tooltip">${escape(b.start.slice(5, 16))} UTC · ${b.count}</span></div>`).join('');
-      text('axis-start', `${data.start.slice(5, 16)} UTC · 0 baseline`);
-      text('axis-end', `${data.end.slice(5, 16)} UTC · Peak ${max === 1 && !data.total ? 0 : max}`);
-      el('chart-data').innerHTML = data.buckets.map((b) => `<tr><td>${escape(b.start)}</td><td>${escape(b.end)}</td><td>${b.count}</td></tr>`).join('');
+      el('bars').innerHTML = data.buckets.map((b) => `<div class="ov-bar-column" tabindex="0" role="img" aria-label="${escape(formatServerTs(b.start))} to ${escape(formatServerTs(b.end))}: ${b.count} recorded starts"><span class="ov-bar" style="height:${b.count / max * 100}%"></span><span class="ov-bar-tooltip">${escape(formatServerTs(b.start).slice(5, 16))} · ${b.count}</span></div>`).join('');
+      text('axis-start', `${formatServerTs(data.start).slice(5, 16)} · 0 baseline`);
+      text('axis-end', `${formatServerTs(data.end).slice(5, 16)} · Peak ${max === 1 && !data.total ? 0 : max}`);
+      el('chart-data').innerHTML = data.buckets.map((b) => `<tr><td>${escape(formatServerTs(b.start))}</td><td>${escape(formatServerTs(b.end))}</td><td>${b.count}</td></tr>`).join('');
       if (focusedBar >= 0) (el('bars').children[Math.min(focusedBar, data.buckets.length - 1)]).focus({ preventScroll: true });
     } catch {
       text('activity-error', 'Could not refresh activity. Use Refresh to retry.');
@@ -160,7 +160,7 @@ document.addEventListener('DOMContentLoaded', () => {
     clone.querySelectorAll('.ov-controls, .ov-clients, #ov-tabs').forEach((n) => n.remove());
     clone.querySelectorAll('details').forEach((n) => { n.open = true; });
     const meta = document.createElement('p'); meta.className = 'hint';
-    meta.textContent = `Generated ${new Date().toLocaleString()} · All clients · ${state.range === '7d' ? 'Last 7 days' : 'Last 24 hours'} · Activity dates in UTC. Values are frozen for this report.`;
+    meta.textContent = `Generated ${new Date().toLocaleString()} · All clients · ${state.range === '7d' ? 'Last 7 days' : 'Last 24 hours'} · Values are frozen for this report.`;
     clone.prepend(meta);
     // Avoid duplicate IDs while preserving internal accessible references.
     [clone, ...clone.querySelectorAll('[id]')].forEach((node) => { if (node.id) node.id = `report-${node.id}`; });
