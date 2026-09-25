@@ -364,7 +364,7 @@ def account_clear_lock():
 @bp.route("/")
 @login_required
 def index():
-    return redirect(url_for("main.clients"))
+    return redirect(url_for("main.overview"))
 
 
 @bp.route("/clients")

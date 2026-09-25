@@ -25,6 +25,13 @@ def test_login_with_correct_credentials_redirects_to_overview(client):
     assert resp.headers["Location"] == "/overview"
 
 
+def test_root_redirects_to_overview_when_authenticated(client):
+    client.post("/login", data={"username": "admin", "password": TEST_PASSWORD})
+    resp = client.get("/")
+    assert resp.status_code == 302
+    assert resp.headers["Location"] == "/overview"
+
+
 def test_login_with_wrong_credentials_reshows_form(client):
     resp = client.post("/login", data={"username": "admin", "password": "wrong"})
     assert resp.status_code == 200

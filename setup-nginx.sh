@@ -57,6 +57,21 @@ fi
 
 sudo mkdir -p /etc/nginx/ssl
 
+# Modern TLS verification (every current mobile/desktop browser included)
+# checks the connection target against the certificate's SAN (Subject
+# Alternative Name), not just its CN — a CN-only cert fails hostname
+# verification even though the name is right, since CN-based fallback
+# matching was deprecated. An IP address specifically needs an "IP:" SAN
+# entry, not a "DNS:" one, or it fails the same way even with SAN present.
+# (Same reasoning as setup-hub-tls.sh's cert — this script's own cert
+# never got the same fix, so browsers strict about it, like iOS Safari,
+# refused to connect at all even with a manually-accepted exception.)
+if [[ "$SERVER_NAME" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  SAN="IP:${SERVER_NAME}"
+else
+  SAN="DNS:${SERVER_NAME}"
+fi
+
 if [[ -f /etc/nginx/ssl/pivpn-webui.crt && -f /etc/nginx/ssl/pivpn-webui.key ]]; then
   echo "Existing cert found at /etc/nginx/ssl/pivpn-webui.{crt,key} — leaving it as-is."
   echo "(Delete those two files first if you want this script to regenerate them.)"
@@ -70,7 +85,8 @@ else
     -newkey rsa:2048 \
     -keyout /etc/nginx/ssl/pivpn-webui.key \
     -out /etc/nginx/ssl/pivpn-webui.crt \
-    -subj "/C=KH/ST=Asia/L=Phnom Penh/O=The Council for the Development of Cambodia/OU=DTPC/CN=${SERVER_NAME}"
+    -subj "/C=KH/ST=Asia/L=Phnom Penh/O=The Council for the Development of Cambodia/OU=DTPC/CN=${SERVER_NAME}" \
+    -addext "subjectAltName=${SAN}"
 fi
 
 # Key readable by nginx's worker user (www-data on Debian/Ubuntu) and root
