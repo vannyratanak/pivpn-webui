@@ -1,8 +1,19 @@
-# Installed to /etc/nginx/sites-available/pivpn-webui by
-# deploy/setup-nginx-tls.sh (with __SERVER_NAME__ substituted), then
-# symlinked into sites-enabled. Terminates TLS and reverse-proxies to
-# gunicorn, which stays bound to 127.0.0.1 (see BIND_HOST in .env) —
-# nginx is the only thing meant to be reachable from outside the box.
+# Installed to /etc/nginx/sites-available/pivpn-webui by setup-nginx.sh
+# (with __SERVER_NAME__ substituted), then symlinked into sites-enabled.
+# Terminates TLS and reverse-proxies to gunicorn, which stays bound to
+# 127.0.0.1 (see BIND_HOST in .env) — nginx is the only thing meant to be
+# reachable from outside the box.
+
+# Without this, a plain http:// request (e.g. a browser address bar
+# defaulting to http when no scheme is typed) falls through to nginx's
+# own default catch-all site instead of this app — confirmed live: an
+# iPhone typing the bare IP landed on the stock "Welcome to nginx!" page.
+server {
+    listen 80;
+    server_name __SERVER_NAME__;
+    return 301 https://$host$request_uri;
+}
+
 server {
     listen 443 ssl;
     server_name __SERVER_NAME__;
