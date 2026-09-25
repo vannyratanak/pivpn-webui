@@ -196,6 +196,11 @@ document.addEventListener('DOMContentLoaded', () => {
           return;
         }
         render(data.clients, data.connected_count);
+      })
+      .catch((error) => {
+        // Keep a failed initial/API refresh visible instead of leaving the
+        // loading skeleton indefinitely when auth, network, or rendering fails.
+        tbody.innerHTML = `<tr class="empty-row"><td colspan="7" class="empty">Could not load clients: ${escapeHtml(error.message || 'request failed')}. <button type="button" class="btn btn-sm" data-clients-retry>Retry</button></td></tr>`;
       });
   }
 
@@ -211,6 +216,8 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   tbody.addEventListener('click', (e) => {
+    const retry = e.target.closest('button[data-clients-retry]');
+    if (retry) { loadClients(true); return; }
     const btn = e.target.closest('button[data-action]');
     if (!btn) {
       // Row-to-detail navigation — anywhere in the row except the
