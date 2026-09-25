@@ -103,15 +103,15 @@ document.addEventListener('DOMContentLoaded', () => {
       activityRange = requested;
       text('activity-error', '');
       text('activity-total', data.total);
-      text('previous', `${data.previous_total} recorded in the previous period`);
+      text('previous', `Peak of ${data.previous_total} in the previous period`);
       text('coverage', `${data.coverage_note}${data.earliest_record ? ` Earliest retained event: ${formatServerTs(data.earliest_record)}.` : ' No retained events available.'}`);
       text('comparison', data.comparison_note);
-      const max = Math.max(1, ...data.buckets.map((b) => b.count));
+      const max = Math.max(1, data.total);
       const focusedBar = [...el('bars').children].indexOf(document.activeElement);
-      el('bars').innerHTML = data.buckets.map((b) => `<div class="ov-bar-column" tabindex="0" role="img" aria-label="${escape(formatServerTs(b.start))} to ${escape(formatServerTs(b.end))}: ${b.count} recorded starts"><span class="ov-bar" style="height:${b.count / max * 100}%"></span><span class="ov-bar-tooltip">${escape(formatServerTs(b.start).slice(5, 16))} · ${b.count}</span></div>`).join('');
-      text('axis-start', `${formatServerTs(data.start).slice(5, 16)} · 0 baseline`);
-      text('axis-end', `${formatServerTs(data.end).slice(5, 16)} · Peak ${max === 1 && !data.total ? 0 : max}`);
-      el('chart-data').innerHTML = data.buckets.map((b) => `<tr><td>${escape(formatServerTs(b.start))}</td><td>${escape(formatServerTs(b.end))}</td><td>${b.count}</td></tr>`).join('');
+      el('bars').innerHTML = data.buckets.map((b) => `<div class="ov-bar-column" tabindex="0" role="img" aria-label="${escape(formatServerTs(b.start))} to ${escape(formatServerTs(b.end))}: peak of ${b.peak} online"><span class="ov-bar" style="height:${b.peak / max * 100}%"></span><span class="ov-bar-tooltip">${escape(formatServerTs(b.start).slice(5, 16))} · ${b.peak}</span></div>`).join('');
+      text('axis-start', `${formatServerTs(data.start).slice(5, 16)}`);
+      text('axis-end', `${formatServerTs(data.end).slice(5, 16)} · Peak ${data.total}`);
+      el('chart-data').innerHTML = data.buckets.map((b) => `<tr><td>${escape(formatServerTs(b.start))}</td><td>${escape(formatServerTs(b.end))}</td><td>${b.peak}</td></tr>`).join('');
       if (focusedBar >= 0) (el('bars').children[Math.min(focusedBar, data.buckets.length - 1)]).focus({ preventScroll: true });
     } catch {
       text('activity-error', 'Could not refresh activity. Use Refresh to retry.');

@@ -29,12 +29,11 @@ def test_moderator_can_read_clients_but_not_health(client):
     assert client.get('/api/overview/health', headers=headers).status_code == 403
 
 
-def test_activity_aggregates_beyond_log_page_and_does_not_claim_coverage(client, monkeypatch):
+def test_activity_reports_peak_concurrency_not_connect_count(client, monkeypatch):
     headers = _auth_header(_admin_token(client))
     # 'range=1d' means the calendar day containing `now` (see overview.py's
     # activity()), not a rolling 24h window — frozen and pinned mid-day so
-    # "25 hours ago" unambiguously lands in yesterday regardless of what
-    # wall-clock time this test actually runs at.
+    # results don't depend on what wall-clock time this test actually runs.
     now = datetime(2026, 9, 25, 12, 0, 0, tzinfo=timezone.utc)
 
     class _FixedDatetime(datetime):
@@ -44,13 +43,29 @@ def test_activity_aggregates_beyond_log_page_and_does_not_claim_coverage(client,
 
     monkeypatch.setattr('app.overview.datetime', _FixedDatetime)
     ts = lambda d: d.strftime('%Y-%m-%d %H:%M:%S')
-    db.insert_vpn_events([(ts(now-timedelta(hours=1)), 'connected', f'client{i}', '10.8.0.2:1', '', None) for i in range(125)])
-    db.insert_vpn_events([(ts(now-timedelta(hours=25)), 'connected', 'earlier', '10.8.0.2:1', '', None)])
+    # a connects 09:00, disconnects 09:20; b connects 09:15 and stays
+    # online; c connects 09:25 and stays online — a+b overlap briefly,
+    # then b+c overlap, but never all three at once. Peak concurrency
+    # this hour is 2, not the 3 connect events a naive count would report.
+    db.insert_vpn_events([
+        (ts(now.replace(hour=9, minute=0)), 'connected', 'a', '10.8.0.2:1', '', None),
+        (ts(now.replace(hour=9, minute=15)), 'connected', 'b', '10.8.0.2:2', '', None),
+        (ts(now.replace(hour=9, minute=20)), 'disconnected', 'a', '10.8.0.2:1', '', None),
+        (ts(now.replace(hour=9, minute=25)), 'connected', 'c', '10.8.0.2:3', '', None),
+    ])
+    # An already-ended session from the day before must not leak into
+    # today's peak, only the previous period's.
+    db.insert_vpn_events([
+        (ts(now - timedelta(days=1)), 'connected', 'yesterday', '10.8.0.2:9', '', None),
+        (ts(now - timedelta(days=1) + timedelta(minutes=5)), 'disconnected', 'yesterday', '10.8.0.2:9', '', None),
+    ])
     result = client.get('/api/overview/activity?range=1d', headers=headers)
     assert result.status_code == 200
     data = result.get_json()
-    assert data['total'] == 125
-    assert sum(b['count'] for b in data['buckets']) == 125
+    bucket9 = data['buckets'][9]
+    assert bucket9['start'] == '2026-09-25 09:00:00'
+    assert bucket9['peak'] == 2
+    assert data['total'] == 2
     assert data['previous_total'] == 1
     assert not data['coverage_complete']
     assert len(data['buckets']) == 24

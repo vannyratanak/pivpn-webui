@@ -32,7 +32,7 @@ import concurrent.futures
 from bisect import bisect_right
 import re
 import subprocess
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import config
 from app import db, hub_client, pivpn_ctl
@@ -280,25 +280,12 @@ def sort_client_sessions(sessions: list[dict]) -> None:
     sessions.sort(key=lambda s: not s["ongoing"])
 
 
-def list_client_sessions(
-    q: str | None = None, page: int = 1, page_size: int = 50, since: str | None = None,
-    client: str | None = None,
-) -> tuple[list[dict], int]:
+def _build_sessions() -> list[dict]:
     """Per-client login sessions — each a paired connect+disconnect (or
-    still-open connect with no disconnect yet), most recent first,
-    searched and paginated over the full retained history. Returns
-    (sessions, total_matching_count).
-
-    Unlike list_sessions/list_traffic_flows, this can't push search/
-    pagination down into SQL: pairing a connect with its disconnect needs
-    to see the *whole* chronological event stream first (a session's two
-    halves can be far apart in the raw table), so search+pagination has to
-    apply to the already-paired result instead — real event volume here
-    (~13k/week observed live) is small enough that doing this in Python
-    each request is still fast.
-
-    Answers "how many sessions, when, how long" per client, as opposed to
-    list_sessions' flat raw event log.
+    still-open connect with no disconnect yet) — over the full retained
+    history, most recent first. Shared by list_client_sessions (which
+    adds search/pagination on top) and overview.py's peak-concurrency
+    chart (which needs the raw intervals, not a paginated page of them).
 
     A client reconnecting mid-window is handled by tracking one "currently
     open" connect per client name and closing it against that same client's
@@ -315,17 +302,6 @@ def list_client_sessions(
     disconnects — resolving it this early instead means an already-*ended*
     session can now show a real address too, wherever ingestion caught it
     in time.
-
-    `since` (a 'YYYY-MM-DD HH:MM:SS' cutoff, same format as `start`/`end`)
-    filters to sessions that *started* at or after it — applied here, in
-    Python, after pairing, for the same reason `q` is: pairing needs the
-    full event stream regardless of the window being displayed.
-
-    `client`, if given, is an exact (not substring) match on session
-    client name — the client detail page's own session-log tab uses this
-    to scope the whole history to just one client, unlike `q` which
-    substring-searches every field including client for the main Logs
-    page's free-text search.
     """
     events = _parse_openvpn_events()
     gaps = db.list_session_observation_gaps()
@@ -424,6 +400,39 @@ def list_client_sessions(
             session["duration"] = None
             session["duration_note"] = "Unknown — server clock changed during session"
     sort_client_sessions(sessions)
+    return sessions
+
+
+def list_client_sessions(
+    q: str | None = None, page: int = 1, page_size: int = 50, since: str | None = None,
+    client: str | None = None,
+) -> tuple[list[dict], int]:
+    """Searched and paginated view over _build_sessions()'s full retained
+    history. Returns (sessions, total_matching_count).
+
+    Unlike list_sessions/list_traffic_flows, this can't push search/
+    pagination down into SQL: pairing a connect with its disconnect needs
+    to see the *whole* chronological event stream first (a session's two
+    halves can be far apart in the raw table), so search+pagination has to
+    apply to the already-paired result instead — real event volume here
+    (~13k/week observed live) is small enough that doing this in Python
+    each request is still fast.
+
+    Answers "how many sessions, when, how long" per client, as opposed to
+    list_sessions' flat raw event log.
+
+    `since` (a 'YYYY-MM-DD HH:MM:SS' cutoff, same format as `start`/`end`)
+    filters to sessions that *started* at or after it — applied here, in
+    Python, after pairing, for the same reason `q` is: pairing needs the
+    full event stream regardless of the window being displayed.
+
+    `client`, if given, is an exact (not substring) match on session
+    client name — the client detail page's own session-log tab uses this
+    to scope the whole history to just one client, unlike `q` which
+    substring-searches every field including client for the main Logs
+    page's free-text search.
+    """
+    sessions = _build_sessions()
 
     if client:
         sessions = [s for s in sessions if s.get("client") == client]
@@ -444,6 +453,69 @@ def list_client_sessions(
     total = len(sessions)
     start = (page - 1) * page_size
     return sessions[start:start + page_size], total
+
+
+def peak_concurrency_by_bucket(start: str, end: str, step_seconds: int, now: str) -> list[int]:
+    """Peak number of simultaneously-online clients within each
+    [start + i*step, start + (i+1)*step) bucket, for i in
+    range((end-start)/step) — the Overview dashboard's activity chart.
+
+    Deliberately not "connects per bucket": a client that's been online
+    since before `start` (or stays online past `end`) has to count in
+    every bucket it actually spans, not just the one holding its connect
+    event — otherwise a long session looks like a single blip instead of
+    sustained load. Reuses _build_sessions()'s interruption/gap-aware
+    pairing instead of a naive connect/disconnect diff for the same
+    reason the Logs tabs do: a raw diff would misread a server outage or
+    an unclean drop as a real occupancy swing.
+
+    `now` (a 'YYYY-MM-DD HH:MM:SS' string, same as `start`/`end`) caps
+    still-open sessions instead of letting them run to `end` — needed
+    because overview.py's 'today' range extends `end` to next local
+    midnight, which is in the future relative to the real current time.
+
+    A session with a genuinely unknown end (VPN restart mid-session, or a
+    reconnect that silently supersedes a stale open one — see
+    _build_sessions' own comments) is treated as an instant at its start
+    rather than spanning indefinitely forward — the alternative would
+    inflate every later bucket by a connection nobody can actually prove
+    stayed up.
+    """
+    fmt = "%Y-%m-%d %H:%M:%S"
+    start_dt, end_dt, now_dt = datetime.strptime(start, fmt), datetime.strptime(end, fmt), datetime.strptime(now, fmt)
+    bucket_count = int((end_dt - start_dt).total_seconds()) // step_seconds
+    peaks = [0] * bucket_count
+    intervals = []
+    for s in _build_sessions():
+        if not s.get("start"):
+            continue
+        s_start = datetime.strptime(s["start"], fmt)
+        if s.get("ongoing"):
+            s_end = min(end_dt, now_dt)
+        elif s.get("end"):
+            s_end = datetime.strptime(s["end"], fmt)
+        elif s.get("end_estimated") and s.get("last_observed_at"):
+            s_end = datetime.strptime(s["last_observed_at"], fmt)
+        else:
+            s_end = s_start
+        lo, hi = max(s_start, start_dt), min(s_end, end_dt)
+        if lo < hi:
+            intervals.append((lo, hi))
+    for i in range(bucket_count):
+        b_start = start_dt + timedelta(seconds=i * step_seconds)
+        b_end = b_start + timedelta(seconds=step_seconds)
+        events = []
+        for s_start, s_end in intervals:
+            lo, hi = max(s_start, b_start), min(s_end, b_end)
+            if lo < hi:
+                events.extend([(lo, 1), (hi, -1)])
+        events.sort(key=lambda e: (e[0], -e[1]))
+        running = peak = 0
+        for _, delta in events:
+            running += delta
+            peak = max(peak, running)
+        peaks[i] = peak
+    return peaks
 
 
 def _client_ip_map() -> dict[str, str]:

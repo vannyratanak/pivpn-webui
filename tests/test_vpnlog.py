@@ -231,6 +231,47 @@ def test_list_client_sessions_since_filters_to_sessions_starting_at_or_after_cut
     assert sessions[0]["client"] == "recent-session"
 
 
+def test_peak_concurrency_counts_overlapping_sessions_not_connect_events(temp_db):
+    db.insert_vpn_events([
+        _connected("2026-08-21 09:00:00", "a", "10.66.66.1:1"),
+        _connected("2026-08-21 09:15:00", "b", "10.66.66.1:2"),
+        _disconnected("2026-08-21 09:20:00", "a", "10.66.66.1:1"),
+        _connected("2026-08-21 09:25:00", "c", "10.66.66.1:3"),
+        _disconnected("2026-08-21 09:40:00", "b", "10.66.66.1:2"),
+        _disconnected("2026-08-21 09:45:00", "c", "10.66.66.1:3"),
+    ])
+    peaks = vpnlog.peak_concurrency_by_bucket(
+        "2026-08-21 09:00:00", "2026-08-21 10:00:00", 3600, "2026-08-21 10:00:00"
+    )
+    assert peaks == [2]  # a+b overlap briefly, then b+c overlap — never all three at once
+
+
+def test_peak_concurrency_caps_ongoing_sessions_at_now_not_query_end(temp_db):
+    db.insert_vpn_events([_connected("2026-08-21 09:30:00", "still-online", "10.66.66.1:1")])
+    peaks = vpnlog.peak_concurrency_by_bucket(
+        "2026-08-21 09:00:00", "2026-08-21 12:00:00", 3600, "2026-08-21 10:00:00"
+    )
+    # Online since 09:30, but "now" is 10:00 — the 10:00-11:00 and
+    # 11:00-12:00 buckets haven't happened yet and must show 0, not a
+    # session that (from the caller's point of view) hasn't reached them.
+    assert peaks == [1, 0, 0]
+
+
+def test_peak_concurrency_treats_unresolved_reconnect_as_an_instant(temp_db):
+    # Same orphaned-session shape as
+    # test_reconnect_without_matching_disconnect_does_not_lose_the_earlier_session
+    # — its end is genuinely unknown, so it must not be treated as
+    # spanning all the way to the second connect two hours later.
+    db.insert_vpn_events([
+        _connected("2026-08-21 09:00:00", "nurak", "10.66.66.1:1"),
+        _connected("2026-08-21 11:00:00", "nurak", "10.66.66.1:2"),
+    ])
+    peaks = vpnlog.peak_concurrency_by_bucket(
+        "2026-08-21 09:00:00", "2026-08-21 12:00:00", 3600, "2026-08-21 12:00:00"
+    )
+    assert peaks == [0, 0, 1]
+
+
 def test_sort_client_sessions_resorts_a_session_relabeled_from_ongoing_to_ended():
     # Regression test for routes.py's live-connected-status cross-check:
     # once a session that list_client_sessions sorted as ongoing (pinned to
