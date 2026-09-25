@@ -103,7 +103,8 @@ document.addEventListener('DOMContentLoaded', () => {
       activityRange = requested;
       text('activity-error', '');
       text('activity-total', data.total);
-      text('coverage', `${data.coverage_note}${data.earliest_record ? ` Earliest retained event: ${formatServerTs(data.earliest_record)}.` : ' No retained events available.'}`);
+      text('activity-total-label', data.total === 1 ? 'client online at once' : 'clients online at once');
+      text('coverage', data.coverage_note);
       const max = Math.max(1, data.total);
       const focusedBar = [...el('bars').children].indexOf(document.activeElement);
       el('bars').innerHTML = data.buckets.map((b) => `<div class="ov-bar-column" tabindex="0" role="img" aria-label="${escape(formatServerTs(b.start))} to ${escape(formatServerTs(b.end))}: peak of ${b.peak} online"><span class="ov-bar" style="height:${b.peak / max * 100}%"></span><span class="ov-bar-tooltip">${escape(formatServerTs(b.start).slice(5, 16))} · ${b.peak}</span></div>`).join('');
@@ -115,7 +116,7 @@ document.addEventListener('DOMContentLoaded', () => {
       text('activity-error', 'Could not refresh activity. Use Refresh to retry.');
       if (activityRange !== requested) {
         el('bars').replaceChildren(); el('chart-data').replaceChildren();
-        ['activity-total', 'coverage', 'axis-start', 'axis-end'].forEach((id) => text(id, '—'));
+        ['activity-total', 'activity-total-label', 'coverage', 'axis-start', 'axis-end'].forEach((id) => text(id, '—'));
       } else text('activity-error', 'Could not refresh activity. Showing the previous chart; use Refresh to retry.');
     } finally {
       busy.delete('activity'); controls();

@@ -79,17 +79,11 @@ def activity():
     # past `end`) has to count in every bucket it spans, not just the one
     # holding its connect event.
     peaks = vpnlog.peak_concurrency_by_bucket(stamp(start), stamp(end), step, now_s)
-    conn = db.get_conn()
-    try:
-        earliest = conn.execute('SELECT MIN(ts) AS earliest FROM vpn_events').fetchone()['earliest']
-    finally:
-        conn.close()
     buckets = [{'start': stamp(start + timedelta(seconds=i * step)),
                 'end': stamp(start + timedelta(seconds=(i + 1) * step)), 'peak': peaks[i]}
                for i in range(len(peaks))]
     return jsonify(range=key, start=stamp(start), end=stamp(end),
-                   buckets=buckets, total=max(peaks, default=0),
-                   earliest_record=earliest, coverage_complete=False,
+                   buckets=buckets, total=max(peaks, default=0), coverage_complete=False,
                    coverage_note='Recorded events only; collection gaps may exist. Zero means no clients online.')
 
 
