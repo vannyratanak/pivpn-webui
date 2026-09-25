@@ -9,14 +9,6 @@
     <div class="btn-group ov-controls"><button type="button" class="btn btn-secondary" id="ov-print" disabled>Print report</button><button type="button" class="btn" id="ov-refresh">Refresh</button></div>
   </div>
   <p id="ov-feedback" role="status" class="hint">Loading overview…</p>
-  <div class="ov-health">
-    <div><span class="ov-label">Client data</span><strong>Cached snapshot</strong><span id="ov-freshness" class="hint">Awaiting data</span></div>
-    {% if current_user.is_admin %}
-    <div><span class="ov-label">VPN service</span><strong id="ov-service">Checking…</strong><span class="hint" id="ov-unit">—</span></div>
-    <div><span class="ov-label">Agent connection</span><strong id="ov-agent">Checking…</strong><span class="hint" id="ov-health-time">—</span></div>
-    {% endif %}
-  </div>
-  <p class="hint" id="ov-health-note"></p>
   <div class="ov-metrics" aria-label="Client summary">
     {% for key, label, hint, tab, reason in [('connected','Connected','Sessions in the latest cache','connected',''), ('total','Total clients','Registered VPN clients','all',''), ('blocked','Blocked','Access restricted','attention','blocked'), ('expiring','Expiring soon','Certificates within 30 days','attention','certificate')] %}
     <button type="button" class="ov-metric" data-view="{{ tab }}" data-reason="{{ reason }}"><span class="ov-label">{{ label }}</span><strong id="ov-count-{{ key }}">—</strong><span class="hint">{{ hint }}</span><span class="ov-metric-arrow" aria-hidden="true">↗</span></button>
@@ -46,6 +38,14 @@
     <div class="ov-table-scroll" tabindex="0" role="region" aria-label="Client overview table"><table><thead><tr><th scope="col">Client</th><th scope="col">Connection</th><th scope="col">VPN IP</th><th scope="col">Access / certificate</th><th scope="col">Connected since</th></tr></thead><tbody id="ov-clients-body"><tr><td colspan="5" class="empty">Loading clients…</td></tr></tbody></table></div>
     <div class="pagination"><a href="{{ url_for('main.clients') }}">Manage clients →</a><div class="pagination-nav"><button type="button" class="btn btn-sm" id="ov-prev">Prev</button><span class="hint" id="ov-page"></span><button type="button" class="btn btn-sm" id="ov-next">Next</button></div></div>
   </section>
+  <div class="ov-health">
+    <div><span class="ov-label">Client data</span><strong>Cached snapshot</strong><span id="ov-freshness" class="hint">Awaiting data</span></div>
+    {% if current_user.is_admin %}
+    <div><span class="ov-label">VPN service</span><strong id="ov-service">Checking…</strong><span class="hint" id="ov-unit">—</span></div>
+    <div><span class="ov-label">Agent connection</span><strong id="ov-agent">Checking…</strong><span class="hint" id="ov-health-time">—</span></div>
+    {% endif %}
+  </div>
+  <p class="hint" id="ov-health-note"></p>
 </div>
 <dialog class="ov-report" id="ov-report" aria-labelledby="ov-report-title"><div class="ov-report-actions"><h2 id="ov-report-title">Overview report</h2><button type="button" class="btn" id="ov-report-print">Print / Save as PDF</button><button type="button" class="btn btn-secondary" id="ov-report-close">Close</button></div><div id="ov-report-content"></div></dialog>
 <script src="{{ url_for('static', filename='js/api-client.js') }}"></script>
