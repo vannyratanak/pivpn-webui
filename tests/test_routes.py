@@ -19,10 +19,10 @@ def test_clients_requires_login(client):
     assert "/login" in resp.headers["Location"]
 
 
-def test_login_with_correct_credentials_redirects_to_clients(client):
+def test_login_with_correct_credentials_redirects_to_overview(client):
     resp = client.post("/login", data={"username": "admin", "password": TEST_PASSWORD})
     assert resp.status_code == 302
-    assert resp.headers["Location"] == "/clients"
+    assert resp.headers["Location"] == "/overview"
 
 
 def test_login_with_wrong_credentials_reshows_form(client):
@@ -61,7 +61,7 @@ def test_login_resume_validates_password_and_restores_session(client):
     assert b"Enter your username." not in missing.data
     resumed = client.post("/login", data={"password": TEST_PASSWORD})
     assert resumed.status_code == 302
-    assert resumed.headers["Location"] == "/clients"
+    assert resumed.headers["Location"] == "/overview"
     assert client.get_cookie("idle_lock") is None
     assert client.get_cookie("html_jwt") is not None
 
@@ -256,7 +256,7 @@ def test_login_lockout_blocks_even_correct_credentials(client):
     # until the window passes — otherwise this is just a slower guesser.
     resp = client.post("/login", data={"username": "admin", "password": TEST_PASSWORD})
     assert b"Too many failed login attempts" in resp.data
-    assert resp.status_code == 200  # not the 302-to-/clients a real login gets
+    assert resp.status_code == 200  # not the 302-to-/overview a real login gets
 
 
 def test_login_under_the_limit_still_works(client):
@@ -265,7 +265,7 @@ def test_login_under_the_limit_still_works(client):
         client.post("/login", data={"username": "admin", "password": "wrong"})
     resp = client.post("/login", data={"username": "admin", "password": TEST_PASSWORD})
     assert resp.status_code == 302
-    assert resp.headers["Location"] == "/clients"
+    assert resp.headers["Location"] == "/overview"
 
 
 def test_successful_login_clears_the_failure_count(client):
@@ -505,7 +505,7 @@ def test_reset_password_success_lets_target_log_in_with_new_password(client):
     client.get("/logout")
     resp = client.post("/login", data={"username": "mod", "password": "newmodpass"})
     assert resp.status_code == 302
-    assert resp.headers["Location"] == "/clients"
+    assert resp.headers["Location"] == "/overview"
 
 
 def test_change_own_password_requires_correct_current_password(client):
@@ -517,7 +517,7 @@ def test_change_own_password_requires_correct_current_password(client):
     client.get("/logout")
     # old password still works, new one doesn't
     resp = client.post("/login", data={"username": "admin", "password": TEST_PASSWORD})
-    assert resp.headers["Location"] == "/clients"
+    assert resp.headers["Location"] == "/overview"
 
 
 def test_change_own_password_success(client):
@@ -528,7 +528,7 @@ def test_change_own_password_success(client):
     client.get("/logout")
     resp = client.post("/login", data={"username": "admin", "password": "newpass789"})
     assert resp.status_code == 302
-    assert resp.headers["Location"] == "/clients"
+    assert resp.headers["Location"] == "/overview"
 
 
 def test_moderator_cannot_access_firewall(client):

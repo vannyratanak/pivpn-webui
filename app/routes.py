@@ -68,7 +68,7 @@ LOGIN_LOCKOUT_WINDOW_SECONDS = 300
 @bp.route("/login", methods=["GET", "POST"])
 def login():
     if current_user.is_authenticated:
-        return redirect(url_for("main.clients"))
+        return redirect(url_for("main.overview"))
 
     # Idle-lock mode: the JS idle timer hit /account/lock, which cleared the
     # html_jwt but left an idle_lock cookie naming the locked user.  We show
@@ -105,7 +105,7 @@ def login():
                 # Resume: keep the existing session generation so the bearer
                 # token (API clients, open tabs) doesn't get invalidated.
                 db.add_audit(user.username, "login", detail=f"resumed from idle lock from {ip}")
-                resp = redirect(url_for("main.clients"))
+                resp = redirect(url_for("main.overview"))
                 issue_html_jwt_cookie(resp, user)
                 clear_lock_cookie(resp)
                 return resp
@@ -118,7 +118,7 @@ def login():
                 # has out there (see auth.py's token_superseded) — the next
                 # request any of them makes just gets treated as logged out.
                 user.session_generation = db.bump_session_generation(int(user.id))
-                resp = redirect(url_for("main.clients"))
+                resp = redirect(url_for("main.overview"))
                 # Identity now lives in a JWT cookie, not Flask's session —
                 # see auth.py's issue_html_jwt_cookie for why, and
                 # __init__.py's after_request hook for how the old "N hours

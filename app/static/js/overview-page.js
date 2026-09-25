@@ -72,7 +72,7 @@ document.addEventListener('DOMContentLoaded', () => {
     el('freshness').title = data.freshness_note;
     text('legend-connected', connected);
     text('legend-offline', clients.length - connected);
-    text('donut-total', clients.length);
+    text('donut-total', `${connected}/${clients.length}`);
     el('donut-active').setAttribute('stroke-dasharray', `${clients.length ? connected / clients.length * 490.09 : 0} 490.09`);
     root.querySelector('.ov-donut').setAttribute('aria-label', `${connected} connected, ${clients.length - connected} offline, ${clients.length} total clients`);
     text('status-note', clients.length ? 'Blocked access is tracked separately from connection status.' : 'No client records available.');
@@ -103,7 +103,7 @@ document.addEventListener('DOMContentLoaded', () => {
       activityRange = requested;
       text('activity-error', '');
       text('activity-total', data.total);
-      text('activity-total-label', data.total === 1 ? 'client online at once' : 'clients online at once');
+      text('activity-total-label', data.total === 1 ? 'client online' : 'clients online');
       text('coverage', data.coverage_note);
       const max = Math.max(1, data.total);
       const focusedBar = [...el('bars').children].indexOf(document.activeElement);
