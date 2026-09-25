@@ -153,6 +153,12 @@ document.addEventListener('DOMContentLoaded', () => {
   window.addEventListener('popstate', () => { readState(); renderTable(); if (activityRange !== state.range) loadActivity(); });
   el('refresh').addEventListener('click', refresh);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
-  setInterval(() => { if (!document.hidden) refresh(); }, 30000);
+  // Client status (donut/table) changes the instant someone connects or
+  // disconnects — the agent already pushes that into the DB within about
+  // a second (see client_status_cache) — so it's polled on the same fast
+  // cadence as the Clients page, not the slower 30s used for the activity
+  // chart and health check below, which don't need to react that quickly.
+  setInterval(() => { if (!document.hidden) loadSnapshot(); }, 2000);
+  setInterval(() => { if (!document.hidden) { loadActivity(); loadHealth(); } }, 30000);
   refresh();
 });
