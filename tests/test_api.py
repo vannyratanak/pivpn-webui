@@ -82,7 +82,7 @@ def test_clients_endpoint_returns_enriched_client_list(client, monkeypatch):
     _seed_client_status_cache([
         {"name": "laptop-anna", "ip": "10.8.0.2", "session_bytes_recv": "100", "session_since": "2026-09-16 10:00:00"},
     ])
-    monkeypatch.setattr("app.api.db.get_client_block", lambda name: None)
+    monkeypatch.setattr("app.api.db.list_client_blocks", lambda: set())
 
     resp = client.get("/api/clients", headers=_auth_header(token))
     assert resp.status_code == 200
@@ -96,7 +96,7 @@ def test_clients_endpoint_returns_enriched_client_list(client, monkeypatch):
 def test_clients_endpoint_marks_disconnected_clients_session_none(client, monkeypatch):
     token = _login(client).get_json()["access_token"]
     _seed_client_status_cache([{"name": "laptop-anna"}])
-    monkeypatch.setattr("app.api.db.get_client_block", lambda name: None)
+    monkeypatch.setattr("app.api.db.list_client_blocks", lambda: set())
 
     resp = client.get("/api/clients", headers=_auth_header(token))
     body = resp.get_json()
@@ -525,6 +525,7 @@ def test_client_add_rule_without_a_vpn_ip_is_400(client, monkeypatch):
 def test_client_toggle_and_delete_rule(client, monkeypatch):
     token = _admin_token(client)
     monkeypatch.setattr("app.firewall.run_root", lambda argv, **kwargs: "")
+    _seed_client_status_cache([{"name": "laptop-anna", "ip": "10.202.226.2"}])
     rule_id = db.insert_rule({"kind": "forward", "action": "DROP", "protocol": "tcp", "src": "10.202.226.2"})
 
     resp = client.post(f"/api/clients/laptop-anna/rules/{rule_id}/toggle", headers=_auth_header(token))
@@ -533,6 +534,22 @@ def test_client_toggle_and_delete_rule(client, monkeypatch):
     resp = client.delete(f"/api/clients/laptop-anna/rules/{rule_id}", headers=_auth_header(token))
     assert resp.status_code == 200
     assert db.list_rules() == []
+
+
+def test_client_scoped_rule_mutations_cannot_target_another_client(client, monkeypatch):
+    token = _admin_token(client)
+    _seed_client_status_cache([
+        {"name": "laptop-anna", "ip": "10.202.226.2"},
+        {"name": "other-client", "ip": "10.202.226.5"},
+    ])
+    rule_id = db.insert_rule({"kind": "forward", "action": "DROP", "protocol": "tcp", "src": "10.202.226.5"})
+
+    toggle = client.post(f"/api/clients/laptop-anna/rules/{rule_id}/toggle", headers=_auth_header(token))
+    delete = client.delete(f"/api/clients/laptop-anna/rules/{rule_id}", headers=_auth_header(token))
+
+    assert toggle.status_code == 404
+    assert delete.status_code == 404
+    assert db.get_rule(rule_id)["enabled"] == 1
 
 
 def test_client_rules_only_returns_rules_matching_that_clients_ip(client, monkeypatch):
@@ -867,7 +884,7 @@ def test_client_sessions_relabeled_ended_session_resorts_below_more_recent_ones(
     # Regression test: a session the log parser thinks is still "ongoing"
     # (no matching disconnect ever logged — e.g. a killed process/unclean
     # drop) gets correctly relabeled "Ended (exact time unknown)" once
-    # this endpoint's live-connected-clients check confirms it's not
+    # the server-side client status cache confirms it's not
     # actually connected — but it used to keep the top-pinned position it
     # only ever earned by looking ongoing at sort time, even after being
     # relabeled, burying a genuinely more recent (and fully closed)
@@ -887,9 +904,8 @@ def test_client_sessions_relabeled_ended_session_resorts_below_more_recent_ones(
         (recent_connect_ts, "connected", "recentclient", "10.66.66.1:2", "", None),
         (recent_disconnect_ts, "disconnected", "recentclient", "10.66.66.1:2", "", None),
     ])
-    # Neither client is actually connected right now — this is what makes
-    # "staleclient" (log-ongoing but not live-connected) get relabeled.
-    monkeypatch.setattr("app.api.pivpn_ctl.list_connected_clients", lambda: {})
+    # Neither client is actually connected right now — an empty cache
+    # session marks "staleclient" as ended.
 
     token = _admin_token(client)
     resp = client.get("/api/logs?tab=client_sessions&range=7d", headers=_auth_header(token))
@@ -901,6 +917,26 @@ def test_client_sessions_relabeled_ended_session_resorts_below_more_recent_ones(
     # staleclient's sole (stale) connect — it must come first now that
     # staleclient has been correctly recognized as not actually ongoing.
     assert names.index("recentclient") < names.index("staleclient")
+
+
+def test_client_sessions_uses_local_status_cache_for_live_connection_check(client, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    ts = (datetime.now(timezone.utc) - timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S")
+    db.insert_vpn_events([(ts, "connected", "mobile", "10.66.66.1:9", "", None)])
+    _seed_client_status_cache([{"name": "mobile", "session_since": ts}])
+    monkeypatch.setattr(
+        "app.api.pivpn_ctl.list_connected_clients",
+        lambda: (_ for _ in ()).throw(AssertionError("Logs reads must not make an agent RPC")),
+    )
+    token = _admin_token(client)
+
+    resp = client.get("/api/logs?tab=client_sessions&range=7d", headers=_auth_header(token))
+
+    assert resp.status_code == 200
+    entry = resp.get_json()["entries"][0]
+    assert entry["client"] == "mobile"
+    assert entry["ongoing"] is True
+    assert "status_note" not in entry
 
 
 def test_client_sessions_tab_client_filter_is_exact_not_substring(client):

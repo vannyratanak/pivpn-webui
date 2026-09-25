@@ -1,6 +1,7 @@
 from app import db, pivpn_ctl
 from app.privileged import PrivilegedCommandError
 from deploy import ingest_logs
+from deploy import ingest_ip_orgs
 
 # Reuses the exact same real captured lines as test_vpnlog.py, since these
 # are the same CONNECT_RE/DISCONNECT_RE/FLOW_RE patterns being fed through
@@ -50,6 +51,8 @@ def test_ingest_vpn_events_resolves_real_address_for_connects_only(temp_db, monk
     calls = []
 
     def fake_resolve_bulk(addresses):
+        # Session facts must be queryable even if relay enrichment is slow.
+        assert len(db.list_vpn_events()) == 2
         calls.append(addresses)
         return {addr: f"resolved:{addr}" for addr in addresses}
 
@@ -106,14 +109,14 @@ def test_ingest_vpn_events_empty_output_is_a_noop(temp_db, monkeypatch):
 
 
 def test_ingest_traffic_flows_resolves_client_and_org(temp_db, monkeypatch):
-    monkeypatch.setattr(pivpn_ctl, "list_client_ips", lambda: {})
-    monkeypatch.setattr(
-        pivpn_ctl, "list_connected_clients",
-        lambda: {"mobile": {"virtual_address": "10.202.226.2"}},
-    )
+    db.replace_client_status_cache([{
+        "name": "mobile", "status": "Valid", "expiration": "", "list_position": 0,
+        "ip": None, "session_real_address": None, "session_virtual_address": "10.202.226.2",
+        "session_bytes_recv": None, "session_bytes_sent": None, "session_since": "now",
+    }])
     monkeypatch.setattr(ingest_logs, "run_root", lambda argv, timeout=None: TCP_FLOW_LINE)
     monkeypatch.setattr(
-        ingest_logs.iplookup, "get_ip_orgs_bulk",
+        ingest_logs.iplookup, "get_cached_ip_orgs",
         lambda ips: {ip: "Meta Platforms Ireland Limited" for ip in ips},
     )
 
@@ -143,9 +146,7 @@ def test_ingest_traffic_flows_handles_journalctl_no_entries_output(temp_db, monk
     assert db.list_traffic_flows() == ([], 0)
 
 
-def test_ingest_traffic_flows_looks_up_org_once_per_unique_destination(temp_db, monkeypatch):
-    monkeypatch.setattr(pivpn_ctl, "list_client_ips", lambda: {})
-    monkeypatch.setattr(pivpn_ctl, "list_connected_clients", lambda: {})
+def test_ingest_traffic_flows_does_not_wait_for_whois(temp_db, monkeypatch):
     # Two distinct flow lines, same destination (different source port so
     # they're not identical rows and both actually get inserted).
     second_line = TCP_FLOW_LINE.replace("SPT=52250", "SPT=52251")
@@ -153,18 +154,50 @@ def test_ingest_traffic_flows_looks_up_org_once_per_unique_destination(temp_db, 
         ingest_logs, "run_root",
         lambda argv, timeout=None: "\n".join([TCP_FLOW_LINE, second_line]),
     )
-    calls = []
-
-    def fake_get_ip_orgs_bulk(ips):
-        calls.append(ips)
-        return {ip: "Meta Platforms Ireland Limited" for ip in ips}
-
-    monkeypatch.setattr(ingest_logs.iplookup, "get_ip_orgs_bulk", fake_get_ip_orgs_bulk)
+    monkeypatch.setattr(ingest_logs.iplookup, "get_cached_ip_orgs", lambda ips: {})
+    monkeypatch.setattr(
+        ingest_logs.iplookup, "get_ip_orgs_bulk",
+        lambda *_: (_ for _ in ()).throw(AssertionError("WHOIS must run outside flow ingestion")),
+    )
 
     count = ingest_logs.ingest_traffic_flows()
 
     assert count == 2
-    assert len(calls) == 1  # one bulk call for the whole batch, not per row
+    rows, total = db.list_traffic_flows()
+    assert total == 2
+    assert all(row["dst_org"] is None for row in rows)
+
+
+def test_org_worker_enriches_new_flows_in_bounded_batches(temp_db, monkeypatch):
+    db.insert_traffic_flows([
+        ("2026-09-23 10:00:00", "10.8.0.2", "9.9.9.9", None, "mobile", "UDP", "5000", "53", "tun0", "eth0"),
+    ])
+    calls = []
+    monkeypatch.setattr(
+        ingest_ip_orgs.db, "list_traffic_destinations_for_org_lookup",
+        lambda limit: calls.append(limit) or ["9.9.9.9"],
+    )
+    monkeypatch.setattr(ingest_ip_orgs.iplookup, "get_ip_orgs_bulk", lambda ips: {ip: "Quad9" for ip in ips})
+
+    assert ingest_ip_orgs.ingest_ip_orgs() == 1
+    assert calls == [ingest_ip_orgs.BATCH_SIZE]
+    rows, total = db.list_traffic_flows()
+    assert total == 1
+    assert rows[0]["dst_org"] == "Quad9"
+
+
+def test_org_worker_selects_flows_with_known_cached_organization(temp_db):
+    db.insert_traffic_flows([
+        ("2026-09-23 10:00:00", "10.8.0.2", "9.9.9.9", None, "mobile", "UDP", "5000", "53", "tun0", "eth0"),
+    ])
+    conn = db.get_conn()
+    try:
+        conn.execute("INSERT INTO ip_org_cache (ip, org) VALUES (%s, %s)", ("9.9.9.9", "Quad9"))
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert db.list_traffic_destinations_for_org_lookup() == ["9.9.9.9"]
 
 
 def test_ingest_system_log_stores_ts_process_and_message(temp_db, monkeypatch):

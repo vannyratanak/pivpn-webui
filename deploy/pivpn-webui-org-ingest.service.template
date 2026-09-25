@@ -1,0 +1,9 @@
+[Unit]
+Description=PiVPN Web UI traffic organization enrichment
+After=network.target
+
+[Service]
+Type=oneshot
+User=__USER__
+WorkingDirectory=__APP_DIR__
+ExecStart=__APP_DIR__/venv/bin/python3 __APP_DIR__/deploy/ingest_ip_orgs.py

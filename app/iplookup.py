@@ -32,6 +32,7 @@ from app import db
 # instead of N, low enough not to fire off hundreds of processes/sockets at
 # once if a page render ever hits an unusually large miss batch.
 _MAX_CONCURRENT_WHOIS = 8
+_IP_ORG_NULL_RETRY_DAYS = 7
 
 # Priority order matters: a raw `whois <ip>` on an ARIN-referred address
 # includes both the IANA referral stub's generic 'organisation:' line and
@@ -88,6 +89,7 @@ def _resolve_from_cache_or_private(ips: list[str]) -> tuple[dict[str, str | None
     concurrently)."""
     known: dict[str, str | None] = {}
     misses: list[str] = []
+    candidates = []
     for ip in dict.fromkeys(ips):
         try:
             if ipaddress.ip_address(ip).is_private:
@@ -96,11 +98,10 @@ def _resolve_from_cache_or_private(ips: list[str]) -> tuple[dict[str, str | None
         except ValueError:
             known[ip] = None
             continue
-        found, cached = db.get_cached_ip_org(ip)
-        if found:
-            known[ip] = cached
-        else:
-            misses.append(ip)
+        candidates.append(ip)
+    cached = db.get_cached_ip_orgs(candidates, _IP_ORG_NULL_RETRY_DAYS)
+    known.update(cached)
+    misses.extend(ip for ip in candidates if ip not in cached)
     return known, misses
 
 

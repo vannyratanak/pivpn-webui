@@ -23,15 +23,17 @@ import asyncio
 import json
 import logging
 import os
+import re
 import ssl
 import sys
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 import websockets
 
 import config
-from app import db
+from app import db, iplookup, vpnlog
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("hub_gateway")
@@ -49,6 +51,47 @@ live_agents: dict[int, "websockets.WebSocketServerProtocol"] = {}
 # {request_id: asyncio.Future} — resolved by handle_agent's read loop
 # when the matching response arrives, awaited by handle_flask.
 pending: dict[str, asyncio.Future] = {}
+_BATCH_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+_FLOW_CURSOR_RE = re.compile(r"^[A-Za-z0-9_:=;.-]{1,2048}$")
+
+
+def _traffic_batch_rows(events: list[dict]) -> tuple[list[tuple], str]:
+    """Validate journal events and convert recognized kernel flow lines."""
+    parsed = []
+    last_cursor = None
+    for event in events:
+        if not isinstance(event, dict):
+            raise ValueError("invalid traffic event")
+        cursor = event.get("cursor")
+        message = event.get("message")
+        realtime_us = event.get("realtime_us")
+        if (not isinstance(cursor, str) or not _FLOW_CURSOR_RE.fullmatch(cursor)
+                or not isinstance(message, str) or len(message) > 8192
+                or not isinstance(realtime_us, str) or not realtime_us.isdigit()
+                or len(realtime_us) > 20):
+            raise ValueError("invalid traffic event fields")
+        last_cursor = cursor
+        match = vpnlog.FLOW_RE.search(message)
+        if not match:
+            continue
+        try:
+            ts = datetime.fromtimestamp(int(realtime_us) / 1_000_000, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        except (ValueError, OverflowError, OSError):
+            continue
+        parsed.append((ts, match))
+    if not last_cursor:
+        raise ValueError("empty traffic batch")
+
+    ip_to_name = db.list_client_ip_name_map()
+    orgs = iplookup.get_cached_ip_orgs([match.group("dst") for _, match in parsed])
+    rows = []
+    for ts, match in parsed:
+        src, dst = match.group("src"), match.group("dst")
+        rows.append((
+            ts, src, dst, orgs.get(dst), ip_to_name.get(src), match.group("proto"),
+            match.group("sport"), match.group("dport"), match.group("in_if"), match.group("out_if"),
+        ))
+    return rows, last_cursor
 
 
 def _peer_cert_cn(websocket) -> str | None:
@@ -75,6 +118,18 @@ async def _reject_hello(websocket, actor: str, server_id, reason: str, detail: s
     await asyncio.to_thread(db.add_audit, actor, "agent_hello_rejected", f"server_id={server_id}", "error", detail)
     await websocket.send(json.dumps({"type": "hello_ack", "ok": False, "error": reason}))
     await websocket.close(code=4001, reason="unauthorized")
+
+
+async def _mark_agent_disconnected(server_id: int, websocket):
+    """Forget only the current socket and clear its cached live sessions."""
+    if live_agents.get(server_id) is not websocket:
+        return
+    del live_agents[server_id]
+    if server_id == config.DEFAULT_SERVER_ID:
+        try:
+            await asyncio.to_thread(db.apply_client_connection_snapshot, {})
+        except Exception:
+            log.exception("could not clear cached client sessions after agent disconnect")
 
 
 async def handle_agent(websocket):
@@ -120,7 +175,11 @@ async def handle_agent(websocket):
 
     live_agents[server_id] = websocket
     await asyncio.to_thread(db.touch_server_last_seen, server_id)
-    await websocket.send(json.dumps({"type": "hello_ack", "ok": True}))
+    traffic_cursor = await asyncio.to_thread(db.get_traffic_flow_cursor, server_id)
+    await websocket.send(json.dumps({
+        "type": "hello_ack", "ok": True, "traffic_cursor": traffic_cursor,
+        "traffic_enabled": server_id == config.DEFAULT_SERVER_ID,
+    }))
     log.info("agent for server #%s connected", server_id)
 
     try:
@@ -158,6 +217,25 @@ async def handle_agent(websocket):
                     }
                     await asyncio.to_thread(db.apply_client_connection_snapshot, safe_sessions)
                 continue
+            if message.get("type") == "traffic_flow_batch":
+                batch_id = message.get("batch_id")
+                events = message.get("events")
+                ok = False
+                if (server_id == config.DEFAULT_SERVER_ID
+                        and isinstance(batch_id, str) and _BATCH_ID_RE.fullmatch(batch_id)
+                        and isinstance(events, list) and 1 <= len(events) <= 50):
+                    try:
+                        rows, cursor = await asyncio.to_thread(_traffic_batch_rows, events)
+                        await asyncio.to_thread(db.insert_agent_traffic_batch, server_id, rows, cursor)
+                        ok = True
+                    except (ValueError, TypeError):
+                        log.warning("rejected invalid traffic batch from server #%s", server_id)
+                    except Exception:
+                        log.exception("failed to persist traffic batch from server #%s", server_id)
+                await websocket.send(json.dumps({
+                    "type": "traffic_flow_ack", "batch_id": batch_id, "ok": ok,
+                }))
+                continue
             request_id = message.get("id")
             if not isinstance(request_id, str):
                 log.warning("server #%s sent a message without a request id", server_id)
@@ -168,8 +246,11 @@ async def handle_agent(websocket):
     except websockets.ConnectionClosed:
         pass
     finally:
-        if live_agents.get(server_id) is websocket:
-            del live_agents[server_id]
+        # A lost agent cannot send a final empty-session snapshot. Clear
+        # cached online state once this socket is known dead; an old
+        # websocket closing after a reconnect must not clear the newer
+        # connection's state.
+        await _mark_agent_disconnected(server_id, websocket)
         log.info("agent for server #%s disconnected", server_id)
 
 
@@ -265,7 +346,10 @@ async def main():
     # guard against. Bounded, not disabled (max_size=None) — still a real
     # ceiling against a truly pathological payload, just one sized for
     # this app's actual traffic instead of the library's generic default.
-    await websockets.serve(handle_agent, AGENT_HOST, AGENT_PORT, max_size=MAX_MESSAGE_BYTES, ssl=tls_ctx)
+    await websockets.serve(
+        handle_agent, AGENT_HOST, AGENT_PORT, max_size=MAX_MESSAGE_BYTES,
+        ssl=tls_ctx, ping_interval=5, ping_timeout=5,
+    )
     mtls = tls_ctx is not None and tls_ctx.verify_mode == ssl.CERT_REQUIRED
     log.info("listening for agents on %s:%s (%s%s), for Flask on %s",
               AGENT_HOST, AGENT_PORT, "wss://" if tls_ctx else "ws://",

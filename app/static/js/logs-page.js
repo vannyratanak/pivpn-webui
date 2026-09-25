@@ -83,6 +83,7 @@
 
     let tab = root.dataset.tab;
     let page = parseInt(root.dataset.page, 10) || 1;
+    let loadGeneration = 0;
 
     function activeSection() {
       return document.querySelector(`[data-logs-section="${tab}"]`);
@@ -131,6 +132,7 @@
     }
 
     function loadLogs(showSkeletonWhileLoading) {
+      const generation = ++loadGeneration;
       const cfg = TAB_CONFIG[tab];
       const tbody = document.getElementById(cfg.tbodyId);
       if (showSkeletonWhileLoading) tbody.innerHTML = skeletonRowHtml(cfg.colCount);
@@ -138,6 +140,9 @@
       return ApiClient.call(apiUrl())
         .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data })))
         .then(({ ok, data }) => {
+          // A slower earlier request must not overwrite a later search,
+          // tab switch, or background refresh.
+          if (generation !== loadGeneration) return;
           if (!ok) { showLoadError(cfg, data.error || 'Could not load this tab.'); return; }
           const entries = data.entries || [];
           tbody.innerHTML = entries.length
@@ -150,6 +155,10 @@
           nextBtn.disabled = data.page >= totalPages;
           page = data.page;
           syncUrl();
+        })
+        .catch((error) => {
+          if (generation !== loadGeneration) return;
+          showLoadError(cfg, error.message || 'Could not load this tab.');
         });
     }
 
@@ -217,5 +226,14 @@
 
     placePagination();
     loadLogs(true);
+
+    // The server ingests logs independently of browsers. Poll only the
+    // selected tab's small, paginated DB result so an open page stays fresh
+    // without causing each viewer to trigger journal ingestion or WHOIS.
+    const LIVE_REFRESH_INTERVAL_MS = 5000;
+    setInterval(() => {
+      if (document.visibilityState === 'hidden') return;
+      loadLogs(false);
+    }, LIVE_REFRESH_INTERVAL_MS);
   });
 })();

@@ -103,8 +103,9 @@ def list_clients():
     read, no agent call), since caching it would add staleness for no
     speed benefit."""
     client_list = db.list_client_status_cache()
+    blocked_clients = db.list_client_blocks()
     for c in client_list:
-        c["blocked"] = db.get_client_block(c["name"]) is not None
+        c["blocked"] = c["name"] in blocked_clients
     return jsonify({"clients": client_list, "connected_count": sum(1 for c in client_list if c["session"])})
 
 
@@ -376,6 +377,10 @@ def client_toggle_rule(name, rule_id):
         name = pivpn_ctl.validate_name(name)
     except pivpn_ctl.PivpnError as exc:
         return jsonify({"error": str(exc)}), 400
+    ip_to_name = db.list_client_ip_name_map()
+    rule = db.get_rule(rule_id)
+    if not rule or firewall.rule_client_name(rule, ip_to_name) != name:
+        return jsonify({"error": "Rule not found for this client."}), 404
     try:
         firewall.toggle_rule(rule_id, client_ip=_client_ip())
     except Exception as exc:
@@ -392,6 +397,10 @@ def client_delete_rule(name, rule_id):
         name = pivpn_ctl.validate_name(name)
     except pivpn_ctl.PivpnError as exc:
         return jsonify({"error": str(exc)}), 400
+    ip_to_name = db.list_client_ip_name_map()
+    rule = db.get_rule(rule_id)
+    if not rule or firewall.rule_client_name(rule, ip_to_name) != name:
+        return jsonify({"error": "Rule not found for this client."}), 404
     try:
         firewall.delete_rule(rule_id, client_ip=_client_ip())
     except firewall.FirewallError as exc:
@@ -933,7 +942,13 @@ def logs():
             # still ongoing (that's what earned it a top-pinned position),
             # so the pinning has to be redone or the row keeps sitting
             # above sessions that actually ended more recently.
-            connected_now = pivpn_ctl.list_connected_clients()
+            # The authenticated agent pushes connection changes into this
+            # cache immediately. Reading it here avoids a hub/agent RPC on
+            # every Logs page poll, while the slower metadata ingest remains
+            # the fallback when the agent is disconnected.
+            connected_now = {
+                c["name"] for c in db.list_client_status_cache() if c["session"]
+            }
             relabeled = False
             for s in entries:
                 if s["ongoing"] and s["client"] not in connected_now:

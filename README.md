@@ -378,6 +378,11 @@ Two separate long-running processes, not one — `hub_gateway.py` holds the
 live WebSocket to every agent; the Flask app (gunicorn) talks to it over a
 local Unix socket per request, not directly:
 
+The hub and agent send WebSocket keepalives every five seconds and declare
+the connection lost after a five-second pong timeout. When the default
+agent disconnects, the hub clears its cached online sessions immediately;
+when it reconnects, its first status snapshot repopulates them.
+
 ```bash
 sed -e "s#__APP_DIR__#$(pwd)#g" -e "s/__USER__/$(whoami)/g" \
   deploy/pivpn-webui-hub-gateway.service.template | sudo tee /etc/systemd/system/pivpn-webui-hub-gateway.service >/dev/null
@@ -623,25 +628,33 @@ access from here.
 
 ## Background log ingestion (Sessions/Traffic history)
 
-`./setup-log-ingest.sh` (run once, after `setup.sh`) installs a systemd
-timer that runs `deploy/ingest_logs.py` every 10 seconds. That script pulls
-whatever's new since its last run (via `journalctl --cursor-file`, so each
-run only ever sees new lines, never re-scans the whole window) and stores
-it as structured rows in the app's own database — `vpn_events` (OpenVPN
-connect/disconnect/other lines, including a `real_address` resolved once
-per connect — see `resolve_real_address`) and `traffic_flows`
-(per-connection Traffic-tab rows, with destination org + client name
-already resolved). The Sessions, Client Sessions, and Traffic tabs then
-just read those tables directly.
+`./setup-log-ingest.sh` (run once, after `setup.sh`) installs systemd
+timers that run `deploy/ingest_logs.py` every 5 seconds and the separate
+`deploy/ingest_ip_orgs.py` enrichment worker every 10 seconds. The default
+agent also follows new kernel traffic log entries and pushes them to the hub
+over its existing WebSocket in batches, waiting quietly when there is no
+traffic. The hub acknowledges each batch only after saving its rows and
+journal cursor together, so a reconnect resumes safely. The timer remains
+as a backfill/fallback path; database uniqueness prevents duplicate rows.
+
+Traffic rows are committed before any WHOIS work, so registry latency
+cannot hold up new traffic or other log streams. The timer pulls whatever's
+new since its last run (via `journalctl --cursor-file`, so it doesn't
+re-scan the whole window) and stores structured rows in the app's database —
+`vpn_events` (OpenVPN connect/disconnect/other lines, including a
+`real_address` resolved once per connect — see `resolve_real_address`) and
+`traffic_flows` (per-connection Traffic-tab rows, with client name and any
+cached destination organization). The enrichment worker resolves cold
+destinations in bounded batches and fills their organization labels
+afterward. The Sessions, Client Sessions, and Traffic tabs read those
+tables directly; an open Logs page refreshes its current page every five
+seconds.
 
 Each of those tabs also has a **Refresh now** button
 (`POST /logs/refresh`) that runs one ingestion cycle immediately instead
-of waiting for the next timer tick — useful right after connecting a
-client yourself and wanting to see it show up without a wait. It calls the
-exact same `ingest_vpn_events`/`ingest_traffic_flows` functions the timer
-does; running it early doesn't skip, duplicate, or conflict with the
-timer's own next run (the journal cursor plus each table's `INSERT OR
-IGNORE` already make ingestion safe to run at any time, from anywhere).
+of waiting for the next timer tick. The page also refreshes its current
+database view every five seconds while visible; neither action is
+responsible for ongoing ingestion, which keeps running server-side.
 
 **Why this exists, not just a wider `--since` window**: journald itself
 already keeps well over a week of history by default (confirmed live: a
@@ -653,17 +666,17 @@ matching the kernel's flow-log format, resolving WHOIS) — measured live at
 ~1.5s (Sessions, ~13k lines/week) to ~4s+ (Traffic, thousands of
 lines/day) once the window's widened to a week. Moving that parsing out
 of the request path and into a background job removes that cost entirely
-from every page load, at the price of up to ~10s of lag (the timer
+from every page load, at the price of up to ~5s of lag (the timer
 interval) before a brand-new session/flow shows up — or none at all, if
 you click Refresh now.
 
-**Retention**: both tables are pruned to the last 7 days on every ingest
+**Retention**: all three log tables are pruned to the last 7 days on every ingest
 run (`db.prune_old_logs`). Change `RETENTION_DAYS` in
 `deploy/ingest_logs.py` for a different window — there's no separate
 config flag for it.
 
 **Duplicate-safety**: confirmed live that `journalctl --cursor-file` can
-re-emit the same last-seen line on the very next invocation. Both tables
+re-emit the same last-seen line on the very next invocation. All three tables
 have a `UNIQUE` constraint over their real-world identifying columns and
 ingestion uses `INSERT OR IGNORE`, so reprocessing the same line twice is
 a silent no-op, not a duplicate row.
@@ -672,7 +685,8 @@ a silent no-op, not a duplicate row.
 checkout (not copied elsewhere), so a normal `git pull`/CD deploy picks up
 changes to it automatically on the next scheduled run — no separate
 reinstall step, unlike the 4 helper scripts below. The systemd unit files
-themselves (`pivpn-webui-log-ingest.service`/`.timer`) are static and
+themselves (`pivpn-webui-log-ingest.service`/`.timer` and
+`pivpn-webui-org-ingest.service`/`.timer`) are static and
 aren't part of the CD forced command; reinstall them by hand
 (`sudo install ...` + `sudo systemctl daemon-reload`) if you ever change
 those specifically.

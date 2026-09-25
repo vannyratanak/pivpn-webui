@@ -524,8 +524,11 @@ def client_toggle_rule(name, rule_id):
         name = pivpn_ctl.validate_name(name)
     except pivpn_ctl.PivpnError:
         abort(404)
+    rule = db.get_rule(rule_id)
+    ip_to_name = db.list_client_ip_name_map()
+    if not rule or firewall.rule_client_name(rule, ip_to_name) != name:
+        abort(404)
     try:
-        rule = db.get_rule(rule_id)
         firewall.toggle_rule(rule_id, client_ip=_client_ip())
         _audit("firewall_rule_toggle", f"rule#{rule_id}")
         if rule and rule["kind"] == "forward":
@@ -547,6 +550,9 @@ def client_delete_rule(name, rule_id):
     except pivpn_ctl.PivpnError:
         abort(404)
     rule = db.get_rule(rule_id)
+    ip_to_name = db.list_client_ip_name_map()
+    if not rule or firewall.rule_client_name(rule, ip_to_name) != name:
+        abort(404)
     try:
         firewall.delete_rule(rule_id, client_ip=_client_ip())
         flash("Rule deleted.", "success")

@@ -1,0 +1,11 @@
+[Unit]
+Description=Resolve uncached traffic destination organizations
+
+[Timer]
+OnBootSec=15s
+OnUnitActiveSec=10s
+AccuracySec=1s
+Unit=pivpn-webui-org-ingest.service
+
+[Install]
+WantedBy=timers.target

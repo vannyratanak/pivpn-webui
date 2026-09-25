@@ -39,15 +39,16 @@ function browser() {
   };
 }
 
-test('idle browser logs out and clears bearer credential after 90 seconds', () => {
+test('idle browser locks the HTML session and preserves the API bearer credential', async () => {
   const b = browser();
   b.stored.set('pivpn_webui_api_token', 'token');
   b.load('idle-timeout.js');
   b.advance(90 * 1000);
   b.tick();
-  assert.equal(b.context.window.location.href, '/logout');
-  assert.equal(b.stored.has('pivpn_webui_api_token'), false);
-  assert.deepEqual(b.requests, []);
+  await new Promise(setImmediate);
+  assert.equal(b.context.window.location.href, '/login');
+  assert.equal(b.stored.get('pivpn_webui_api_token'), 'token');
+  assert.deepEqual(b.requests, ['/account/lock']);
 });
 
 test('activity extends idle deadline and sends heartbeat', () => {
@@ -62,12 +63,14 @@ test('activity extends idle deadline and sends heartbeat', () => {
   assert.equal(b.context.window.location.href, '/clients');
 });
 
-test('first input after a suspended tab exceeded its deadline cannot revive it', () => {
+test('first input after a suspended tab exceeded its deadline cannot revive it', async () => {
   const b = browser();
   b.load('idle-timeout.js');
   b.advance(91 * 1000);
   b.event('mousemove');
-  assert.equal(b.context.window.location.href, '/logout');
+  await new Promise(setImmediate);
+  assert.equal(b.context.window.location.href, '/login');
+  assert.deepEqual(b.requests, ['/account/lock']);
 });
 
 test('another tab activity keeps this tab alive', () => {

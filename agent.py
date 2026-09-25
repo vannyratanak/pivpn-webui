@@ -21,6 +21,7 @@ import re
 import ssl
 import subprocess
 import sys
+import uuid
 
 import websockets
 
@@ -192,6 +193,74 @@ async def _push_connection_changes(websocket, send_lock: asyncio.Lock):
         await asyncio.sleep(1)
 
 
+async def _push_traffic_flows(websocket, send_lock: asyncio.Lock, ack_queue: asyncio.Queue, cursor: str | None):
+    """Follow new kernel flow log records and send acknowledged batches.
+
+    journalctl blocks while the kernel log is quiet. The hub supplies the
+    last committed cursor on connect; if the socket drops, the next process
+    resumes after the last batch the hub confirmed.
+    """
+    while True:
+        proc = None
+        batch = []
+        try:
+            argv = ["sudo", "-n", config.LOG_HELPER, "flow-follow"]
+            if cursor:
+                argv.append(cursor)
+            proc = await asyncio.create_subprocess_exec(
+                *argv, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+            )
+            flush_at = asyncio.get_running_loop().time() + 0.5
+            while True:
+                timeout = max(0.01, flush_at - asyncio.get_running_loop().time())
+                try:
+                    raw = await asyncio.wait_for(proc.stdout.readline(), timeout=timeout)
+                except asyncio.TimeoutError:
+                    raw = None
+                if raw == b"":
+                    raise RuntimeError(f"flow journal follower exited ({await proc.wait()})")
+                if raw:
+                    try:
+                        event = json.loads(raw)
+                    except (json.JSONDecodeError, UnicodeDecodeError):
+                        continue
+                    event_cursor = event.get("__CURSOR")
+                    message = event.get("MESSAGE")
+                    realtime_us = event.get("__REALTIME_TIMESTAMP")
+                    if (isinstance(event_cursor, str) and len(event_cursor) <= 2048
+                            and isinstance(message, str) and len(message) <= 8192
+                            and isinstance(realtime_us, str) and realtime_us.isdigit()):
+                        batch.append({"cursor": event_cursor, "message": message, "realtime_us": realtime_us})
+                if batch and (len(batch) >= 50 or raw is None or asyncio.get_running_loop().time() >= flush_at):
+                    batch_id = uuid.uuid4().hex
+                    async with send_lock:
+                        await websocket.send(json.dumps({
+                            "type": "traffic_flow_batch", "batch_id": batch_id, "events": batch,
+                        }))
+                    ack_id, ok = await asyncio.wait_for(ack_queue.get(), timeout=30)
+                    if ack_id != batch_id or not ok:
+                        raise RuntimeError("hub did not acknowledge traffic batch")
+                    # This is the only cursor advanced in memory. If anything
+                    # fails before the hub commits, restarting the follower
+                    # replays from the previous acknowledged position.
+                    cursor = batch[-1]["cursor"]
+                    batch = []
+                    flush_at = asyncio.get_running_loop().time() + 0.5
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.warning("traffic journal stream paused (%s); retrying from last acknowledged cursor", exc)
+            await asyncio.sleep(2)
+        finally:
+            if proc and proc.returncode is None:
+                proc.terminate()
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=2)
+                except asyncio.TimeoutError:
+                    proc.kill()
+                    await proc.wait()
+
+
 def _build_tls_context() -> ssl.SSLContext | None:
     """None for a plain ws:// HUB_URL (websockets.connect ignores ssl=None
     and just doesn't use TLS at all). For wss://, HUB_TLS_CERT pins trust
@@ -218,7 +287,10 @@ def _build_tls_context() -> ssl.SSLContext | None:
 
 async def _run_until_disconnected():
     tls_ctx = _build_tls_context()
-    async with websockets.connect(config.HUB_URL, max_size=MAX_MESSAGE_BYTES, ssl=tls_ctx) as websocket:
+    async with websockets.connect(
+        config.HUB_URL, max_size=MAX_MESSAGE_BYTES, ssl=tls_ctx,
+        ping_interval=5, ping_timeout=5,
+    ) as websocket:
         await websocket.send(json.dumps(
             {"type": "hello", "server_id": config.AGENT_SERVER_ID, "token": config.AGENT_TOKEN}
         ))
@@ -228,21 +300,38 @@ async def _run_until_disconnected():
             sys.exit(1)
         log.info("connected to hub as server #%s", config.AGENT_SERVER_ID)
         send_lock = asyncio.Lock()
+        traffic_acks = asyncio.Queue()
         status_task = asyncio.create_task(_push_connection_changes(websocket, send_lock))
+        traffic_task = None
+        if ack.get("traffic_enabled"):
+            traffic_task = asyncio.create_task(_push_traffic_flows(
+                websocket, send_lock, traffic_acks, ack.get("traffic_cursor")
+            ))
         try:
             async for raw in websocket:
                 try:
                     message = json.loads(raw)
-                    request_id = message["id"]
-                except (json.JSONDecodeError, KeyError, TypeError):
+                except (json.JSONDecodeError, TypeError):
                     log.warning("hub sent an unparseable request: %r", raw)
+                    continue
+                if isinstance(message, dict) and message.get("type") == "traffic_flow_ack":
+                    traffic_acks.put_nowait((message.get("batch_id"), message.get("ok") is True))
+                    continue
+                try:
+                    request_id = message["id"]
+                except (KeyError, TypeError):
+                    log.warning("hub sent a message without a request id: %r", raw)
                     continue
                 response = await _dispatch(message)
                 async with send_lock:
                     await websocket.send(json.dumps({**response, "id": request_id}))
         finally:
             status_task.cancel()
-            await asyncio.gather(status_task, return_exceptions=True)
+            tasks = [status_task]
+            if traffic_task:
+                traffic_task.cancel()
+                tasks.append(traffic_task)
+            await asyncio.gather(*tasks, return_exceptions=True)
 
 
 async def main():

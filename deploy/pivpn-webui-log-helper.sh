@@ -93,7 +93,7 @@ SYSTEM_CURSOR="$STATE_DIR/system.cursor"
 BACKFILL_SINCE="7 days ago"
 
 usage() {
-  echo "usage: $0 openvpn | webui [range] | system [range] | flow | openvpn-tail | flow-tail | system-tail" >&2
+  echo "usage: $0 openvpn | webui [range] | system [range] | flow | openvpn-tail | flow-tail | flow-follow [cursor] | system-tail" >&2
   echo "  range (webui/system only): 1h | 6h | 12h | 1d | 7d (default 7d)" >&2
   exit 1
 }
@@ -151,6 +151,24 @@ case "$action" in
     rc=$?
     set -e
     [[ $rc -eq 0 || $rc -eq 1 ]] || exit "$rc"
+    ;;
+  flow-follow)
+    # A dedicated follower for the agent's live WebSocket stream. The
+    # opaque cursor is supplied by the hub only after the preceding batch
+    # was committed. Validate it before passing it to journalctl; with no
+    # cursor, start at the current end (the periodic ingest timer handles
+    # any initial history/backfill).
+    if [[ $# -gt 2 ]]; then usage; fi
+    if [[ $# -eq 2 ]]; then
+      cursor="$2"
+      cursor_re='^[A-Za-z0-9_:=;.-]+$'
+      [[ ${#cursor} -le 2048 && "$cursor" =~ $cursor_re ]] || {
+        echo "invalid journal cursor" >&2
+        exit 2
+      }
+      exec journalctl -k --after-cursor="$cursor" --follow --no-pager -o json -g "$FLOW_LOG_PREFIX"
+    fi
+    exec journalctl -k --follow --lines=0 --no-pager -o json -g "$FLOW_LOG_PREFIX"
     ;;
   *)
     usage

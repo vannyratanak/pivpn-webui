@@ -26,6 +26,10 @@ only ever sees lines since the last one, so this stays cheap indefinitely
 regardless of how much history piles up — the *parsing* cost that
 motivated this doesn't reappear as an *ingestion* cost, since ingestion
 only ever processes one tick's worth of new lines, not the full window.
+
+Traffic destination WHOIS lookups are intentionally handled separately by
+deploy/ingest_ip_orgs.py. Flow rows are committed with cached organization
+data when available, then cold destinations are enriched asynchronously.
 """
 import sys
 from pathlib import Path
@@ -39,7 +43,6 @@ from app.vpnlog import (
     CONNECT_RE,
     DISCONNECT_RE,
     FLOW_RE,
-    _client_ip_map,
     _split_journal_line,
     _split_journal_line_with_process,
     resolve_real_addresses_bulk,
@@ -77,27 +80,19 @@ def ingest_vpn_events() -> int:
         # docstring). Losing that here would be a real feature regression.
         other_events.append((ts, msg))
 
-    # Resolved here, once per unique address, concurrently — rather than
-    # live on every Client Sessions page load (the old design), and rather
-    # than one at a time in this loop (the first version of this design):
-    # a burst of simultaneous new connections (e.g. every client
-    # reconnecting after a server restart) would otherwise pay one
-    # sequential SSH round-trip to the relay per connection. This runs
-    # within ~10s of the connections actually starting (the ingest timer's
-    # own interval), while the relay's conntrack entries are essentially
-    # guaranteed to still exist, unlike a live lookup that might happen
-    # hours or days later. resolve_real_addresses_bulk already no-ops
-    # instantly (no SSH call at all) for any address that isn't behind the
-    # relay, so this is cheap for the common case.
-    real_addresses = resolve_real_addresses_bulk([addr for _, _, addr in connect_events])
-
     rows = [
-        (ts, "connected", client, addr, "", real_addresses.get(addr))
+        (ts, "connected", client, addr, "", None)
         for ts, client, addr in connect_events
     ]
     rows += [(ts, "disconnected", client, addr, "", None) for ts, client, addr in disconnect_events]
     rows += [(ts, "other", "", "", detail, None) for ts, detail in other_events]
     db.insert_vpn_events(rows)
+
+    # Relay lookups are useful enrichment, but never delay storing the
+    # connection event itself. Resolve in parallel after the insert and
+    # patch the rows when answers arrive.
+    real_addresses = resolve_real_addresses_bulk([addr for _, _, addr in connect_events])
+    db.update_vpn_event_real_addresses(real_addresses)
     return len(rows)
 
 
@@ -114,12 +109,18 @@ def ingest_traffic_flows() -> int:
     if not parsed:
         return 0
 
-    # Resolved once for this whole batch, not per row — same reasoning as
-    # the old request-time code: a client's VPN IP doesn't change mid-batch,
-    # and get_ip_orgs_bulk already dedups + parallelizes the actual WHOIS
-    # calls internally.
-    ip_to_name = _client_ip_map()
-    orgs = iplookup.get_ip_orgs_bulk([m.group("dst") for _, m in parsed])
+    # Use only local cache state here. WHOIS used to run inline before these
+    # rows were committed, so one slow registry could delay fresh traffic
+    # and every later log stream. A separate worker resolves misses.
+    clients = db.list_client_status_cache()
+    ip_to_name = {}
+    for client in clients:
+        if client.get("ip"):
+            ip_to_name[client["ip"]] = client["name"]
+        session = client.get("session")
+        if session and session.get("virtual_address"):
+            ip_to_name[session["virtual_address"]] = client["name"]
+    orgs = iplookup.get_cached_ip_orgs([m.group("dst") for _, m in parsed])
 
     rows = []
     for ts, m in parsed:
@@ -130,6 +131,8 @@ def ingest_traffic_flows() -> int:
             m.group("proto"), m.group("sport"), m.group("dport"),
             m.group("in_if"), m.group("out_if"),
         ))
+    # Commit the flow facts immediately; organization enrichment is
+    # independent and can safely catch up after these rows are visible.
     db.insert_traffic_flows(rows)
     return len(rows)
 
@@ -169,9 +172,9 @@ def _best_effort(fn):
 
 
 def main():
+    n_system = _best_effort(ingest_system_log)
     n_events = _best_effort(ingest_vpn_events)
     n_flows = _best_effort(ingest_traffic_flows)
-    n_system = _best_effort(ingest_system_log)
     db.prune_old_logs(RETENTION_DAYS)
     print(f"ingested {n_events} vpn event(s), {n_flows} traffic flow(s), {n_system} system log line(s)")
 

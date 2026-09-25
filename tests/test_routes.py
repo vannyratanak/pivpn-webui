@@ -781,6 +781,17 @@ def test_delete_rule_always_redirects_to_firewall_page(client):
 # redirect back to that client's page without the Firewall page's own
 # routes ever needing to vary.
 
+def _cache_clients_for_rule_tests(rows):
+    db.replace_client_status_cache([
+        {
+            "status": "Valid", "expiration": "", "list_position": i,
+            "session_real_address": None, "session_virtual_address": None,
+            "session_bytes_recv": None, "session_bytes_sent": None,
+            "session_since": None, **row,
+        }
+        for i, row in enumerate(rows)
+    ])
+
 def test_client_add_rule_allows_moderator(client, monkeypatch):
     monkeypatch.setattr("app.routes.pivpn_ctl.list_client_ips", lambda: {"laptop-anna": "10.202.226.2"})
     monkeypatch.setattr("app.firewall.run_root", lambda argv, **kwargs: "")
@@ -817,7 +828,8 @@ def test_client_add_rule_without_a_vpn_ip_flashes_and_does_not_create_a_rule(cli
     assert db.list_rules() == []
 
 
-def test_client_toggle_rule_redirects_back_to_client_page(client):
+def test_client_toggle_rule_redirects_back_to_client_page(client, monkeypatch):
+    _cache_clients_for_rule_tests([{"name": "laptop-anna", "ip": "10.202.226.2"}])
     _login_admin(client)
     rule_id = db.insert_rule({"kind": "forward", "action": "DROP", "protocol": "tcp", "src": "10.202.226.2"})
     resp = client.post(f"/clients/laptop-anna/rules/{rule_id}/toggle")
@@ -825,13 +837,30 @@ def test_client_toggle_rule_redirects_back_to_client_page(client):
     assert resp.headers["Location"] == "/clients/laptop-anna"
 
 
-def test_client_delete_rule_redirects_back_to_client_page(client):
+def test_client_delete_rule_redirects_back_to_client_page(client, monkeypatch):
+    _cache_clients_for_rule_tests([{"name": "laptop-anna", "ip": "10.202.226.2"}])
     _login_admin(client)
     rule_id = db.insert_rule({"kind": "forward", "action": "DROP", "protocol": "tcp", "src": "10.202.226.2"})
     resp = client.post(f"/clients/laptop-anna/rules/{rule_id}/delete")
     assert resp.status_code == 302
     assert resp.headers["Location"] == "/clients/laptop-anna"
     assert db.list_rules() == []
+
+
+def test_client_scoped_rule_mutations_cannot_target_another_client(client, monkeypatch):
+    _cache_clients_for_rule_tests([
+        {"name": "laptop-anna", "ip": "10.202.226.2"},
+        {"name": "other-client", "ip": "10.202.226.5"},
+    ])
+    _login_admin(client)
+    rule_id = db.insert_rule({"kind": "forward", "action": "DROP", "protocol": "tcp", "src": "10.202.226.5"})
+
+    toggle = client.post(f"/clients/laptop-anna/rules/{rule_id}/toggle")
+    delete = client.post(f"/clients/laptop-anna/rules/{rule_id}/delete")
+
+    assert toggle.status_code == 404
+    assert delete.status_code == 404
+    assert db.get_rule(rule_id)["enabled"] == 1
 
 
 # --- /clients/<name>/rules/bulk-disable and /bulk-delete: same underlying
