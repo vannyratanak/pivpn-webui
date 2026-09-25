@@ -4,6 +4,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const el = (id) => document.getElementById(`ov-${id}`);
   const escape = (value) => { const node = document.createElement('span'); node.textContent = value == null ? '' : String(value); return node.innerHTML; };
   const text = (id, value) => { if (el(id)) el(id).textContent = value; };
+  const parseServerUtc = (ts) => new Date(ts.replace(' ', 'T') + 'Z').getTime();
   let snapshot = null;
   let state;
   let activityRange = null;
@@ -126,11 +127,26 @@ document.addEventListener('DOMContentLoaded', () => {
       text('axis-start', `${formatServerTs(data.start).slice(5, 16)}`);
       text('axis-end', `${formatServerTs(data.end).slice(5, 16)} · Peak ${data.total}`);
       el('chart-data').innerHTML = data.buckets.map((b) => `<tr><td>${escape(formatServerTs(b.start))}</td><td>${escape(formatServerTs(b.end))}</td><td>${b.peak}</td></tr>`).join('');
+      // Where "now" actually falls within [start, end) — data.start/end are
+      // UTC strings from the server, compared against the viewer's own
+      // clock (not a server timestamp) so the line tracks in real time
+      // between polls, not just at the moment this response arrived.
+      const rangeStartMs = parseServerUtc(data.start);
+      const rangeEndMs = parseServerUtc(data.end);
+      const nowMs = Date.now();
+      const marker = el('now-marker');
+      if (marker && rangeEndMs > rangeStartMs && nowMs >= rangeStartMs && nowMs <= rangeEndMs) {
+        marker.style.left = `${(nowMs - rangeStartMs) / (rangeEndMs - rangeStartMs) * 100}%`;
+        marker.hidden = false;
+      } else if (marker) {
+        marker.hidden = true;
+      }
       if (focusedBar >= 0) (el('bars').children[Math.min(focusedBar, data.buckets.length - 1)]).focus({ preventScroll: true });
     } catch {
       text('activity-error', 'Could not refresh activity. Use Refresh to retry.');
       if (activityRange !== requested) {
         el('bars').replaceChildren(); el('chart-data').replaceChildren();
+        if (el('now-marker')) el('now-marker').hidden = true;
         ['activity-total', 'activity-total-label', 'coverage', 'axis-start', 'axis-end'].forEach((id) => text(id, '—'));
       } else text('activity-error', 'Could not refresh activity. Showing the previous chart; use Refresh to retry.');
     } finally {

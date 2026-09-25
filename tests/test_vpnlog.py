@@ -246,6 +246,25 @@ def test_peak_concurrency_counts_overlapping_sessions_not_connect_events(temp_db
     assert peaks == [2]  # a+b overlap briefly, then b+c overlap — never all three at once
 
 
+def test_peak_concurrency_does_not_count_back_to_back_sessions_as_overlapping(temp_db):
+    # Found live: client2 disconnected and reconnected at the exact same
+    # second (07:47:11 both times) while client1 was separately online the
+    # whole hour. A naive sweep that processes the new connect's +1 before
+    # the old disconnect's -1 at that shared instant briefly double-counts
+    # client2 against itself, reporting peak=3 instead of the real 2.
+    db.insert_vpn_events([
+        _connected("2026-08-21 09:00:00", "client1", "10.66.66.1:1"),
+        _connected("2026-08-21 09:10:00", "client2", "10.66.66.1:2"),
+        _disconnected("2026-08-21 09:20:00", "client2", "10.66.66.1:2"),
+        _connected("2026-08-21 09:20:00", "client2", "10.66.66.1:3"),
+        _disconnected("2026-08-21 09:30:00", "client2", "10.66.66.1:3"),
+    ])
+    peaks = vpnlog.peak_concurrency_by_bucket(
+        "2026-08-21 09:00:00", "2026-08-21 10:00:00", 3600, "2026-08-21 10:00:00"
+    )
+    assert peaks == [2]  # client1 + client2 — never 3, even at the exact touching instant
+
+
 def test_peak_concurrency_caps_ongoing_sessions_at_now_not_query_end(temp_db):
     db.insert_vpn_events([_connected("2026-08-21 09:30:00", "still-online", "10.66.66.1:1")])
     peaks = vpnlog.peak_concurrency_by_bucket(

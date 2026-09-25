@@ -19,7 +19,10 @@
       <div class="card-header-row"><div><h2 id="ov-activity-title">Connection activity</h2><p class="hint">Peak clients online</p></div><label class="ov-controls">Period <select id="ov-range"><option value="1d">Today</option><option value="7d">Last 7 days</option></select></label></div>
       <p id="ov-activity-error" role="status" class="hint">Loading activity…</p>
       <div class="ov-activity-total"><strong id="ov-activity-total">—</strong><span id="ov-activity-total-label">clients online</span></div>
-      <div id="ov-bars" class="ov-bars" aria-label="Peak clients online"></div>
+      <div class="ov-bars-wrap">
+        <div id="ov-bars" class="ov-bars" aria-label="Peak clients online"></div>
+        <div id="ov-now-marker" class="ov-now-marker" hidden><span class="ov-now-marker-label">now</span></div>
+      </div>
       <div class="ov-axis"><span id="ov-axis-start">—</span><span id="ov-axis-end">—</span></div>
       <p class="hint" id="ov-coverage"></p>
       <details class="ov-data"><summary>View chart data</summary><div class="ov-table-scroll"><table><thead><tr><th scope="col">Start</th><th scope="col">End</th><th scope="col">Peak</th></tr></thead><tbody id="ov-chart-data"></tbody></table></div></details>

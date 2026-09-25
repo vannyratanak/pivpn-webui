@@ -509,7 +509,15 @@ def peak_concurrency_by_bucket(start: str, end: str, step_seconds: int, now: str
             lo, hi = max(s_start, b_start), min(s_end, b_end)
             if lo < hi:
                 events.extend([(lo, 1), (hi, -1)])
-        events.sort(key=lambda e: (e[0], -e[1]))
+        # Intervals are half-open [start, end) — a session ending at time T
+        # and another starting at exactly T must not count as overlapping,
+        # even briefly. Sorting (-1) before (+1) at a tie (ascending on the
+        # delta) processes the departure first, so back-to-back sessions
+        # (even the same client reconnecting instantly) never inflate the
+        # peak by counting both for an instant. Found live: two of the same
+        # client's own sessions touching end-to-end read as a phantom extra
+        # concurrent connection.
+        events.sort(key=lambda e: (e[0], e[1]))
         running = peak = 0
         for _, delta in events:
             running += delta
