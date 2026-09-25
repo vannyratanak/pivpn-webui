@@ -1284,6 +1284,50 @@ def insert_system_log_lines(rows: list[tuple[str, str, str]]):
         conn.close()
 
 
+def list_clock_change_times() -> list[str]:
+    """Agent journal evidence that wall-clock session durations are uncertain.
+
+    A resumed VM may keep its boot ID and OpenVPN process while its wall
+    clock jumps. Preserve the original logs; callers annotate durations.
+    Even a small clock correction is conservatively treated as uncertain.
+    """
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT ts FROM system_log_lines "
+            "WHERE process = 'systemd-resolved' "
+            "AND message = 'Clock change detected. Flushing caches.' ORDER BY ts"
+        ).fetchall()
+        return [r["ts"] for r in rows]
+    finally:
+        conn.close()
+
+
+def list_session_observation_gaps() -> list[dict]:
+    """Clock changes following at least five minutes without journal records.
+
+    This is evidence of an observation gap, not an exact client disconnect.
+    Small time corrections must not split every active VPN connection.
+    """
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT changes.ts AS resumed_at, previous.ts AS last_observed_at "
+            "FROM system_log_lines changes "
+            "JOIN LATERAL (SELECT ts FROM system_log_lines "
+            "WHERE ts < changes.ts ORDER BY ts DESC LIMIT 1) previous ON TRUE "
+            "WHERE changes.process = 'systemd-resolved' "
+            "AND changes.message = 'Clock change detected. Flushing caches.' "
+            "ORDER BY resumed_at"
+        ).fetchall()
+        return [dict(r) for r in rows if (
+            datetime.fromisoformat(r["resumed_at"]) -
+            datetime.fromisoformat(r["last_observed_at"])
+        ).total_seconds() >= 300]
+    finally:
+        conn.close()
+
+
 def list_system_log_page(
     q: str | None = None, page: int = 1, page_size: int = 50, since: str | None = None
 ) -> tuple[list[dict], int]:

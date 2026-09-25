@@ -25,15 +25,16 @@
   }
 
   function clientSessionsRow(s) {
-    const endCell = s.ongoing
+    let endCell = s.ongoing
       ? '<span class="badge badge-connected">ongoing</span>'
       : s.status_note
         ? `<span class="cell-note">${escapeHtml(s.status_note)}</span>`
         : escapeHtml(formatServerTs(s.end) || '—');
+    if (s.end_estimated) endCell = `${escapeHtml(formatServerTs(s.end))}<span class="cell-note hint-block">Interrupted — estimated from last server activity</span>`;
     const addressCell = s.real_address
       ? `${escapeHtml(s.real_address)}<span class="cell-note hint-block">via relay (${escapeHtml(s.address)})</span>`
       : escapeHtml(s.address || '—');
-    return `<tr><td>${escapeHtml(s.client)}</td><td>${escapeHtml(formatServerTs(s.start) || '—')}</td><td>${endCell}</td><td>${escapeHtml(s.duration || '—')}</td><td>${addressCell}</td></tr>`;
+    return `<tr><td>${escapeHtml(s.client)}</td><td>${escapeHtml(formatServerTs(s.start) || '—')}</td><td>${endCell}</td><td>${escapeHtml(s.duration_note || s.duration || '—')}</td><td>${addressCell}</td></tr>`;
   }
 
   function trafficRow(f) {

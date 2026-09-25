@@ -29,6 +29,7 @@ parsing may fall back to raw/unparsed rows rather than raise an error —
 this is a "best effort" view, not something else depends on it.
 """
 import concurrent.futures
+from bisect import bisect_right
 import re
 import subprocess
 from datetime import datetime, timezone
@@ -327,10 +328,49 @@ def list_client_sessions(
     page's free-text search.
     """
     events = _parse_openvpn_events()
+    gaps = db.list_session_observation_gaps()
+    events = sorted([
+        *events,
+        *({"ts": gap["resumed_at"], "event": "observation_gap", **gap} for gap in gaps),
+    ], key=lambda e: (e["ts"], e["event"] != "observation_gap"))
     open_sessions: dict[str, dict] = {}
+    interrupted_peers = set()
     sessions = []
     for e in events:
+        if e["event"] == "observation_gap":
+            for client_name, pending in list(open_sessions.items()):
+                if pending["start"] > e["last_observed_at"]:
+                    continue
+                sessions.append({
+                    "client": client_name, "start": pending["start"],
+                    "end": e["last_observed_at"], "end_estimated": True,
+                    "duration": None, "ongoing": False, "address": pending["address"],
+                    "real_address": pending["real_address"],
+                    "status_note": "Interrupted — estimated end",
+                    "duration_note": "Unknown — exact disconnect time not recorded",
+                    "last_observed_at": e["last_observed_at"],
+                })
+                interrupted_peers.add((client_name, pending["address"]))
+                del open_sessions[client_name]
+            continue
+        # Retained raw OpenVPN startup lines also repair historical sessions:
+        # a restart cannot preserve a connection from the previous process.
+        # The restart time is not the (possibly much earlier) outage time.
+        detail = (e.get("detail") or "").strip()
+        if e["event"] == "other" and (
+            detail.startswith("OpenVPN 2.") or detail == "Initialization Sequence Completed"
+        ):
+            for interrupted_client, pending in open_sessions.items():
+                sessions.append({
+                    "client": interrupted_client, "start": pending["start"],
+                    "end": None, "duration": None, "ongoing": False,
+                    "address": pending["address"], "real_address": pending["real_address"],
+                    "status_note": "Interrupted by VPN restart (end time unknown)",
+                })
+            open_sessions.clear()
+            continue
         if e["event"] == "connected":
+            interrupted_peers.discard((e["client"], e["address"]))
             stale = open_sessions.get(e["client"])
             if stale:
                 # Reconnected without a matching disconnect ever being
@@ -349,7 +389,17 @@ def list_client_sessions(
                 "start": e["ts"], "address": e["address"], "real_address": e.get("real_address"),
             }
         elif e["event"] == "disconnected":
-            pending = open_sessions.pop(e["client"], None)
+            if (e["client"], e["address"]) in interrupted_peers:
+                # The delayed timeout remains in the raw log, but isn't
+                # a second session or the end of the pre-gap connection.
+                continue
+            pending = open_sessions.get(e["client"])
+            # A late disconnect for an older peer must not end a newer
+            # connection using the same certificate name.
+            if pending and pending["address"] != e["address"]:
+                pending = None
+            elif pending:
+                open_sessions.pop(e["client"])
             start = pending["start"] if pending else None
             address = pending["address"] if pending else e["address"]
             sessions.append({
@@ -364,6 +414,15 @@ def list_client_sessions(
             "address": pending["address"], "duration": None, "ongoing": True,
             "real_address": pending["real_address"],
         })
+    clock_changes = db.list_clock_change_times()
+    for session in sessions:
+        start, end = session["start"], session["end"]
+        if not start or not end or session.get("end_estimated"):
+            continue
+        boundary = bisect_right(clock_changes, start)
+        if boundary < len(clock_changes) and clock_changes[boundary] <= end:
+            session["duration"] = None
+            session["duration_note"] = "Unknown — server clock changed during session"
     sort_client_sessions(sessions)
 
     if client:

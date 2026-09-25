@@ -499,15 +499,16 @@ document.addEventListener('DOMContentLoaded', () => {
   // minus the Client/Source columns those need (always this client here,
   // so showing it again on every row would be pure noise).
   function clientSessionRowHtml(s) {
-    const endCell = s.ongoing
+    let endCell = s.ongoing
       ? '<span class="badge badge-connected">ongoing</span>'
       : s.status_note
         ? `<span class="cell-note">${escapeHtml(s.status_note)}</span>`
         : escapeHtml(formatServerTs(s.end) || '—');
+    if (s.end_estimated) endCell = `${escapeHtml(formatServerTs(s.end))}<span class="cell-note hint-block">Interrupted — estimated from last server activity</span>`;
     const addressCell = s.real_address
       ? `${escapeHtml(s.real_address)}<span class="cell-note hint-block">via relay (${escapeHtml(s.address)})</span>`
       : escapeHtml(s.address || '—');
-    return `<tr><td>${escapeHtml(formatServerTs(s.start) || '—')}</td><td>${endCell}</td><td>${escapeHtml(s.duration || '—')}</td><td>${addressCell}</td></tr>`;
+    return `<tr><td>${escapeHtml(formatServerTs(s.start) || '—')}</td><td>${endCell}</td><td>${escapeHtml(s.duration_note || s.duration || '—')}</td><td>${addressCell}</td></tr>`;
   }
 
   function trafficRowHtml(f) {
@@ -569,57 +570,45 @@ document.addEventListener('DOMContentLoaded', () => {
     return `${s}s`;
   }
 
-  // One row per calendar day covering the selected range (Last 7 days ->
-  // 7 rows, oldest at top through today at the bottom) — each row's bar is
-  // the total time this client was connected that day, summed across every
-  // session that started on it. A session is attributed whole to the day
-  // it *started* rather than split across midnight — real sessions here
-  // are seconds to a few hours, so that simplification never meaningfully
-  // changes which day looks busiest, and this chart isn't meant to be
-  // to-the-second precise anyway. Same horizontal label/bar/value row
-  // style as the destinations chart below (renderDestChart).
+  // Count completed, timestamped sessions only; an unmatched connect
+  // does not prove the client stayed online during an outage.
   function renderSessionTimeline(sessions) {
     const container = document.getElementById('client-session-timeline');
     if (!container) return;
     const rangeEnd = Date.now();
     const rangeHours = RANGE_HOURS[activityRangeSelect.value] || RANGE_HOURS['7d'];
 
-    // Exactly N calendar-day rows ending today (7d -> 7 rows, today plus
-    // the 6 days before it) — not "floor(rangeStart) through today", which
-    // adds a stray extra day up front whenever rangeStart itself falls
-    // partway through a day rather than exactly on a midnight boundary
-    // (always, for a rolling "last N days" window).
-    const dayMs = 24 * 3600 * 1000;
-    const numDays = Math.max(1, Math.ceil(rangeHours / 24));
-    const today = new Date(rangeEnd);
-    today.setHours(0, 0, 0, 0);
+    const rangeStart = rangeEnd - rangeHours * 3600 * 1000;
+    const day = new Date(rangeStart);
+    day.setHours(0, 0, 0, 0);
     const buckets = [];
-    for (let i = numDays - 1; i >= 0; i--) {
-      const d = today.getTime() - i * dayMs;
-      buckets.push({ dayStart: d, dayEnd: d + dayMs, ms: 0 });
+    while (day.getTime() < rangeEnd) {
+      const dayStart = day.getTime();
+      day.setDate(day.getDate() + 1);
+      buckets.push({ dayStart, dayEnd: day.getTime(), ms: 0 });
     }
 
-    sessions.forEach((s) => {
-      const start = parseServerTs(s.start);
-      if (start == null) return;
-      // A session with no `end` is one of two very different things (see
-      // vpnlog.py's list_client_sessions): genuinely still connected right
-      // now (ongoing: true) — that one legitimately counts toward "now" —
-      // or a stale reconnect where no matching disconnect event was ever
-      // logged (ongoing: false, status_note "Ended (exact time unknown)").
-      // The second one already ended; we just don't know exactly when, so
-      // it contributes nothing to the total rather than being guessed as
-      // "ran until right now" (that guess was inflating today's total by
-      // however many hours ago it actually started).
-      if (!s.ongoing && !s.end) return;
-      const end = s.ongoing ? rangeEnd : parseServerTs(s.end);
-      if (end == null || end <= start) return;
-      const bucket = buckets.find((b) => start >= b.dayStart && start < b.dayEnd);
-      if (bucket) bucket.ms += (end - start);
+    const intervals = sessions.filter((s) => !s.ongoing && !s.status_note && !s.duration_note)
+      .map((s) => [parseServerTs(s.start), parseServerTs(s.end)])
+      .filter(([start, end]) => start != null && end != null && end > start)
+      .sort((a, b) => a[0] - b[0]);
+    // Merge overlapping intervals so a client's daily connected time
+    // cannot exceed the actual day length due to duplicate records.
+    const merged = [];
+    intervals.forEach(([start, end]) => {
+      const last = merged[merged.length - 1];
+      if (last && start <= last[1]) last[1] = Math.max(last[1], end);
+      else merged.push([start, end]);
+    });
+    merged.forEach(([start, end]) => {
+      buckets.forEach((bucket) => {
+        bucket.ms += Math.max(0, Math.min(end, bucket.dayEnd, rangeEnd)
+          - Math.max(start, bucket.dayStart, rangeStart));
+      });
     });
 
     if (!buckets.some((b) => b.ms > 0)) {
-      container.innerHTML = '<p class="chart-empty">No sessions in this range to chart.</p>';
+      container.innerHTML = '<p class="chart-empty">No completed sessions with known start and end times in this range.</p>';
       return;
     }
     const max = Math.max(...buckets.map((b) => b.ms), 1);
