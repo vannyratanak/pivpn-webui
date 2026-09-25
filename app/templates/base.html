@@ -10,6 +10,7 @@
   <meta name="idle-timeout-minutes" content="{{ idle_timeout_minutes }}">
   {% endif %}
   <title>{% block title %}PiVPN Web UI{% endblock %}</title>
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg', v='1') }}">
   <!-- Sets data-theme before the stylesheet paints, so a saved choice (or
        the light default, for a first-time visitor with nothing saved yet)
        never flashes dark-then-light on load. Must be inline (not an
