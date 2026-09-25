@@ -53,12 +53,6 @@ def test_activity_reports_peak_concurrency_not_connect_count(client, monkeypatch
         (ts(now.replace(hour=9, minute=20)), 'disconnected', 'a', '10.8.0.2:1', '', None),
         (ts(now.replace(hour=9, minute=25)), 'connected', 'c', '10.8.0.2:3', '', None),
     ])
-    # An already-ended session from the day before must not leak into
-    # today's peak, only the previous period's.
-    db.insert_vpn_events([
-        (ts(now - timedelta(days=1)), 'connected', 'yesterday', '10.8.0.2:9', '', None),
-        (ts(now - timedelta(days=1) + timedelta(minutes=5)), 'disconnected', 'yesterday', '10.8.0.2:9', '', None),
-    ])
     result = client.get('/api/overview/activity?range=1d', headers=headers)
     assert result.status_code == 200
     data = result.get_json()
@@ -66,7 +60,6 @@ def test_activity_reports_peak_concurrency_not_connect_count(client, monkeypatch
     assert bucket9['start'] == '2026-09-25 09:00:00'
     assert bucket9['peak'] == 2
     assert data['total'] == 2
-    assert data['previous_total'] == 1
     assert not data['coverage_complete']
     assert len(data['buckets']) == 24
     assert client.get('/api/overview/activity?range=invalid', headers=headers).status_code == 400

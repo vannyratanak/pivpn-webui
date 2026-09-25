@@ -73,17 +73,12 @@ def activity():
         end = now
         start = now - timedelta(days=7)
         step = 86400
-    previous_start = start - (end - start)
     now_s = stamp(now)
     # Peak concurrent online clients per bucket, not a connect-event count
     # — a client that's been online since before `start` (or stays online
     # past `end`) has to count in every bucket it spans, not just the one
-    # holding its connect event. previous_total reuses the same function
-    # with the whole previous period collapsed into a single "bucket".
+    # holding its connect event.
     peaks = vpnlog.peak_concurrency_by_bucket(stamp(start), stamp(end), step, now_s)
-    previous_peak = vpnlog.peak_concurrency_by_bucket(
-        stamp(previous_start), stamp(start), int((start - previous_start).total_seconds()), now_s
-    )[0]
     conn = db.get_conn()
     try:
         earliest = conn.execute('SELECT MIN(ts) AS earliest FROM vpn_events').fetchone()['earliest']
@@ -92,11 +87,10 @@ def activity():
     buckets = [{'start': stamp(start + timedelta(seconds=i * step)),
                 'end': stamp(start + timedelta(seconds=(i + 1) * step)), 'peak': peaks[i]}
                for i in range(len(peaks))]
-    return jsonify(range=key, start=stamp(start), end=stamp(end), previous_start=stamp(previous_start),
-                   buckets=buckets, total=max(peaks, default=0), previous_total=previous_peak,
+    return jsonify(range=key, start=stamp(start), end=stamp(end),
+                   buckets=buckets, total=max(peaks, default=0),
                    earliest_record=earliest, coverage_complete=False,
-                   coverage_note='Recorded events only; collection gaps may exist. Zero means no clients online.',
-                   comparison_note='Percentage unavailable: uninterrupted coverage of both periods is not confirmed.')
+                   coverage_note='Recorded events only; collection gaps may exist. Zero means no clients online.')
 
 
 @bp.get('/health')
