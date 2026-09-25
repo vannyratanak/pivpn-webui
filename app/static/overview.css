@@ -49,26 +49,5 @@ button.ov-metric { justify-content: stretch; justify-items: start; }
 .ov-clients input[type="search"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .ov-clients .pagination { justify-content: space-between; flex-wrap: wrap; }
 .ov-clients .pagination > a { color: var(--console-link); font-size: 12px; }
-.ov-report { width: min(1000px, calc(100vw - 32px)); max-height: 90dvh; box-sizing: border-box; border: 1px solid var(--border); border-radius: 14px; background: var(--bg); color: var(--text); padding: 28px; }
-.ov-report::backdrop { background: #0008; }
-.ov-report-actions { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 24px; }
-.ov-report-actions h2 { margin-right: auto; }
-.ov-report .ov-clients, .ov-report .ov-controls, .ov-report #ov-print, .ov-report #ov-refresh { display: none; }
-.ov-report .ov-metric { pointer-events: none; }
-.ov-report .ov-data summary { display: none; }
 @media (max-width: 800px) { .ov-charts { grid-template-columns: 1fr; } .ov-metrics { grid-template-columns: repeat(2,minmax(0,1fr)); } .ov-health { gap: 20px; } }
 @media (max-width: 480px) { .ov-metrics { gap: 10px; } button.ov-metric { padding: 16px; } .ov-metric .hint { font-size: 10px; } .ov-charts .card-header-row, .ov-clients .card-header-row { align-items: stretch; flex-direction: column; } .overview-page .page-header-row { align-items: flex-start; flex-direction: column; } .ov-bars { gap: 3px; } }
-@media print {
-  @page { margin: 12mm; }
-  body.overview-page { --bg: #fff; --panel: #fff; --panel-2: #ddd; --text: #111; --muted: #444; --ok: #222; --surface-line: #bbb; --row-line: #ddd; height: auto; background: #fff; color: #111; }
-  body.overview-page > :not(main), #overview-root, .ov-report-actions, .ov-report::backdrop, .table-scroll-hint { display: none !important; }
-  body.overview-page .content { width: 100%; max-width: none; padding: 0; margin: 0; overflow: visible; }
-  .ov-report[open] { display: block; position: static; width: 100%; max-width: none; max-height: none; overflow: visible; padding: 0; border: 0; background: white; color: #111; }
-  .ov-report .card, .ov-report .ov-metric { break-inside: avoid; box-shadow: none; }
-  .ov-report .ov-charts { display: block; }
-  .ov-report .ov-metrics { grid-template-columns: repeat(4,minmax(0,1fr)); }
-  .ov-report .ov-table-scroll { overflow: visible; }
-  .ov-report thead { display: table-header-group; }
-  .ov-report .ov-bar { background: #555 !important; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
-  .ov-report svg circle { stroke: #bbb; }.ov-report svg .ov-donut circle:nth-of-type(2) { stroke: #222; }
-}

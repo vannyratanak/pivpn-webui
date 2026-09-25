@@ -57,17 +57,30 @@ def activity():
     if key not in ('1d', '7d'):
         return jsonify(error='Range must be 1d or 7d.'), 400
     now = datetime.now(timezone.utc).replace(microsecond=0)
-    seconds = 86400 if key == '1d' else 7 * 86400
-    step = 3600 if key == '1d' else 86400
-    start = now - timedelta(seconds=seconds)
-    previous_start = start - timedelta(seconds=seconds)
+    if key == '1d':
+        # Today, midnight-to-midnight in the *viewer's* timezone — not a
+        # rolling 24h window — so the chart matches what "today" means to
+        # whoever's looking at it, not whatever hour the page happens to
+        # load at. tz_offset is minutes, same sign convention as JS's
+        # Date.getTimezoneOffset() (positive means local time is behind
+        # UTC), sent by overview-page.js on every request.
+        tz_offset = request.args.get('tz_offset', 0, type=int)
+        local_midnight = (now - timedelta(minutes=tz_offset)).replace(hour=0, minute=0, second=0, microsecond=0)
+        start = local_midnight + timedelta(minutes=tz_offset)
+        end = start + timedelta(days=1)
+        step = 3600
+    else:
+        end = now
+        start = now - timedelta(days=7)
+        step = 86400
+    previous_start = start - (end - start)
     conn = db.get_conn()
     try:
         # Aggregate the complete range in SQL, independent of Logs pagination.
         rows = conn.execute(
             "SELECT floor(extract(epoch FROM (ts::timestamp - %s::timestamp)) / %s)::int AS bucket, "
             "count(*) AS count FROM vpn_events WHERE event='connected' AND ts >= %s AND ts < %s "
-            "GROUP BY bucket ORDER BY bucket", (stamp(start), step, stamp(start), stamp(now))
+            "GROUP BY bucket ORDER BY bucket", (stamp(start), step, stamp(start), stamp(end))
         ).fetchall()
         previous = conn.execute(
             "SELECT count(*) AS count FROM vpn_events WHERE event='connected' AND ts >= %s AND ts < %s",
@@ -79,8 +92,8 @@ def activity():
     counts = {r['bucket']: r['count'] for r in rows}
     buckets = [{'start': stamp(start + timedelta(seconds=i * step)),
                 'end': stamp(start + timedelta(seconds=(i + 1) * step)), 'count': counts.get(i, 0)}
-               for i in range(seconds // step)]
-    return jsonify(range=key, start=stamp(start), end=stamp(now), previous_start=stamp(previous_start),
+               for i in range(int((end - start).total_seconds()) // step)]
+    return jsonify(range=key, start=stamp(start), end=stamp(end), previous_start=stamp(previous_start),
                    buckets=buckets, total=sum(b['count'] for b in buckets), previous_total=previous,
                    earliest_record=earliest, coverage_complete=False,
                    coverage_note='Recorded events only; collection gaps may exist. Zero means no recorded starts.',

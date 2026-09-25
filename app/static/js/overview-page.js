@@ -8,7 +8,6 @@ document.addEventListener('DOMContentLoaded', () => {
   let state;
   let activityRange = null;
   const busy = new Set();
-  const report = el('report');
   const views = ['connected', 'attention', 'all', 'offline'];
   function readState() {
     const p = new URLSearchParams(location.search);
@@ -86,7 +85,6 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   function controls() {
     el('refresh').disabled = busy.size > 0;
-    el('print').disabled = !snapshot || busy.size > 0;
   }
   async function loadSnapshot() {
     if (busy.has('snapshot')) return;
@@ -100,7 +98,7 @@ document.addEventListener('DOMContentLoaded', () => {
     busy.add('activity'); controls();
     const requested = state.range;
     try {
-      const data = await json(`/api/overview/activity?range=${requested}`);
+      const data = await json(`/api/overview/activity?range=${requested}&tz_offset=${new Date().getTimezoneOffset()}`);
       if (requested !== state.range) return;
       activityRange = requested;
       text('activity-error', '');
@@ -138,7 +136,7 @@ document.addEventListener('DOMContentLoaded', () => {
       text('service', 'Unknown'); text('agent', 'Unknown'); text('health-note', 'Health check failed. Use Refresh to retry.');
     } finally { busy.delete('health'); controls(); }
   }
-  function refresh() { if (!report.open) { loadSnapshot(); loadActivity(); loadHealth(); } }
+  function refresh() { loadSnapshot(); loadActivity(); loadHealth(); }
   root.addEventListener('click', (event) => {
     const control = event.target.closest('[data-view], [data-clear]');
     if (!control) return;
@@ -154,22 +152,6 @@ document.addEventListener('DOMContentLoaded', () => {
   el('range').addEventListener('change', () => { if (state.range === el('range').value) return; state.range = el('range').value; save(); loadActivity(); });
   window.addEventListener('popstate', () => { readState(); renderTable(); if (activityRange !== state.range) loadActivity(); });
   el('refresh').addEventListener('click', refresh);
-  el('print').addEventListener('click', () => {
-    const clone = root.cloneNode(true);
-    clone.querySelectorAll('.ov-controls, .ov-clients, #ov-tabs').forEach((n) => n.remove());
-    clone.querySelectorAll('details').forEach((n) => { n.open = true; });
-    const meta = document.createElement('p'); meta.className = 'hint';
-    meta.textContent = `Generated ${new Date().toLocaleString()} · All clients · ${state.range === '7d' ? 'Last 7 days' : 'Last 24 hours'} · Values are frozen for this report.`;
-    clone.prepend(meta);
-    // Avoid duplicate IDs while preserving internal accessible references.
-    [clone, ...clone.querySelectorAll('[id]')].forEach((node) => { if (node.id) node.id = `report-${node.id}`; });
-    clone.querySelectorAll('[aria-labelledby]').forEach((n) => n.setAttribute('aria-labelledby', n.getAttribute('aria-labelledby').split(' ').map((id) => `report-${id}`).join(' ')));
-    el('report-content').replaceChildren(clone);
-    report.showModal();
-  });
-  el('report-close').addEventListener('click', () => report.close());
-  el('report-print').addEventListener('click', () => window.print());
-  report.addEventListener('close', () => el('print').focus());
   document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
   setInterval(() => { if (!document.hidden) refresh(); }, 30000);
   refresh();
