@@ -103,7 +103,8 @@ document.addEventListener('DOMContentLoaded', () => {
       activityRange = requested;
       text('activity-error', '');
       text('activity-total', data.total);
-      text('activity-total-label', data.total === 1 ? 'client online' : 'clients online');
+      const period = requested === '7d' ? 'this week' : 'today';
+      text('activity-total-label', `${data.total === 1 ? 'client' : 'clients'} online at peak ${period}`);
       text('coverage', data.coverage_note);
       const max = Math.max(1, data.total);
       const focusedBar = [...el('bars').children].indexOf(document.activeElement);
