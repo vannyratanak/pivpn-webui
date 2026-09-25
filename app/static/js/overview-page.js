@@ -196,8 +196,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (dirty.size) dirtyTimer = setTimeout(flushChanges, 500);
   }
+  let initialLoadComplete = false;
+  let initialLoadFallback = null;
   const stream = OverviewStream((event, data) => {
-    if (event === 'ready') invalidate(['snapshot', 'activity']);
+    if (event === 'ready') {
+      if (!initialLoadComplete) {
+        initialLoadComplete = true;
+        clearTimeout(initialLoadFallback);
+        refresh();
+      } else invalidate(['snapshot', 'activity']);
+    }
     if (event === 'changed') invalidate(data);
     if (event === 'health') renderHealth(data);
   }, message => text('live-status', message));
@@ -220,7 +228,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (document.hidden) {
       stream.stop(); clearTimeout(dirtyTimer); dirtyTimer = null;
     } else {
-      updateNowMarker(); refresh(); stream.start();
+      updateNowMarker(); stream.start();
     }
   });
   window.addEventListener('pagehide', () => stream.stop());
@@ -238,6 +246,12 @@ document.addEventListener('DOMContentLoaded', () => {
       setTimeout(() => invalidate(['snapshot', 'activity']), 1100);
     }
   }, 1000);
-  refresh();
-  if (!document.hidden) stream.start();
+  if (!document.hidden) {
+    stream.start();
+    // If the stream cannot connect, still show data and leave manual Refresh
+    // available. A later successful connection resynchronizes after this load.
+    initialLoadFallback = setTimeout(() => {
+      if (!initialLoadComplete) { initialLoadComplete = true; refresh(); }
+    }, 3000);
+  }
 });
