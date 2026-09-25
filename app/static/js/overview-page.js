@@ -8,6 +8,20 @@ document.addEventListener('DOMContentLoaded', () => {
   let snapshot = null;
   let state;
   let activityRange = null;
+  let chartWindow = null;
+  const nowTimeFormat = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+  function updateNowMarker() {
+    const marker = el('now-marker');
+    if (!marker) return;
+    const now = new Date();
+    const fraction = chartWindow ? (now.getTime() - chartWindow.start) / (chartWindow.end - chartWindow.start) : NaN;
+    marker.hidden = !Number.isFinite(fraction) || fraction < 0 || fraction > 1;
+    if (marker.hidden) return;
+    marker.style.left = `${fraction * 100}%`;
+    marker.classList.toggle('near-start', fraction < 0.12);
+    marker.classList.toggle('near-end', fraction > 0.88);
+    marker.querySelector('.ov-now-marker-label').textContent = `Now, ${nowTimeFormat.format(now)}`;
+  }
   const busy = new Set();
   const views = ['connected', 'attention', 'all', 'offline'];
   function readState() {
@@ -129,21 +143,14 @@ document.addEventListener('DOMContentLoaded', () => {
       // UTC strings from the server, compared against the viewer's own
       // clock (not a server timestamp) so the line tracks in real time
       // between polls, not just at the moment this response arrived.
-      const rangeStartMs = parseServerUtc(data.start);
-      const rangeEndMs = parseServerUtc(data.end);
-      const nowMs = Date.now();
-      const marker = el('now-marker');
-      if (marker && rangeEndMs > rangeStartMs && nowMs >= rangeStartMs && nowMs <= rangeEndMs) {
-        marker.style.left = `${(nowMs - rangeStartMs) / (rangeEndMs - rangeStartMs) * 100}%`;
-        marker.hidden = false;
-      } else if (marker) {
-        marker.hidden = true;
-      }
+      chartWindow = { start: parseServerUtc(data.start), end: parseServerUtc(data.end) };
+      updateNowMarker();
       if (focusedBar >= 0) (el('bars').children[Math.min(focusedBar, data.buckets.length - 1)]).focus({ preventScroll: true });
     } catch {
       if (!silent) {
         if (activityRange !== requested) {
           el('bars').replaceChildren(); el('chart-data').replaceChildren();
+          chartWindow = null;
           if (el('now-marker')) el('now-marker').hidden = true;
           ['activity-total', 'activity-total-label', 'coverage', 'axis-start', 'axis-end'].forEach((id) => text(id, '—'));
           text('activity-error', 'Could not refresh activity. Use Refresh to retry.');
@@ -191,7 +198,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // a second (see client_status_cache) — so it's polled on the same fast
   // cadence as the Clients page, not the slower 30s used for the activity
   // chart and health check below, which don't need to react that quickly.
-  setInterval(() => { if (!document.hidden) pollSnapshotSilently(); }, 2000);
+  setInterval(() => { if (!document.hidden) { updateNowMarker(); pollSnapshotSilently(); } }, 2000);
   setInterval(() => { if (!document.hidden) { pollActivitySilently(); pollHealthSilently(); } }, 30000);
   refresh();
 });

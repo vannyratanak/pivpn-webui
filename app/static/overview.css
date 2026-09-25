@@ -21,7 +21,9 @@ button.ov-metric { justify-content: stretch; justify-items: start; }
 .ov-bars-wrap { position: relative; }
 .ov-bars { height: 170px; display: flex; align-items: stretch; gap: 6px; border-bottom: 1px solid var(--border); padding: 0 3px; background: repeating-linear-gradient(to top, transparent 0, transparent calc(25% - 1px), var(--row-line) calc(25% - 1px), var(--row-line) 25%); }
 .ov-now-marker { position: absolute; top: 0; bottom: 1px; width: 2px; background: var(--accent); pointer-events: none; }
-.ov-now-marker-label { position: absolute; top: -14px; left: 50%; transform: translateX(-50%); font-size: 9px; font-weight: 650; color: var(--accent); white-space: nowrap; text-transform: uppercase; letter-spacing: .04em; }
+.ov-now-marker-label { position: absolute; top: -28px; left: 50%; transform: translateX(-50%); padding: 4px 8px; border: 1px solid var(--accent); border-radius: 6px; background: var(--panel); font-size: 11px; line-height: 16px; font-weight: 600; color: var(--accent); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ov-now-marker.near-start .ov-now-marker-label { left: 0; transform: none; }
+.ov-now-marker.near-end .ov-now-marker-label { left: auto; right: 0; transform: none; }
 .ov-bar-column { flex: 1; min-width: 0; display: flex; align-items: end; position: relative; }
 .ov-bar { width: 100%; min-height: 2px; border-radius: 4px 4px 0 0; background: var(--muted); }
 .ov-bar-column:hover .ov-bar, .ov-bar-column:focus .ov-bar { background: var(--accent); }
@@ -52,5 +54,19 @@ button.ov-metric { justify-content: stretch; justify-items: start; }
 .ov-clients input[type="search"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .ov-clients .pagination { justify-content: space-between; flex-wrap: wrap; }
 .ov-clients .pagination > a { color: var(--console-link); font-size: 12px; }
+#ov-feedback:empty, #ov-activity-error:empty, #ov-health-note:empty { display: none; }
+.ov-activity-total { margin-top: 8px; margin-bottom: 40px; }
+.ov-axis { font-variant-numeric: tabular-nums; font-size: 11px; }
+.ov-now-marker { z-index: 1; }
+.ov-bar-column:hover, .ov-bar-column:focus { z-index: 2; }
+.ov-bar-column:first-child .ov-bar-tooltip { left: 0; transform: none; }
+.ov-bar-column:last-child .ov-bar-tooltip { left: auto; right: 0; transform: none; }
+.ov-metric:focus-visible, .ov-legend button:focus-visible, .ov-data summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.ov-metric strong, .ov-legend strong { line-height: 1.15; font-variant-numeric: tabular-nums; }
+.ov-status { display: flex; flex-direction: column; }
+.ov-status .ov-donut-wrap { flex: 1; align-items: center; }
+.ov-health > div { flex: 1 1 180px; }
+.ov-data summary { padding: 8px 0; }
+.ov-clients .card-header-row { align-items: center; }
 @media (max-width: 800px) { .ov-charts { grid-template-columns: 1fr; } .ov-metrics { grid-template-columns: repeat(2,minmax(0,1fr)); } .ov-health { gap: 20px; } }
 @media (max-width: 480px) { .ov-metrics { gap: 10px; } button.ov-metric { padding: 16px; } .ov-metric .hint { font-size: 10px; } .ov-charts .card-header-row, .ov-clients .card-header-row { align-items: stretch; flex-direction: column; } .overview-page .page-header-row { align-items: flex-start; flex-direction: column; } .ov-bars { gap: 3px; } }

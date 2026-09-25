@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Overview — PiVPN Web UI{% endblock %}
 {% block body_class %}overview-page{% endblock %}
-{% block page_head %}<link rel="stylesheet" href="{{ url_for('static', filename='overview.css', v='1') }}">{% endblock %}
+{% block page_head %}<link rel="stylesheet" href="{{ url_for('static', filename='overview.css', v='2') }}">{% endblock %}
 {% block content %}
 <div id="overview-root" data-admin="{{ 'true' if current_user.is_admin else 'false' }}">
   <div class="page-header-row">
@@ -16,12 +16,12 @@
   </div>
   <div class="ov-charts">
     <section class="card ov-activity" aria-labelledby="ov-activity-title">
-      <div class="card-header-row"><div><h2 id="ov-activity-title">Connection activity</h2><p class="hint">Peak clients online</p></div><label class="ov-controls">Period <select id="ov-range"><option value="1d">Today</option><option value="7d">Last 7 days</option></select></label></div>
+      <div class="card-header-row"><div><h2 id="ov-activity-title">Connection activity</h2><p class="hint">Peak clients online · Your local time</p></div><label class="ov-controls">Period <select id="ov-range"><option value="1d">Today</option><option value="7d">Last 7 days</option></select></label></div>
       <p id="ov-activity-error" role="status" class="hint">Loading activity…</p>
       <div class="ov-activity-total"><strong id="ov-activity-total">—</strong><span id="ov-activity-total-label">clients online</span></div>
       <div class="ov-bars-wrap">
         <div id="ov-bars" class="ov-bars" aria-label="Peak clients online"></div>
-        <div id="ov-now-marker" class="ov-now-marker" hidden><span class="ov-now-marker-label">now</span></div>
+        <div id="ov-now-marker" class="ov-now-marker" hidden><span class="ov-now-marker-label">Now</span></div>
       </div>
       <div class="ov-axis"><span id="ov-axis-start">—</span><span id="ov-axis-end">—</span></div>
       <p class="hint" id="ov-coverage"></p>
@@ -51,5 +51,5 @@
   <p class="hint" id="ov-health-note"></p>
 </div>
 <script src="{{ url_for('static', filename='js/api-client.js') }}"></script>
-<script src="{{ url_for('static', filename='js/overview-page.js', v='1') }}"></script>
+<script src="{{ url_for('static', filename='js/overview-page.js', v='2') }}"></script>
 {% endblock %}
