@@ -181,9 +181,9 @@ case "$action" in
         echo "invalid journal cursor" >&2
         exit 2
       }
-      exec journalctl -k --after-cursor="$cursor" --follow --no-pager -o json -g "$FLOW_LOG_PREFIX"
+      exec journalctl -k --after-cursor="$cursor" --follow --no-pager -o json
     fi
-    exec journalctl -k --follow --lines=0 --no-pager -o json -g "$FLOW_LOG_PREFIX"
+    exec journalctl -k --follow --lines=0 --no-pager -o json
     ;;
   *)
     usage

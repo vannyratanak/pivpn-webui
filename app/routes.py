@@ -378,6 +378,12 @@ def clients():
     return render_template("clients.html")
 
 
+@bp.route("/overview")
+@login_required
+def overview():
+    return render_template("overview.html")
+
+
 @bp.route("/clients/add", methods=["POST"])
 @login_required
 def add_client():

@@ -1,0 +1,177 @@
+document.addEventListener('DOMContentLoaded', () => {
+  const root = document.getElementById('overview-root');
+  if (!root) return;
+  const el = (id) => document.getElementById(`ov-${id}`);
+  const escape = (value) => { const node = document.createElement('span'); node.textContent = value == null ? '' : String(value); return node.innerHTML; };
+  const text = (id, value) => { if (el(id)) el(id).textContent = value; };
+  let snapshot = null;
+  let state;
+  let activityRange = null;
+  const busy = new Set();
+  const report = el('report');
+  const views = ['connected', 'attention', 'all', 'offline'];
+  function readState() {
+    const p = new URLSearchParams(location.search);
+    state = { tab: views.includes(p.get('tab')) ? p.get('tab') : 'connected',
+      q: p.get('q') || '', reason: ['certificate', 'blocked'].includes(p.get('reason')) ? p.get('reason') : '',
+      page: Math.max(1, Number.parseInt(p.get('page'), 10) || 1), range: p.get('range') === '7d' ? '7d' : '1d' };
+    el('search').value = state.q;
+    el('range').value = state.range;
+    el('range').dispatchEvent(new Event('change', { bubbles: false }));
+  }
+  function save(replace = false) {
+    const p = new URLSearchParams({ tab: state.tab, range: state.range });
+    if (state.q) p.set('q', state.q);
+    if (state.reason) p.set('reason', state.reason);
+    if (state.page > 1) p.set('page', state.page);
+    history[replace ? 'replaceState' : 'pushState']({}, '', `${location.pathname}?${p}`);
+  }
+  function filterClients(clients) {
+    return clients.filter((c) => {
+      const attention = c.blocked || ['expired', 'expiring'].includes(c.certificate_state);
+      if (state.tab === 'connected' && !c.session) return false;
+      if (state.tab === 'offline' && c.session) return false;
+      if (state.tab === 'attention' && !attention) return false;
+      if (state.reason === 'certificate' && !['expired', 'expiring'].includes(c.certificate_state)) return false;
+      if (state.reason === 'blocked' && !c.blocked) return false;
+      return [c.name, c.ip, c.status, c.expiration].join(' ').toLowerCase().includes(state.q.toLowerCase());
+    });
+  }
+  function renderTable() {
+    root.querySelectorAll('#ov-tabs a').forEach((a) => {
+      const active = a.dataset.view === state.tab;
+      a.classList.toggle('active', active);
+      if (active) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+    });
+    if (!snapshot) return;
+    const matches = filterClients(snapshot.clients);
+    const pages = Math.max(1, Math.ceil(matches.length / 10));
+    state.page = Math.min(state.page, pages);
+    const rows = matches.slice((state.page - 1) * 10, state.page * 10);
+    const focusedLink = el('clients-body').contains(document.activeElement) ? document.activeElement.getAttribute('href') : null;
+    el('clients-body').innerHTML = rows.length ? rows.map((c) => {
+      let certificate = c.certificate_state === 'expired' ? 'Certificate expired' : c.certificate_state === 'expiring' ? `Expires ${c.expiry_date}` : c.certificate_state === 'unknown' ? 'Expiry unknown' : `Expires ${c.expiry_date}`;
+      return `<tr><td><a href="/clients/${encodeURIComponent(c.name)}">${escape(c.name)}</a></td><td><span class="badge ${c.session ? 'badge-connected' : 'badge-inactive'}">${c.session ? 'Connected' : 'Offline'}</span></td><td><code>${escape(c.ip || '—')}</code></td><td>${c.blocked ? '<span class="badge badge-inactive">Blocked</span> ' : ''}${escape(certificate)}</td><td>${escape(c.session ? c.session.since || 'Unknown' : '—')}</td></tr>`;
+    }).join('') : `<tr><td class="empty" colspan="5">${state.q ? 'No clients match your search.' : !snapshot.clients.length ? 'No client records available.' : state.tab === 'connected' ? 'No clients connected in this snapshot.' : state.tab === 'attention' ? 'No access or certificate issues in this snapshot.' : 'No clients in this view.'} <button class="btn btn-sm" type="button" data-clear>Clear filters</button></td></tr>`;
+    text('page', `${matches.length} clients · Page ${state.page} of ${pages}`);
+    text('filter-note', state.reason ? `Filtered by ${state.reason === 'certificate' ? 'expired or expiring certificates' : 'blocked access'}. Select a tab to reset.` : 'Connection status reflects the last cached observation.');
+    el('prev').disabled = state.page <= 1;
+    el('next').disabled = state.page >= pages;
+    if (focusedLink) {
+      const replacement = [...el('clients-body').querySelectorAll('a')].find((a) => a.getAttribute('href') === focusedLink);
+      (replacement || el('search')).focus({ preventScroll: true });
+    }
+  }
+  function renderSnapshot(data) {
+    snapshot = data;
+    const clients = data.clients;
+    const connected = clients.filter((c) => c.session).length;
+    const counts = { total: clients.length, connected, blocked: clients.filter((c) => c.blocked).length, expiring: clients.filter((c) => c.certificate_state === 'expiring').length };
+    Object.entries(counts).forEach(([key, value]) => text(`count-${key}`, value));
+    text('server', data.server_name);
+    text('feedback', `Fetched ${formatServerTs(data.fetched_at)} · Refreshes every 30 seconds while visible.`);
+    text('freshness', data.last_client_update ? `Last row update: ${formatServerTs(data.last_client_update)}` : 'No update timestamp available');
+    el('freshness').title = data.freshness_note;
+    text('legend-connected', connected);
+    text('legend-offline', clients.length - connected);
+    text('donut-total', clients.length);
+    el('donut-active').setAttribute('stroke-dasharray', `${clients.length ? connected / clients.length * 490.09 : 0} 490.09`);
+    root.querySelector('.ov-donut').setAttribute('aria-label', `${connected} connected, ${clients.length - connected} offline, ${clients.length} total clients`);
+    text('status-note', clients.length ? 'Blocked access is tracked separately from connection status.' : 'No client records available.');
+    renderTable();
+  }
+  async function json(path) {
+    const response = await ApiClient.call(path);
+    if (!response.ok) throw new Error('Request failed');
+    return response.json();
+  }
+  function controls() {
+    el('refresh').disabled = busy.size > 0;
+    el('print').disabled = !snapshot || busy.size > 0;
+  }
+  async function loadSnapshot() {
+    if (busy.has('snapshot')) return;
+    busy.add('snapshot'); controls();
+    try { renderSnapshot(await json('/api/overview')); }
+    catch { text('feedback', snapshot ? 'Could not refresh clients. Showing the previous snapshot; use Refresh to retry.' : 'Could not load clients. Use Refresh to retry.'); if (!snapshot) el('clients-body').innerHTML = '<tr><td colspan="5" class="empty">Client data unavailable.</td></tr>'; }
+    finally { busy.delete('snapshot'); controls(); }
+  }
+  async function loadActivity() {
+    if (busy.has('activity')) return;
+    busy.add('activity'); controls();
+    const requested = state.range;
+    try {
+      const data = await json(`/api/overview/activity?range=${requested}`);
+      if (requested !== state.range) return;
+      activityRange = requested;
+      text('activity-error', '');
+      text('activity-total', data.total);
+      text('previous', `${data.previous_total} recorded in the previous period`);
+      text('coverage', `${data.coverage_note}${data.earliest_record ? ` Earliest retained event: ${data.earliest_record} UTC.` : ' No retained events available.'}`);
+      text('comparison', data.comparison_note);
+      const max = Math.max(1, ...data.buckets.map((b) => b.count));
+      const focusedBar = [...el('bars').children].indexOf(document.activeElement);
+      el('bars').innerHTML = data.buckets.map((b) => `<div class="ov-bar-column" tabindex="0" role="img" aria-label="${escape(b.start)} to ${escape(b.end)} UTC: ${b.count} recorded starts"><span class="ov-bar" style="height:${b.count / max * 100}%"></span><span class="ov-bar-tooltip">${escape(b.start.slice(5, 16))} UTC · ${b.count}</span></div>`).join('');
+      text('axis-start', `${data.start.slice(5, 16)} UTC · 0 baseline`);
+      text('axis-end', `${data.end.slice(5, 16)} UTC · Peak ${max === 1 && !data.total ? 0 : max}`);
+      el('chart-data').innerHTML = data.buckets.map((b) => `<tr><td>${escape(b.start)}</td><td>${escape(b.end)}</td><td>${b.count}</td></tr>`).join('');
+      if (focusedBar >= 0) (el('bars').children[Math.min(focusedBar, data.buckets.length - 1)]).focus({ preventScroll: true });
+    } catch {
+      text('activity-error', 'Could not refresh activity. Use Refresh to retry.');
+      if (activityRange !== requested) {
+        el('bars').replaceChildren(); el('chart-data').replaceChildren();
+        ['activity-total', 'previous', 'coverage', 'comparison', 'axis-start', 'axis-end'].forEach((id) => text(id, '—'));
+      } else text('activity-error', 'Could not refresh activity. Showing the previous chart; use Refresh to retry.');
+    } finally {
+      busy.delete('activity'); controls();
+      if (requested !== state.range) loadActivity();
+    }
+  }
+  async function loadHealth() {
+    if (root.dataset.admin !== 'true' || busy.has('health')) return;
+    busy.add('health'); controls();
+    try {
+      const data = await json('/api/overview/health');
+      text('service', data.service.state); text('unit', data.service.unit || 'Service check unavailable');
+      text('agent', data.agent); text('health-time', `Checked ${formatServerTs(data.checked_at)}`);
+      text('health-note', data.note || '');
+    } catch {
+      text('service', 'Unknown'); text('agent', 'Unknown'); text('health-note', 'Health check failed. Use Refresh to retry.');
+    } finally { busy.delete('health'); controls(); }
+  }
+  function refresh() { if (!report.open) { loadSnapshot(); loadActivity(); loadHealth(); } }
+  root.addEventListener('click', (event) => {
+    const control = event.target.closest('[data-view], [data-clear]');
+    if (!control) return;
+    event.preventDefault();
+    state.tab = control.dataset.view || 'all'; state.reason = control.dataset.reason || ''; state.page = 1;
+    if (control.hasAttribute('data-clear')) { state.q = ''; el('search').value = ''; }
+    save(); renderTable();
+  });
+  el('search').addEventListener('input', () => { state.q = el('search').value; state.page = 1; save(true); renderTable(); });
+  el('prev').addEventListener('click', () => { state.page = Math.max(1, state.page - 1); save(); renderTable(); });
+  el('next').addEventListener('click', () => { state.page++; save(); renderTable(); });
+  readState();
+  el('range').addEventListener('change', () => { if (state.range === el('range').value) return; state.range = el('range').value; save(); loadActivity(); });
+  window.addEventListener('popstate', () => { readState(); renderTable(); if (activityRange !== state.range) loadActivity(); });
+  el('refresh').addEventListener('click', refresh);
+  el('print').addEventListener('click', () => {
+    const clone = root.cloneNode(true);
+    clone.querySelectorAll('.ov-controls, .ov-clients, #ov-tabs').forEach((n) => n.remove());
+    clone.querySelectorAll('details').forEach((n) => { n.open = true; });
+    const meta = document.createElement('p'); meta.className = 'hint';
+    meta.textContent = `Generated ${new Date().toLocaleString()} · All clients · ${state.range === '7d' ? 'Last 7 days' : 'Last 24 hours'} · Activity dates in UTC. Values are frozen for this report.`;
+    clone.prepend(meta);
+    // Avoid duplicate IDs while preserving internal accessible references.
+    [clone, ...clone.querySelectorAll('[id]')].forEach((node) => { if (node.id) node.id = `report-${node.id}`; });
+    clone.querySelectorAll('[aria-labelledby]').forEach((n) => n.setAttribute('aria-labelledby', n.getAttribute('aria-labelledby').split(' ').map((id) => `report-${id}`).join(' ')));
+    el('report-content').replaceChildren(clone);
+    report.showModal();
+  });
+  el('report-close').addEventListener('click', () => report.close());
+  el('report-print').addEventListener('click', () => window.print());
+  report.addEventListener('close', () => el('print').focus());
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+  setInterval(() => { if (!document.hidden) refresh(); }, 30000);
+  refresh();
+});

@@ -121,6 +121,8 @@ def create_app():
 
     from app.api import bp as api_bp
     app.register_blueprint(api_bp)
+    from app.overview import bp as overview_bp
+    app.register_blueprint(overview_bp)
 
     @app.after_request
     def _refresh_html_jwt_cookie(response):

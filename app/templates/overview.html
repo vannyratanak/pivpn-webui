@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Overview — PiVPN Web UI{% endblock %}
+{% block body_class %}overview-page{% endblock %}
+{% block page_head %}<link rel="stylesheet" href="{{ url_for('static', filename='overview.css', v='1') }}">{% endblock %}
+{% block content %}
+<div id="overview-root" data-admin="{{ 'true' if current_user.is_admin else 'false' }}">
+  <div class="page-header-row">
+    <div class="page-heading"><p class="ov-eyebrow" id="ov-server">PiVPN server</p><h1>Overview</h1><p class="page-description">Connections, activity, and access across your VPN.</p></div>
+    <div class="btn-group ov-controls"><button type="button" class="btn btn-secondary" id="ov-print" disabled>Print report</button><button type="button" class="btn" id="ov-refresh">Refresh</button></div>
+  </div>
+  <p id="ov-feedback" role="status" class="hint">Loading overview…</p>
+  <div class="ov-health">
+    <div><span class="ov-label">Client data</span><strong>Cached snapshot</strong><span id="ov-freshness" class="hint">Awaiting data</span></div>
+    {% if current_user.is_admin %}
+    <div><span class="ov-label">VPN service</span><strong id="ov-service">Checking…</strong><span class="hint" id="ov-unit">—</span></div>
+    <div><span class="ov-label">Agent connection</span><strong id="ov-agent">Checking…</strong><span class="hint" id="ov-health-time">—</span></div>
+    {% endif %}
+  </div>
+  <p class="hint" id="ov-health-note"></p>
+  <div class="ov-metrics" aria-label="Client summary">
+    {% for key, label, hint, tab, reason in [('connected','Connected','Sessions in the latest cache','connected',''), ('total','Total clients','Registered VPN clients','all',''), ('blocked','Blocked','Access restricted','attention','blocked'), ('expiring','Expiring soon','Certificates within 30 days','attention','certificate')] %}
+    <button type="button" class="ov-metric" data-view="{{ tab }}" data-reason="{{ reason }}"><span class="ov-label">{{ label }}</span><strong id="ov-count-{{ key }}">—</strong><span class="hint">{{ hint }}</span><span class="ov-metric-arrow" aria-hidden="true">↗</span></button>
+    {% endfor %}
+  </div>
+  <div class="ov-charts">
+    <section class="card ov-activity" aria-labelledby="ov-activity-title">
+      <div class="card-header-row"><div><h2 id="ov-activity-title">Connection activity</h2><p class="hint">Recorded session starts · UTC</p></div><label class="ov-controls">Period <select id="ov-range"><option value="1d">Last 24 hours</option><option value="7d">Last 7 days</option></select></label></div>
+      <p id="ov-activity-error" role="status" class="hint">Loading activity…</p>
+      <div class="ov-activity-total"><strong id="ov-activity-total">—</strong><span>session starts</span><span class="hint" id="ov-previous"></span></div>
+      <div id="ov-bars" class="ov-bars" aria-label="Recorded session starts"></div>
+      <div class="ov-axis"><span id="ov-axis-start">—</span><span id="ov-axis-end">—</span></div>
+      <p class="hint" id="ov-coverage"></p><p class="hint" id="ov-comparison"></p>
+      <details class="ov-data"><summary>View chart data</summary><div class="ov-table-scroll"><table><thead><tr><th scope="col">Start (UTC)</th><th scope="col">End (UTC)</th><th scope="col">Starts</th></tr></thead><tbody id="ov-chart-data"></tbody></table></div></details>
+    </section>
+    <section class="card ov-status" aria-labelledby="ov-status-title">
+      <div class="card-header-row"><div><h2 id="ov-status-title">Client status</h2><p class="hint">Based on the cached snapshot</p></div></div>
+      <div class="ov-donut-wrap"><svg class="ov-donut" viewBox="0 0 200 200" role="img" aria-label="Client status is loading"><circle class="ov-donut-track" cx="100" cy="100" r="78"/><circle id="ov-donut-active" cx="100" cy="100" r="78" stroke-dasharray="0 490.09"/><text id="ov-donut-total" x="100" y="99" text-anchor="middle">—</text><text class="ov-donut-caption" x="100" y="122" text-anchor="middle">clients</text></svg></div>
+      <div class="ov-legend"><button type="button" data-view="connected"><span class="ov-dot"></span>Connected <strong id="ov-legend-connected">—</strong></button><button type="button" data-view="offline"><span class="ov-dot ov-dot-offline"></span>Offline <strong id="ov-legend-offline">—</strong></button></div>
+      <p class="hint" id="ov-status-note">Connection status and blocked access are shown separately.</p>
+    </section>
+  </div>
+  <section class="card ov-clients" aria-labelledby="ov-clients-title">
+    <div class="card-header-row"><div><h2 id="ov-clients-title">Clients at a glance</h2><p class="hint">Select a client to inspect its sessions and access.</p></div><input class="log-filter-input" id="ov-search" type="search" placeholder="Search clients…" aria-label="Search overview clients"></div>
+    <nav class="tabs" aria-label="Overview client views" id="ov-tabs"><a href="?tab=connected" data-view="connected">Connected</a><a href="?tab=attention" data-view="attention">Needs attention</a><a href="?tab=all" data-view="all">All clients</a><a href="?tab=offline" data-view="offline">Offline</a></nav>
+    <p id="ov-filter-note" class="hint"></p>
+    <div class="ov-table-scroll" tabindex="0" role="region" aria-label="Client overview table"><table><thead><tr><th scope="col">Client</th><th scope="col">Connection</th><th scope="col">VPN IP</th><th scope="col">Access / certificate</th><th scope="col">Connected since</th></tr></thead><tbody id="ov-clients-body"><tr><td colspan="5" class="empty">Loading clients…</td></tr></tbody></table></div>
+    <div class="pagination"><a href="{{ url_for('main.clients') }}">Manage clients →</a><div class="pagination-nav"><button type="button" class="btn btn-sm" id="ov-prev">Prev</button><span class="hint" id="ov-page"></span><button type="button" class="btn btn-sm" id="ov-next">Next</button></div></div>
+  </section>
+</div>
+<dialog class="ov-report" id="ov-report" aria-labelledby="ov-report-title"><div class="ov-report-actions"><h2 id="ov-report-title">Overview report</h2><button type="button" class="btn" id="ov-report-print">Print / Save as PDF</button><button type="button" class="btn btn-secondary" id="ov-report-close">Close</button></div><div id="ov-report-content"></div></dialog>
+<script src="{{ url_for('static', filename='js/api-client.js') }}"></script>
+<script src="{{ url_for('static', filename='js/overview-page.js', v='1') }}"></script>
+{% endblock %}
