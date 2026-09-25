@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Overview — PiVPN Web UI{% endblock %}
 {% block body_class %}overview-page{% endblock %}
-{% block page_head %}<link rel="stylesheet" href="{{ url_for('static', filename='overview.css', v='2') }}">{% endblock %}
+{% block page_head %}<link rel="stylesheet" href="{{ url_for('static', filename='overview.css', v='3') }}">{% endblock %}
 {% block content %}
 <div id="overview-root" data-admin="{{ 'true' if current_user.is_admin else 'false' }}">
   <div class="page-header-row">
@@ -49,7 +49,9 @@
     {% endif %}
   </div>
   <p class="hint" id="ov-health-note"></p>
+  <p class="hint" id="ov-live-status" role="status">Connecting live updates…</p>
 </div>
 <script src="{{ url_for('static', filename='js/api-client.js') }}"></script>
-<script src="{{ url_for('static', filename='js/overview-page.js', v='2') }}"></script>
+<script src="{{ url_for('static', filename='js/overview-stream.js', v='1') }}"></script>
+<script src="{{ url_for('static', filename='js/overview-page.js', v='3') }}"></script>
 {% endblock %}

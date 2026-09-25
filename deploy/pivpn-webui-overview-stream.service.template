@@ -1,0 +1,15 @@
+[Unit]
+Description=PiVPN Overview live browser updates
+After=network.target postgresql.service pivpn-webui-hub-gateway.service
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__APP_DIR__
+EnvironmentFile=__APP_DIR__/.env
+ExecStart=__APP_DIR__/venv/bin/python3 __APP_DIR__/overview_stream.py
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

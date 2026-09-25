@@ -14,7 +14,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const marker = el('now-marker');
     if (!marker) return;
     const now = new Date();
-    const fraction = chartWindow ? (now.getTime() - chartWindow.start) / (chartWindow.end - chartWindow.start) : NaN;
+    const fraction = activityRange === '7d' && chartWindow ? 1 : chartWindow ? (now.getTime() - chartWindow.start) / (chartWindow.end - chartWindow.start) : NaN;
     marker.hidden = !Number.isFinite(fraction) || fraction < 0 || fraction > 1;
     if (marker.hidden) return;
     marker.style.left = `${fraction * 100}%`;
@@ -101,32 +101,38 @@ document.addEventListener('DOMContentLoaded', () => {
   function controls() {
     el('refresh').disabled = busy.size > 0;
   }
-  // Every loader below takes a `silent` flag for its background-interval
-  // call: `busy`/controls() drives the Refresh button's disabled state, so
-  // a silent call skips it entirely (background polling shouldn't make the
-  // button flicker every 2s/30s) along with any visible error text swap —
-  // a background poll failing silently just leaves the last good data on
-  // screen, same as if a real user-initiated load had never noticed a
-  // problem worth surfacing. Each still guards against overlapping itself
-  // via its own *Polling flag, independent of `busy`.
-  let snapshotPolling = false, activityPolling = false, healthPolling = false;
+  // Push-triggered refreshes keep controls stable and preserve the last data
+  // while a request runs. Manual Refresh uses the same single-flight guard.
+  const failedRefreshTimers = {};
+  function retryFailedRefresh(topic) {
+    text('feedback', 'Some data could not refresh. Showing the last received data; retrying…');
+    if (!failedRefreshTimers[topic]) failedRefreshTimers[topic] = setTimeout(() => {
+      delete failedRefreshTimers[topic]; invalidate([topic]);
+    }, 30000);
+  }
+  function clearFailedRefresh(topic) {
+    clearTimeout(failedRefreshTimers[topic]); delete failedRefreshTimers[topic];
+  }
+  let snapshotPolling = false, activityPolling = false;
   async function loadSnapshot(silent) {
-    if (silent ? (snapshotPolling || busy.has('snapshot')) : busy.has('snapshot')) return;
+    if (snapshotPolling || busy.has('snapshot')) return;
     if (silent) snapshotPolling = true; else { busy.add('snapshot'); controls(); }
-    try { renderSnapshot(await json('/api/overview')); }
+    try { renderSnapshot(await json('/api/overview')); clearFailedRefresh('snapshot'); }
     catch {
+      if (silent) retryFailedRefresh('snapshot');
       if (!silent) { text('feedback', snapshot ? 'Could not refresh clients. Showing the previous snapshot; use Refresh to retry.' : 'Could not load clients. Use Refresh to retry.'); if (!snapshot) el('clients-body').innerHTML = '<tr><td colspan="5" class="empty">Client data unavailable.</td></tr>'; }
     }
     finally { if (silent) snapshotPolling = false; else { busy.delete('snapshot'); controls(); } }
   }
   function pollSnapshotSilently() { return loadSnapshot(true); }
   async function loadActivity(silent) {
-    if (silent ? (activityPolling || busy.has('activity')) : busy.has('activity')) return;
+    if (activityPolling || busy.has('activity')) return;
     if (silent) activityPolling = true; else { busy.add('activity'); controls(); }
     const requested = state.range;
     try {
       const data = await json(`/api/overview/activity?range=${requested}&tz_offset=${new Date().getTimezoneOffset()}`);
       if (requested !== state.range) return;
+      clearFailedRefresh('activity');
       activityRange = requested;
       text('activity-error', '');
       text('activity-total', data.total);
@@ -142,11 +148,12 @@ document.addEventListener('DOMContentLoaded', () => {
       // Where "now" actually falls within [start, end) — data.start/end are
       // UTC strings from the server, compared against the viewer's own
       // clock (not a server timestamp) so the line tracks in real time
-      // between polls, not just at the moment this response arrived.
+      // between data updates, not just at the moment this response arrived.
       chartWindow = { start: parseServerUtc(data.start), end: parseServerUtc(data.end) };
       updateNowMarker();
       if (focusedBar >= 0) (el('bars').children[Math.min(focusedBar, data.buckets.length - 1)]).focus({ preventScroll: true });
     } catch {
+      if (silent) retryFailedRefresh('activity');
       if (!silent) {
         if (activityRange !== requested) {
           el('bars').replaceChildren(); el('chart-data').replaceChildren();
@@ -162,21 +169,38 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
   function pollActivitySilently() { return loadActivity(true); }
-  async function loadHealth(silent) {
+  function renderHealth(data) {
     if (root.dataset.admin !== 'true') return;
-    if (silent ? (healthPolling || busy.has('health')) : busy.has('health')) return;
-    if (silent) healthPolling = true; else { busy.add('health'); controls(); }
-    try {
-      const data = await json('/api/overview/health');
-      text('service', data.service.state); text('unit', data.service.unit || 'Service check unavailable');
-      text('agent', data.agent); text('health-time', `Checked ${formatServerTs(data.checked_at)}`);
-      text('health-note', data.note || '');
-    } catch {
-      if (!silent) { text('service', 'Unknown'); text('agent', 'Unknown'); text('health-note', 'Health check failed. Use Refresh to retry.'); }
-    } finally { if (silent) healthPolling = false; else { busy.delete('health'); controls(); } }
+    text('service', data.service.state); text('unit', data.service.unit || 'Service check unavailable');
+    text('agent', data.agent); text('health-time', `Checked ${formatServerTs(data.checked_at)}`);
+    text('health-note', data.note || '');
   }
-  function pollHealthSilently() { return loadHealth(true); }
-  function refresh() { loadSnapshot(); loadActivity(); loadHealth(); }
+  function refresh() { loadSnapshot(); loadActivity(); }
+  // Invalidation events are bounded and coalesced. If an event arrives during
+  // a fetch, run again after it finishes so an old response can't lose a change.
+  const dirty = new Set();
+  let dirtyTimer = null;
+  function invalidate(topics) {
+    topics.filter(topic => ['snapshot', 'activity'].includes(topic)).forEach(topic => dirty.add(topic));
+    if (dirtyTimer !== null) return;
+    dirtyTimer = setTimeout(flushChanges, 500);
+  }
+  function flushChanges() {
+    dirtyTimer = null;
+    if (document.hidden) return;
+    if (dirty.has('snapshot') && !snapshotPolling && !busy.has('snapshot')) {
+      dirty.delete('snapshot'); pollSnapshotSilently();
+    }
+    if (dirty.has('activity') && !activityPolling && !busy.has('activity')) {
+      dirty.delete('activity'); pollActivitySilently();
+    }
+    if (dirty.size) dirtyTimer = setTimeout(flushChanges, 500);
+  }
+  const stream = OverviewStream((event, data) => {
+    if (event === 'ready') invalidate(['snapshot', 'activity']);
+    if (event === 'changed') invalidate(data);
+    if (event === 'health') renderHealth(data);
+  }, message => text('live-status', message));
   root.addEventListener('click', (event) => {
     const control = event.target.closest('[data-view], [data-clear]');
     if (!control) return;
@@ -192,13 +216,28 @@ document.addEventListener('DOMContentLoaded', () => {
   el('range').addEventListener('change', () => { if (state.range === el('range').value) return; state.range = el('range').value; save(); loadActivity(); });
   window.addEventListener('popstate', () => { readState(); renderTable(); if (activityRange !== state.range) loadActivity(); });
   el('refresh').addEventListener('click', refresh);
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
-  // Client status (donut/table) changes the instant someone connects or
-  // disconnects — the agent already pushes that into the DB within about
-  // a second (see client_status_cache) — so it's polled on the same fast
-  // cadence as the Clients page, not the slower 30s used for the activity
-  // chart and health check below, which don't need to react that quickly.
-  setInterval(() => { if (!document.hidden) { updateNowMarker(); pollSnapshotSilently(); } }, 2000);
-  setInterval(() => { if (!document.hidden) { pollActivitySilently(); pollHealthSilently(); } }, 30000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      stream.stop(); clearTimeout(dirtyTimer); dirtyTimer = null;
+    } else {
+      updateNowMarker(); refresh(); stream.start();
+    }
+  });
+  window.addEventListener('pagehide', () => stream.stop());
+  window.addEventListener('pageshow', () => { if (!document.hidden) stream.start(); });
+  // This timer only moves the clock label. Data changes arrive over SSE.
+  // A new hour needs a chart refresh even if an existing session stays online.
+  let hour = new Date().toDateString() + ':' + new Date().getHours();
+  setInterval(() => {
+    if (document.hidden) return;
+    updateNowMarker();
+    const now = new Date();
+    const nextHour = now.toDateString() + ':' + now.getHours();
+    if (nextHour !== hour) {
+      hour = nextHour;
+      setTimeout(() => invalidate(['snapshot', 'activity']), 1100);
+    }
+  }, 1000);
   refresh();
+  if (!document.hidden) stream.start();
 });

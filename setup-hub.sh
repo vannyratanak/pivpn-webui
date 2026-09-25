@@ -132,6 +132,7 @@ setup_background_ingestion() {
   echo "             DB instead of a live agent round-trip on every load) =="
   ./deploy/setup-log-ingest.sh
   ./deploy/setup-client-ingest.sh
+  ./deploy/setup-overview-stream.sh
 }
 
 register_first_agent() {

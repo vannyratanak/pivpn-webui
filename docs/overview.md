@@ -35,3 +35,39 @@ API routes use the existing bearer-token authentication:
 - `GET /api/overview`: client snapshot and normalized certificate information.
 - `GET /api/overview/activity?range=1d|7d`: recorded activity and previous-period count.
 - `GET /api/overview/health`: admin-only bounded service/agent observation.
+
+## Live updates
+
+Overview loads a snapshot once, then subscribes to `/api/overview/events` using
+Bearer-authenticated SSE. PostgreSQL commit notifications invalidate the client
+snapshot or activity chart; browser refreshes are coalesced and bounded. Traffic
+rows, unchanged client snapshots, byte counters, and routine VPN diagnostics do
+not refresh Overview. Reconnecting resynchronizes both sections, so notifications
+need not be stored or replayed. Hidden tabs disconnect and resync on return.
+
+The **Now, HH:mm** label uses the browser's local clock and makes no network
+request. It continues to advance even if the server is unavailable; the separate
+live-update status reports the connection. Charts refresh at hour boundaries to
+account for continuing sessions and midnight, even without a connect/disconnect.
+The seven-day view is a rolling snapshot, recalculated on events/hour boundaries.
+
+The async `overview_stream.py` service listens on loopback port 8766. nginx routes
+only the SSE endpoint to it, with buffering disabled; ordinary API requests stay
+on gunicorn. One PostgreSQL LISTEN connection serves every viewer. Health is
+checked once every 30 seconds on the hub and shared with admin viewers. A silent
+heartbeat every 15 seconds detects broken streams; reconnect uses backoff up to
+30 seconds. Failed projection requests retry after 30 seconds. JWT expiry and
+account changes close streams and require authentication again. Slow viewers have
+bounded queues and receive a resync signal rather than an unbounded backlog.
+
+On an existing hub, run `./deploy/setup-overview-stream.sh` and update the nginx
+site using the SSE location in `deploy/nginx-pivpn-webui.conf.template` (or rerun
+`./setup-nginx.sh`). Restart the web service to load the updated template. Fresh
+hub setup installs the stream service automatically. Direct gunicorn access does
+not provide SSE; use the nginx HTTPS address. The agent protocol is unchanged.
+
+Operational tradeoff: this adds a service and long-lived connection per visible
+tab. Monitor `systemctl status pivpn-webui-overview-stream` and its journal. A
+stream outage leaves the last received data visible with a reconnect message;
+manual Refresh remains available. Ordinary snapshot/chart API reads still occur
+per viewer when a relevant change arrives, rather than continuously while idle.
