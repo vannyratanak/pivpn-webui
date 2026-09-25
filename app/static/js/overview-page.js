@@ -69,7 +69,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const counts = { total: clients.length, connected, blocked: clients.filter((c) => c.blocked).length, expiring: clients.filter((c) => c.certificate_state === 'expiring').length };
     Object.entries(counts).forEach(([key, value]) => text(`count-${key}`, value));
     text('server', data.server_name);
-    text('feedback', `Fetched ${formatServerTs(data.fetched_at)} · Refreshes every 30 seconds while visible.`);
+    text('feedback', '');
     text('freshness', data.last_client_update ? `Last row update: ${formatServerTs(data.last_client_update)}` : 'No update timestamp available');
     el('freshness').title = data.freshness_note;
     text('legend-connected', connected);
