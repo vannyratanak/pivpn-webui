@@ -37,6 +37,15 @@ def install():
             conn.execute(f'DROP TRIGGER IF EXISTS overview_changed ON {table}')
             conn.execute(f"CREATE TRIGGER overview_changed AFTER INSERT OR UPDATE OR DELETE ON {table} "
                          f"FOR EACH ROW EXECUTE FUNCTION overview_notify('{topic}')")
+        # One notification per ingest transaction for visible log tabs.
+        # PostgreSQL coalesces identical NOTIFY payloads within a transaction,
+        # including executemany batches. No row payload is exposed to browsers.
+        for table, topic in [('vpn_events', 'vpn_logs'), ('traffic_flows', 'traffic_logs'),
+                             ('system_log_lines', 'system_logs'), ('audit_log', 'activity_logs'),
+                             ('login_failures', 'auth_logs')]:
+            conn.execute(f'DROP TRIGGER IF EXISTS live_log_changed ON {table}')
+            conn.execute(f"CREATE TRIGGER live_log_changed AFTER INSERT ON {table} "
+                         f"FOR EACH STATEMENT EXECUTE FUNCTION overview_notify('{topic}')")
         # Only clock-change evidence affects Overview among system log lines.
         conn.execute('DROP TRIGGER IF EXISTS overview_clock_changed ON system_log_lines')
         conn.execute("""CREATE TRIGGER overview_clock_changed AFTER INSERT ON system_log_lines

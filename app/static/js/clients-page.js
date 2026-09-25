@@ -399,32 +399,30 @@ document.addEventListener('DOMContentLoaded', () => {
       });
   };
 
-  // A client's own connection status can change with no admin action at
-  // all (they connect/disconnect their VPN client on their own device) —
-  // without this, "Session" only ever updated on a manual reload or as a
-  // side effect of clicking something else on this page, which read as
-  // stale/wrong for a status column. Patches every row in place (same
-  // updateRowInPlace as the action handlers above), never a full
-  // tbody rebuild, so this can't reintroduce the whole-table flicker.
-  const POLL_INTERVAL_MS = 2 * 1000;
-  function pollClients() {
-    if (document.visibilityState === 'hidden') return; // no point paying for a hub round-trip nobody's looking at
-    ApiClient.call('/api/clients')
-      .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data })))
-      .then(({ ok, data }) => {
-        if (!ok) return; // a background poll failing silently is correct here — loadClients()'s own error path already covers a real failed *initial* load
-        totalCount = data.clients.length;
-        connectedCount = data.connected_count;
-        updateCountHint();
-        cacheForDetailPage(data.clients);
-        const byName = new Map(data.clients.map((c) => [c.name, c]));
-        tbody.querySelectorAll('tr[data-client-name]').forEach((row) => {
-          const fresh = byName.get(row.dataset.clientName);
-          if (fresh) updateRowInPlace(row, fresh);
-        });
-      });
-  }
+  // Status changes arrive through the hub's shared live update stream.
+  let initialLoaded = false;
+  let hadStream = false;
+  let pendingClientChange = false;
+  let fallbackTimer;
+  const clientStream = OverviewStream((event, topics) => {
+    if (event === 'ready') {
+      if (hadStream) loadClients(false); // reconnect: resynchronize
+      hadStream = true;
+      if (pendingClientChange) { pendingClientChange = false; loadClients(false); }
+    } else if (event === 'changed' && topics.includes('snapshot')) {
+      if (initialLoaded) loadClients(false); else pendingClientChange = true;
+    }
+  }, () => {});
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) clientStream.stop(); else clientStream.start();
+  });
+  window.addEventListener('pagehide', () => clientStream.stop());
+  window.addEventListener('pageshow', () => { if (!document.hidden) clientStream.start(); });
 
-  loadClients(true);
-  setInterval(pollClients, POLL_INTERVAL_MS);
+  loadClients(true).finally(() => { initialLoaded = true; clearTimeout(fallbackTimer); });
+  clientStream.start();
+  // Preserve initial page rendering if the live service is temporarily down.
+  fallbackTimer = setTimeout(() => {
+    if (!initialLoaded) loadClients(true).finally(() => { initialLoaded = true; clearTimeout(fallbackTimer); });
+  }, 3000);
 });

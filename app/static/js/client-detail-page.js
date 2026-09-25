@@ -464,18 +464,20 @@ document.addEventListener('DOMContentLoaded', () => {
       .catch(() => showToast('Could not import rules.'));
   });
 
-  // Same reasoning as clients-page.js's own poll: this client's Online/
-  // Offline status can change with no action on this page at all (they
-  // connect/disconnect their own VPN client), so it shouldn't need a
-  // manual reload to show current — the meta strip is small enough that
-  // loadClient()'s existing full-refresh is fine to reuse here (unlike
-  // the rules table, there's no pagination/filter state a rebuild could
-  // clobber).
-  const POLL_INTERVAL_MS = 2 * 1000;
-  setInterval(() => {
-    if (document.visibilityState === 'hidden') return;
-    loadClient();
-  }, POLL_INTERVAL_MS);
+  // Client status is pushed through the shared hub stream. Reconnects
+  // trigger a fresh read so status recovers cleanly after a short outage.
+  let detailStreamConnected = false;
+  const detailStream = OverviewStream((event, topics) => {
+    if (event === 'ready') {
+      if (detailStreamConnected) loadClient();
+      detailStreamConnected = true;
+    } else if (event === 'changed' && topics.includes('snapshot')) loadClient();
+  }, () => {});
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) detailStream.stop(); else detailStream.start();
+  });
+  window.addEventListener('pagehide', () => detailStream.stop());
+  window.addEventListener('pageshow', () => { if (!document.hidden) detailStream.start(); });
 
   // --- Activity (session log + traffic), scoped to this client only —
   // reuses the same GET /api/logs endpoint the Logs page itself uses,
@@ -727,4 +729,5 @@ document.addEventListener('DOMContentLoaded', () => {
   loadRules(true);
   loadActivity(true);
   loadActivityChart();
+  detailStream.start();
 });

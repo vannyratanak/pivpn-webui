@@ -92,7 +92,7 @@ class Broker:
                     topics = {n.payload for n in conn.notifies}
                     conn.notifies.clear()
                     for topic in topics:
-                        if topic in {'snapshot', 'activity', 'auth'}:
+                        if topic in {'snapshot', 'activity', 'auth', 'vpn_logs', 'traffic_logs', 'system_logs', 'activity_logs', 'auth_logs'}:
                             self.publish(topic)
             except Exception:
                 log.exception('Overview notification listener disconnected')
@@ -154,7 +154,13 @@ def create_stream_app(broker=None, flask_app=None):
                     break  # Reconnect must authenticate and resync.
                 if 'resync' in topics:
                     topics.update(('snapshot', 'activity'))
-                changed = sorted(topics & {'snapshot', 'activity'})
+                changed = topics & {'snapshot', 'activity', 'vpn_logs', 'traffic_logs', 'system_logs', 'activity_logs', 'auth_logs'}
+                if claims.get('role') != 'admin':
+                    # Moderators may see client status, VPN client sessions,
+                    # and auth events, but no admin-only system/traffic/audit
+                    # activity signal side channel.
+                    changed &= {'snapshot', 'activity', 'vpn_logs', 'auth_logs'}
+                changed = sorted(changed)
                 if changed:
                     await asyncio.wait_for(response.write(frame('changed', changed)), timeout=5)
                 if 'health' in topics and claims.get('role') == 'admin' and broker.health:

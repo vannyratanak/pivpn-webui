@@ -43,13 +43,22 @@ def test_notifications_after_commit_not_counters_or_rollback(temp_db):
         writer.commit()
         assert notifications(listener) == ['snapshot']
         db.insert_vpn_events([('2026-09-25 10:00:00', 'connected', 'one', '', '', None)])
-        assert notifications(listener) == ['activity']
+        assert notifications(listener) == ['activity', 'vpn_logs']
         db.insert_vpn_events([('2026-09-25 10:00:01', 'other', '', '', 'ordinary diagnostic', None)])
-        assert notifications(listener) == []
+        assert notifications(listener) == ['vpn_logs']
         db.insert_system_log_lines([('2026-09-25 10:00:02', 'systemd', 'ordinary diagnostic')])
-        assert notifications(listener) == []
+        assert notifications(listener) == ['system_logs']
         db.insert_system_log_lines([('2026-09-25 10:00:03', 'systemd-resolved', 'Clock change detected. Flushing caches.')])
-        assert notifications(listener) == ['activity']
+        assert notifications(listener) == ['activity', 'system_logs']
+        writer.execute("INSERT INTO traffic_flows (ts,src,dst,proto) VALUES (%s,%s,%s,%s)", ('2026-09-25 10:00:04','10.8.0.2','1.1.1.1','UDP'))
+        writer.commit()
+        assert notifications(listener) == ['traffic_logs']
+        writer.execute("INSERT INTO audit_log (actor,action,result) VALUES (%s,%s,%s)", ('admin','test','ok'))
+        writer.commit()
+        assert notifications(listener) == ['activity_logs']
+        writer.execute("INSERT INTO login_failures (ip) VALUES (%s)", ('192.0.2.1',))
+        writer.commit()
+        assert notifications(listener) == ['auth_logs']
     finally:
         listener.close()
         writer.close()

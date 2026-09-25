@@ -228,13 +228,42 @@
     placePagination();
     loadLogs(true);
 
-    // The server ingests logs independently of browsers. Poll only the
-    // selected tab's small, paginated DB result so an open page stays fresh
-    // without causing each viewer to trigger journal ingestion or WHOIS.
-    const LIVE_REFRESH_INTERVAL_MS = 5000;
-    setInterval(() => {
+    // Keep one authenticated stream open; refresh only the visible log tab
+    // when its corresponding ingest transaction commits. Changes are
+    // coalesced and limited to one table fetch every two seconds.
+    let lastLiveRefresh = 0;
+    let liveRefreshTimer = null;
+    let hadStream = false;
+    const topicsForTab = {
+      sessions: ['vpn_logs'], client_sessions: ['vpn_logs'], traffic: ['traffic_logs'],
+      system: ['system_logs'], activity: ['activity_logs'], auth: ['auth_logs'],
+    };
+    function scheduleLiveRefresh(resync = false) {
       if (document.visibilityState === 'hidden') return;
-      loadLogs(false);
-    }, LIVE_REFRESH_INTERVAL_MS);
+      const wait = Math.max(0, 2000 - (Date.now() - lastLiveRefresh));
+      clearTimeout(liveRefreshTimer);
+      liveRefreshTimer = setTimeout(() => {
+        lastLiveRefresh = Date.now();
+        loadLogs(false);
+      }, wait);
+    }
+    const logsStream = OverviewStream((event, topics) => {
+      if (event === 'ready') {
+        if (hadStream) scheduleLiveRefresh(true);
+        hadStream = true;
+      }
+      if (event === 'changed' && topics.some(topic => (topicsForTab[tab] || []).includes(topic))) {
+        if (!refreshBtn?.disabled) scheduleLiveRefresh();
+      }
+    }, () => {});
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) { logsStream.stop(); clearTimeout(liveRefreshTimer); }
+      else logsStream.start();
+    });
+    window.addEventListener('pagehide', () => logsStream.stop());
+    window.addEventListener('pageshow', () => { if (!document.hidden) logsStream.start(); });
+    placePagination();
+    loadLogs(true);
+    logsStream.start();
   });
 })();

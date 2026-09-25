@@ -38,11 +38,14 @@ API routes use the existing bearer-token authentication:
 
 ## Live updates
 
-Overview loads a snapshot once, then subscribes to `/api/overview/events` using
-Bearer-authenticated SSE. PostgreSQL commit notifications invalidate the client
-snapshot or activity chart; browser refreshes are coalesced and bounded. Traffic
+Overview, `/clients`, and `/logs` load their current view, then share the
+Bearer-authenticated SSE endpoint at `/api/overview/events`. PostgreSQL commit notifications invalidate only the affected view: client
+snapshot, activity chart, VPN sessions, traffic, system, activity, or auth logs.
+Browser refreshes are coalesced and bounded; log views refresh at most once per
+two seconds, and only the selected log tab is fetched. Traffic
 rows, unchanged client snapshots, byte counters, and routine VPN diagnostics do
-not refresh Overview. Reconnecting resynchronizes both sections, so notifications
+not refresh the Overview or Clients views. Log-table notifications are emitted
+once per database transaction. Reconnecting resynchronizes both sections, so notifications
 need not be stored or replayed. Hidden tabs disconnect and resync on return.
 
 The **Now, HH:mm** label uses the browser's local clock and makes no network
@@ -71,3 +74,15 @@ tab. Monitor `systemctl status pivpn-webui-overview-stream` and its journal. A
 stream outage leaves the last received data visible with a reconnect message;
 manual Refresh remains available. Ordinary snapshot/chart API reads still occur
 per viewer when a relevant change arrives, rather than continuously while idle.
+
+The Clients and Logs pages use this same hub stream; they do not start separate
+connections. Client connection changes update `/clients` and the client summary.
+VPN, traffic, system, activity, and auth log changes refresh only their selected
+Logs tab, with a two-second minimum between automatic table fetches.
+
+
+Next review: compare the browser Network panel on Overview, Clients, client
+detail, and each Logs tab against actual updates; confirm connected-client
+snapshots don't trigger extra fetches immediately after a manual client action;
+check stream recovery while the PostgreSQL listener is restarted; and review
+any remaining periodic refreshes on pages outside those covered here.
