@@ -93,6 +93,20 @@ document.addEventListener('DOMContentLoaded', () => {
     catch { text('feedback', snapshot ? 'Could not refresh clients. Showing the previous snapshot; use Refresh to retry.' : 'Could not load clients. Use Refresh to retry.'); if (!snapshot) el('clients-body').innerHTML = '<tr><td colspan="5" class="empty">Client data unavailable.</td></tr>'; }
     finally { busy.delete('snapshot'); controls(); }
   }
+  // Same fetch as loadSnapshot, but for the fast 2s background poll below —
+  // deliberately doesn't touch `busy`/controls(), which would otherwise
+  // flip the Refresh button's disabled state on and off every 2 seconds
+  // for a tick nobody asked for. A background poll failing is also silent
+  // (no error text swap) rather than fighting with a real user-initiated
+  // load's own error message.
+  let snapshotPolling = false;
+  async function pollSnapshotSilently() {
+    if (snapshotPolling || busy.has('snapshot')) return;
+    snapshotPolling = true;
+    try { renderSnapshot(await json('/api/overview')); }
+    catch { /* silent — see comment above */ }
+    finally { snapshotPolling = false; }
+  }
   async function loadActivity() {
     if (busy.has('activity')) return;
     busy.add('activity'); controls();
@@ -158,7 +172,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // a second (see client_status_cache) — so it's polled on the same fast
   // cadence as the Clients page, not the slower 30s used for the activity
   // chart and health check below, which don't need to react that quickly.
-  setInterval(() => { if (!document.hidden) loadSnapshot(); }, 2000);
+  setInterval(() => { if (!document.hidden) pollSnapshotSilently(); }, 2000);
   setInterval(() => { if (!document.hidden) { loadActivity(); loadHealth(); } }, 30000);
   refresh();
 });
