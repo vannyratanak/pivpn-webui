@@ -1,0 +1,11 @@
+[Unit]
+Description=Recover missed PiVPN WebSocket VPN and traffic events every minute
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=60s
+AccuracySec=2s
+Unit=pivpn-webui-event-fallback.service
+
+[Install]
+WantedBy=timers.target

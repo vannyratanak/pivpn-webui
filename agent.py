@@ -108,6 +108,9 @@ def _resolve_real_address_local(address: str) -> str | None:
 async def _dispatch(message: dict) -> dict:
     action = message.get("action")
     try:
+        if action == "overview_health":
+            from app.overview_health import service_health
+            return {"ok": True, "result": await asyncio.to_thread(service_health)}
         if action == "run_root":
             result = await asyncio.to_thread(
                 privileged.run_root, message["argv"], message.get("input_text"), message.get("timeout", 15)
@@ -193,8 +196,11 @@ async def _push_connection_changes(websocket, send_lock: asyncio.Lock):
         await asyncio.sleep(1)
 
 
-async def _push_traffic_flows(websocket, send_lock: asyncio.Lock, ack_queue: asyncio.Queue, cursor: str | None):
-    """Follow new kernel flow log records and send acknowledged batches.
+async def _push_journal_stream(
+    websocket, send_lock: asyncio.Lock, ack_queue: asyncio.Queue, cursor: str | None,
+    action: str, message_type: str, stream_name: str,
+):
+    """Follow one local journal source and send acknowledged batches.
 
     journalctl blocks while the kernel log is quiet. The hub supplies the
     last committed cursor on connect; if the socket drops, the next process
@@ -204,7 +210,7 @@ async def _push_traffic_flows(websocket, send_lock: asyncio.Lock, ack_queue: asy
         proc = None
         batch = []
         try:
-            argv = ["sudo", "-n", config.LOG_HELPER, "flow-follow"]
+            argv = ["sudo", "-n", config.LOG_HELPER, action]
             if cursor:
                 argv.append(cursor)
             proc = await asyncio.create_subprocess_exec(
@@ -235,7 +241,7 @@ async def _push_traffic_flows(websocket, send_lock: asyncio.Lock, ack_queue: asy
                     batch_id = uuid.uuid4().hex
                     async with send_lock:
                         await websocket.send(json.dumps({
-                            "type": "traffic_flow_batch", "batch_id": batch_id, "events": batch,
+                            "type": message_type, "batch_id": batch_id, "events": batch,
                         }))
                     ack_id, ok = await asyncio.wait_for(ack_queue.get(), timeout=30)
                     if ack_id != batch_id or not ok:
@@ -249,7 +255,7 @@ async def _push_traffic_flows(websocket, send_lock: asyncio.Lock, ack_queue: asy
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            log.warning("traffic journal stream paused (%s); retrying from last acknowledged cursor", exc)
+            log.warning("%s journal stream paused (%s); retrying from last acknowledged cursor", stream_name, exc)
             await asyncio.sleep(2)
         finally:
             if proc and proc.returncode is None:
@@ -300,13 +306,21 @@ async def _run_until_disconnected():
             sys.exit(1)
         log.info("connected to hub as server #%s", config.AGENT_SERVER_ID)
         send_lock = asyncio.Lock()
-        traffic_acks = asyncio.Queue()
+        stream_acks = {
+            "traffic_flow_ack": asyncio.Queue(),
+            "vpn_event_ack": asyncio.Queue(),
+        }
         status_task = asyncio.create_task(_push_connection_changes(websocket, send_lock))
-        traffic_task = None
+        stream_tasks = []
         if ack.get("traffic_enabled"):
-            traffic_task = asyncio.create_task(_push_traffic_flows(
-                websocket, send_lock, traffic_acks, ack.get("traffic_cursor")
-            ))
+            stream_tasks.append(asyncio.create_task(_push_journal_stream(
+                websocket, send_lock, stream_acks["traffic_flow_ack"], ack.get("traffic_cursor"),
+                "flow-follow", "traffic_flow_batch", "traffic",
+            )))
+            stream_tasks.append(asyncio.create_task(_push_journal_stream(
+                websocket, send_lock, stream_acks["vpn_event_ack"], ack.get("vpn_cursor"),
+                "openvpn-follow", "vpn_event_batch", "VPN event",
+            )))
         try:
             async for raw in websocket:
                 try:
@@ -314,8 +328,10 @@ async def _run_until_disconnected():
                 except (json.JSONDecodeError, TypeError):
                     log.warning("hub sent an unparseable request: %r", raw)
                     continue
-                if isinstance(message, dict) and message.get("type") == "traffic_flow_ack":
-                    traffic_acks.put_nowait((message.get("batch_id"), message.get("ok") is True))
+                if isinstance(message, dict) and message.get("type") in stream_acks:
+                    stream_acks[message["type"]].put_nowait((
+                        message.get("batch_id"), message.get("ok") is True,
+                    ))
                     continue
                 try:
                     request_id = message["id"]
@@ -327,10 +343,9 @@ async def _run_until_disconnected():
                     await websocket.send(json.dumps({**response, "id": request_id}))
         finally:
             status_task.cancel()
-            tasks = [status_task]
-            if traffic_task:
-                traffic_task.cancel()
-                tasks.append(traffic_task)
+            tasks = [status_task, *stream_tasks]
+            for task in stream_tasks:
+                task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
 
 

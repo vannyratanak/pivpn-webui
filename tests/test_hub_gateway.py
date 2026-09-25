@@ -77,3 +77,45 @@ def test_agent_traffic_batch_cursor_and_rows_are_idempotent(temp_db):
     assert total == 1
     assert flows[0]["src"] == "10.8.0.2"
     assert db.get_traffic_flow_cursor(config.DEFAULT_SERVER_ID) == cursor
+
+
+def test_vpn_event_batch_parses_raw_connect_disconnect_and_other_events():
+    events = [
+        {
+            "cursor": "s=boot;i=51;b=boot;m=1;t=2;x=3",
+            "message": "[mobile] Peer Connection Initiated with [AF_INET]198.51.100.4:5111",
+            "realtime_us": "1790136182000000",
+        },
+        {
+            "cursor": "s=boot;i=52;b=boot;m=2;t=3;x=4",
+            "message": "mobile/198.51.100.4:5111 SIGTERM",
+            "realtime_us": "1790136192000000",
+        },
+        {
+            "cursor": "s=boot;i=53;b=boot;m=3;t=4;x=5",
+            "message": "client-instance exiting",
+            "realtime_us": "1790136202000000",
+        },
+    ]
+
+    rows, cursor = hub_gateway._vpn_event_batch_rows(events)
+
+    assert cursor == events[-1]["cursor"]
+    assert rows == [
+        ("2026-09-23 04:03:02", "connected", "mobile", "198.51.100.4:5111", "", None),
+        ("2026-09-23 04:03:12", "disconnected", "mobile", "198.51.100.4:5111", "", None),
+        ("2026-09-23 04:03:22", "other", "", "", "client-instance exiting", None),
+    ]
+
+
+def test_agent_vpn_batch_cursor_and_rows_are_idempotent(temp_db):
+    rows = [("2026-09-23 04:03:02", "connected", "mobile", "198.51.100.4:5111", "", None)]
+    cursor = "s=boot;i=51;b=boot;m=1;t=2;x=3"
+
+    db.insert_agent_vpn_event_batch(config.DEFAULT_SERVER_ID, rows, cursor)
+    db.insert_agent_vpn_event_batch(config.DEFAULT_SERVER_ID, rows, cursor)
+
+    events, total = db.list_vpn_events_page()
+    assert total == 1
+    assert events[0]["client"] == "mobile"
+    assert db.get_vpn_event_cursor(config.DEFAULT_SERVER_ID) == cursor

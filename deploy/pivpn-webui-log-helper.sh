@@ -93,7 +93,7 @@ SYSTEM_CURSOR="$STATE_DIR/system.cursor"
 BACKFILL_SINCE="7 days ago"
 
 usage() {
-  echo "usage: $0 openvpn | webui [range] | system [range] | flow | openvpn-tail | flow-tail | flow-follow [cursor] | system-tail" >&2
+  echo "usage: $0 openvpn | webui [range] | system [range] | flow | openvpn-tail | openvpn-follow [cursor] | flow-tail | flow-follow [cursor] | system-tail" >&2
   echo "  range (webui/system only): 1h | 6h | 12h | 1d | 7d (default 7d)" >&2
   exit 1
 }
@@ -133,6 +133,21 @@ case "$action" in
   openvpn-tail)
     mkdir -p "$STATE_DIR"
     journalctl -u "$OPENVPN_UNIT" --cursor-file="$OPENVPN_CURSOR" --since "$BACKFILL_SINCE" --no-pager -o short-iso
+    ;;
+  openvpn-follow)
+    # Persistent follow used by the agent's WebSocket event stream. Cursor
+    # comes from the hub only after the corresponding batch is committed.
+    if [[ $# -gt 2 ]]; then usage; fi
+    if [[ $# -eq 2 ]]; then
+      cursor="$2"
+      cursor_re='^[A-Za-z0-9_:=;.-]+$'
+      [[ ${#cursor} -le 2048 && "$cursor" =~ $cursor_re ]] || {
+        echo "invalid journal cursor" >&2
+        exit 2
+      }
+      exec journalctl -u "$OPENVPN_UNIT" --after-cursor="$cursor" --follow --no-pager -o json
+    fi
+    exec journalctl -u "$OPENVPN_UNIT" --follow --lines=0 --no-pager -o json
     ;;
   system-tail)
     # Same incremental-fetch shape as openvpn-tail — no -g/grep filter

@@ -1,5 +1,5 @@
 [Unit]
-Description=Run PiVPN Web UI log ingestion every 5 seconds
+Description=Run PiVPN Web UI system log ingestion every 5 seconds
 
 [Timer]
 OnBootSec=10s

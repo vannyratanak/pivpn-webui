@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Pulls new OpenVPN connect/disconnect events, Traffic-tab flow lines, and
-whole-system journal lines since the last run, and stores them as
+"""Pulls recovery batches of OpenVPN events and Traffic-tab flow lines, plus
+whole-system journal lines on the fast system-log timer, and stores them as
 structured rows in the app's own database (app/db.py's
 vpn_events/traffic_flows/system_log_lines tables) — so the Sessions,
 Client Sessions, Traffic, and System tabs can read instantly instead of
@@ -14,12 +14,14 @@ history. journald itself already keeps far more than either window (a
 month+, confirmed live), so the fix isn't fetching more — it's not paying
 that parse cost on every page load.
 
-Meant to be run periodically by systemd (see
-deploy/pivpn-webui-log-ingest.timer / .service), as the same unprivileged
-user the main app runs as — it only ever reaches root-only data through
+Meant to be run periodically by systemd (the whole-system log timer runs
+every five seconds; VPN and traffic recovery runs once a minute), as the
+same unprivileged user the main app runs as — it only ever reaches root-only data through
 run_root() -> the same narrow sudoers-gated helper script the web app
 itself uses (pivpn-webui-log-helper.sh's openvpn-tail/flow-tail actions),
-never directly.
+never directly. The normal live path for VPN and traffic events is the
+agent's acknowledged WebSocket journal stream; these periodic reads provide
+backfill and recovery.
 
 Incremental via journalctl --cursor-file (see those actions): each run
 only ever sees lines since the last one, so this stays cheap indefinitely
@@ -171,13 +173,15 @@ def _best_effort(fn):
         return 0
 
 
-def main():
-    n_system = _best_effort(ingest_system_log)
-    n_events = _best_effort(ingest_vpn_events)
-    n_flows = _best_effort(ingest_traffic_flows)
+def main(mode="all"):
+    if mode not in {"all", "system-only", "events-only"}:
+        raise ValueError(f"unknown ingest mode: {mode}")
+    n_system = _best_effort(ingest_system_log) if mode in {"all", "system-only"} else 0
+    n_events = _best_effort(ingest_vpn_events) if mode in {"all", "events-only"} else 0
+    n_flows = _best_effort(ingest_traffic_flows) if mode in {"all", "events-only"} else 0
     db.prune_old_logs(RETENTION_DAYS)
     print(f"ingested {n_events} vpn event(s), {n_flows} traffic flow(s), {n_system} system log line(s)")
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1] if len(sys.argv) > 1 else "all")

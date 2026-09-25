@@ -1,0 +1,10 @@
+[Unit]
+Description=PiVPN Web UI VPN and traffic log recovery ingest
+After=network.target
+
+[Service]
+Type=oneshot
+User=__USER__
+WorkingDirectory=__APP_DIR__
+ExecStart=__APP_DIR__/venv/bin/python3 __APP_DIR__/deploy/ingest_logs.py events-only
+NoNewPrivileges=false

@@ -94,6 +94,42 @@ def _traffic_batch_rows(events: list[dict]) -> tuple[list[tuple], str]:
     return rows, last_cursor
 
 
+def _vpn_event_batch_rows(events: list[dict]) -> tuple[list[tuple], str]:
+    """Convert OpenVPN journal events to the shared VPN Sessions rows."""
+    rows = []
+    last_cursor = None
+    for event in events:
+        if not isinstance(event, dict):
+            raise ValueError("invalid VPN event")
+        cursor = event.get("cursor")
+        message = event.get("message")
+        realtime_us = event.get("realtime_us")
+        if (not isinstance(cursor, str) or not _FLOW_CURSOR_RE.fullmatch(cursor)
+                or not isinstance(message, str) or len(message) > 8192
+                or not isinstance(realtime_us, str) or not realtime_us.isdigit()
+                or len(realtime_us) > 20):
+            raise ValueError("invalid VPN event fields")
+        last_cursor = cursor
+        try:
+            ts = datetime.fromtimestamp(int(realtime_us) / 1_000_000, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        except (ValueError, OverflowError, OSError):
+            continue
+        match = vpnlog.CONNECT_RE.search(message)
+        if match:
+            rows.append((ts, "connected", match.group("name"),
+                         f"{match.group('addr')}:{match.group('port')}", "", None))
+            continue
+        match = vpnlog.DISCONNECT_RE.search(message)
+        if match:
+            rows.append((ts, "disconnected", match.group("name"),
+                         f"{match.group('addr')}:{match.group('port')}", "", None))
+            continue
+        rows.append((ts, "other", "", "", message, None))
+    if not last_cursor:
+        raise ValueError("empty VPN event batch")
+    return rows, last_cursor
+
+
 def _peer_cert_cn(websocket) -> str | None:
     """The verified TLS client certificate's Common Name, or None when
     mutual TLS is off (GATEWAY_CLIENT_CA unset — no client cert was ever
@@ -176,8 +212,10 @@ async def handle_agent(websocket):
     live_agents[server_id] = websocket
     await asyncio.to_thread(db.touch_server_last_seen, server_id)
     traffic_cursor = await asyncio.to_thread(db.get_traffic_flow_cursor, server_id)
+    vpn_cursor = await asyncio.to_thread(db.get_vpn_event_cursor, server_id)
     await websocket.send(json.dumps({
         "type": "hello_ack", "ok": True, "traffic_cursor": traffic_cursor,
+        "vpn_cursor": vpn_cursor,
         "traffic_enabled": server_id == config.DEFAULT_SERVER_ID,
     }))
     log.info("agent for server #%s connected", server_id)
@@ -234,6 +272,25 @@ async def handle_agent(websocket):
                         log.exception("failed to persist traffic batch from server #%s", server_id)
                 await websocket.send(json.dumps({
                     "type": "traffic_flow_ack", "batch_id": batch_id, "ok": ok,
+                }))
+                continue
+            if message.get("type") == "vpn_event_batch":
+                batch_id = message.get("batch_id")
+                events = message.get("events")
+                ok = False
+                if (server_id == config.DEFAULT_SERVER_ID
+                        and isinstance(batch_id, str) and _BATCH_ID_RE.fullmatch(batch_id)
+                        and isinstance(events, list) and 1 <= len(events) <= 50):
+                    try:
+                        rows, cursor = await asyncio.to_thread(_vpn_event_batch_rows, events)
+                        await asyncio.to_thread(db.insert_agent_vpn_event_batch, server_id, rows, cursor)
+                        ok = True
+                    except (ValueError, TypeError):
+                        log.warning("rejected invalid VPN event batch from server #%s", server_id)
+                    except Exception:
+                        log.exception("failed to persist VPN event batch from server #%s", server_id)
+                await websocket.send(json.dumps({
+                    "type": "vpn_event_ack", "batch_id": batch_id, "ok": ok,
                 }))
                 continue
             request_id = message.get("id")

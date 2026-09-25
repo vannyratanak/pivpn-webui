@@ -281,3 +281,27 @@ def test_main_does_not_crash_when_agent_is_unreachable(temp_db, monkeypatch):
     ingest_logs.main()  # must not raise
 
     assert pruned == [ingest_logs.RETENTION_DAYS]
+
+
+def test_main_system_only_does_not_poll_vpn_or_traffic(temp_db, monkeypatch):
+    called = []
+    monkeypatch.setattr(ingest_logs, "ingest_system_log", lambda: called.append("system") or 3)
+    monkeypatch.setattr(ingest_logs, "ingest_vpn_events", lambda: called.append("vpn") or 4)
+    monkeypatch.setattr(ingest_logs, "ingest_traffic_flows", lambda: called.append("traffic") or 5)
+    monkeypatch.setattr(db, "prune_old_logs", lambda days: None)
+
+    ingest_logs.main("system-only")
+
+    assert called == ["system"]
+
+
+def test_main_events_only_does_not_poll_whole_system_journal(temp_db, monkeypatch):
+    called = []
+    monkeypatch.setattr(ingest_logs, "ingest_system_log", lambda: called.append("system") or 3)
+    monkeypatch.setattr(ingest_logs, "ingest_vpn_events", lambda: called.append("vpn") or 4)
+    monkeypatch.setattr(ingest_logs, "ingest_traffic_flows", lambda: called.append("traffic") or 5)
+    monkeypatch.setattr(db, "prune_old_logs", lambda days: None)
+
+    ingest_logs.main("events-only")
+
+    assert called == ["vpn", "traffic"]

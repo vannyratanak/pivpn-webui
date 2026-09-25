@@ -628,19 +628,23 @@ access from here.
 
 ## Background log ingestion (Sessions/Traffic history)
 
-`./setup-log-ingest.sh` (run once, after `setup.sh`) installs systemd
-timers that run `deploy/ingest_logs.py` every 5 seconds and the separate
-`deploy/ingest_ip_orgs.py` enrichment worker every 10 seconds. The default
-agent also follows new kernel traffic log entries and pushes them to the hub
-over its existing WebSocket in batches, waiting quietly when there is no
-traffic. The hub acknowledges each batch only after saving its rows and
-journal cursor together, so a reconnect resumes safely. The timer remains
-as a backfill/fallback path; database uniqueness prevents duplicate rows.
+`./setup-log-ingest.sh` (run once, after `setup.sh`) installs a five-second
+timer for whole-system logs, a one-minute recovery timer for VPN and traffic
+events, and the separate `deploy/ingest_ip_orgs.py` enrichment worker every
+10 seconds. The default agent follows new kernel traffic entries and
+OpenVPN service events, pushing both streams to the hub over its existing
+WebSocket in batches and waiting quietly when there are no events. VPN
+Sessions and Client Sessions are two views of the same pushed OpenVPN event
+stream. The hub acknowledges each batch only after saving its rows and
+journal cursor together, so a reconnect resumes safely. The one-minute
+timer recovers missed events; database uniqueness prevents duplicates.
 
 Traffic rows are committed before any WHOIS work, so registry latency
-cannot hold up new traffic or other log streams. The timer pulls whatever's
-new since its last run (via `journalctl --cursor-file`, so it doesn't
-re-scan the whole window) and stores structured rows in the app's database —
+cannot hold up new traffic or other log streams. The one-minute recovery
+timer pulls any missed VPN and traffic events using `journalctl
+--cursor-file`, while the five-second system timer incrementally stores
+whole-system log lines. Both avoid re-scanning the entire journal. Rows are
+stored in the app's database —
 `vpn_events` (OpenVPN connect/disconnect/other lines, including a
 `real_address` resolved once per connect — see `resolve_real_address`) and
 `traffic_flows` (per-connection Traffic-tab rows, with client name and any
@@ -666,9 +670,9 @@ matching the kernel's flow-log format, resolving WHOIS) — measured live at
 ~1.5s (Sessions, ~13k lines/week) to ~4s+ (Traffic, thousands of
 lines/day) once the window's widened to a week. Moving that parsing out
 of the request path and into a background job removes that cost entirely
-from every page load, at the price of up to ~5s of lag (the timer
-interval) before a brand-new session/flow shows up — or none at all, if
-you click Refresh now.
+from every page load. VPN and traffic events normally arrive through the
+WebSocket stream; the one-minute timer is a recovery path if the agent is
+disconnected. The visible page can still take up to five seconds to refresh.
 
 **Retention**: all three log tables are pruned to the last 7 days on every ingest
 run (`db.prune_old_logs`). Change `RETENTION_DAYS` in
@@ -685,7 +689,8 @@ a silent no-op, not a duplicate row.
 checkout (not copied elsewhere), so a normal `git pull`/CD deploy picks up
 changes to it automatically on the next scheduled run — no separate
 reinstall step, unlike the 4 helper scripts below. The systemd unit files
-themselves (`pivpn-webui-log-ingest.service`/`.timer` and
+themselves (`pivpn-webui-log-ingest.service`/`.timer`,
+`pivpn-webui-event-fallback.service`/`.timer`, and
 `pivpn-webui-org-ingest.service`/`.timer`) are static and
 aren't part of the CD forced command; reinstall them by hand
 (`sudo install ...` + `sudo systemctl daemon-reload`) if you ever change

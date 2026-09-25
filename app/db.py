@@ -271,6 +271,14 @@ CREATE TABLE IF NOT EXISTS traffic_flow_cursors (
     updated_at TEXT NOT NULL DEFAULT to_char(now(), 'YYYY-MM-DD HH24:MI:SS')
 );
 
+-- Resume point for the agent's pushed OpenVPN event stream. Kept separate
+-- from traffic because the streams have independent journal cursors.
+CREATE TABLE IF NOT EXISTS vpn_event_cursors (
+    server_id INTEGER PRIMARY KEY,
+    cursor TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT to_char(now(), 'YYYY-MM-DD HH24:MI:SS')
+);
+
 -- Whole-system journal lines, ingested incrementally by
 -- deploy/ingest_logs.py (system-tail action) instead of the Logs page's
 -- System tab live-fetching a full journalctl window on every request —
@@ -1055,6 +1063,39 @@ def insert_vpn_events(rows: list[tuple[str, str, str, str, str, str | None]]):
             "VALUES (%s, %s, %s, %s, %s, %s) "
             "ON CONFLICT (ts, event, client, address, detail) DO NOTHING",
             rows,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_vpn_event_cursor(server_id: int) -> str | None:
+    conn = get_conn()
+    try:
+        row = conn.execute(
+            "SELECT cursor FROM vpn_event_cursors WHERE server_id=%s", (server_id,)
+        ).fetchone()
+        return row["cursor"] if row else None
+    finally:
+        conn.close()
+
+
+def insert_agent_vpn_event_batch(server_id: int, rows: list[tuple], cursor: str):
+    """Store pushed OpenVPN events and their resume cursor atomically."""
+    conn = get_conn()
+    try:
+        if rows:
+            conn.executemany(
+                "INSERT INTO vpn_events (ts, event, client, address, detail, real_address) "
+                "VALUES (%s, %s, %s, %s, %s, %s) "
+                "ON CONFLICT (ts, event, client, address, detail) DO NOTHING",
+                rows,
+            )
+        conn.execute(
+            "INSERT INTO vpn_event_cursors (server_id, cursor) VALUES (%s, %s) "
+            "ON CONFLICT (server_id) DO UPDATE SET cursor=EXCLUDED.cursor, "
+            "updated_at=to_char(now(), 'YYYY-MM-DD HH24:MI:SS')",
+            (server_id, cursor),
         )
         conn.commit()
     finally:
