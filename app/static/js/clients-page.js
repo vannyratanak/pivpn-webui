@@ -429,18 +429,14 @@ document.addEventListener('DOMContentLoaded', () => {
       clientStream.start();
     }
   } catch (error) {
-    console.warn('Clients live updates unavailable; using periodic refresh.', error);
+    console.warn('Clients live updates unavailable.', error);
   }
-  if (!clientStream) {
-    // Rare fallback for a missing/broken stream helper; normal operation stays
-    // push-driven and makes no repeating API requests.
-    fallbackTimer = setInterval(() => { if (!document.hidden) loadClients(false); }, 30000);
-  }
+  if (!clientStream) console.warn('Clients live updates are unavailable; the initial client list will still load.');
   document.addEventListener('visibilitychange', () => {
     if (!clientStream) return;
     if (document.hidden) clientStream.stop(); else clientStream.start();
   });
-  window.addEventListener('pagehide', () => { if (clientStream) clientStream.stop(); clearInterval(fallbackTimer); });
+  window.addEventListener('pagehide', () => { if (clientStream) clientStream.stop(); clearTimeout(fallbackTimer); });
   window.addEventListener('pageshow', () => { if (clientStream && !document.hidden) clientStream.start(); });
 
   // Preserve initial page rendering if the live service is temporarily down.
