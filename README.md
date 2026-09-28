@@ -788,10 +788,12 @@ isn't something the app can safely assume for you.
 
 ## CD: deploying code changes to a running server
 
-The Deploy workflow runs on a **self-hosted macOS runner** inside the
-private LAN, because GitHub-hosted runners cannot reach private server
-addresses. Pushes to `main` deploy automatically **after CI succeeds for
-that exact commit**. Deployments are serialized. Each host checks that its
+The Deploy workflow runs on a **self-hosted Linux runner** inside the
+private LAN (the hub is a suitable host), because GitHub-hosted runners
+cannot reach private server addresses. The runner connects outbound to
+GitHub; no inbound port forwarding is needed. Pushes to `main` deploy
+automatically **after CI succeeds for that exact commit**. Deployments are
+serialized. Each host checks that its
 checkout is clean and that the tested commit is still `origin/main` before
 updating, so it will not overwrite local changes or install newer, untested
 code. Auto-deploy remains disabled until the repository variable
