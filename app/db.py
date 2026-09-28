@@ -340,6 +340,7 @@ CREATE TABLE IF NOT EXISTS client_status_cache (
     session_bytes_sent TEXT,
     session_since TEXT,
     session_updated_at TIMESTAMPTZ NOT NULL DEFAULT 'epoch'::timestamptz,
+    expiration_changed_at TIMESTAMPTZ,
     updated_at TEXT NOT NULL DEFAULT to_char(now(), 'YYYY-MM-DD HH24:MI:SS')
 );
 """
@@ -389,6 +390,17 @@ _MIGRATIONS = {
         # timestamp. The periodic metadata ingest must not overwrite a newer
         # agent-pushed connection state with a snapshot it fetched earlier.
         "session_updated_at": "ALTER TABLE client_status_cache ADD COLUMN session_updated_at TIMESTAMPTZ NOT NULL DEFAULT 'epoch'::timestamptz",
+        # When `expiration` (a day-granularity display string, e.g. "Sep 12
+        # 2029") last actually changed for this client — i.e. the last time
+        # it was created or renewed. Needed because `expiration` itself is
+        # too coarse to rank same-day actions: two clients renewed hours
+        # apart on the same day display an identical string, so sorting by
+        # the string alone ties them and falls back to arbitrary order —
+        # reported live when a same-day renew didn't move to the top of the
+        # Clients page. Backfilled below for existing rows; every ingest
+        # from here on stamps clock_timestamp() only when EXCLUDED.expiration
+        # actually differs from what's stored (see replace_client_status_cache).
+        "expiration_changed_at": "ALTER TABLE client_status_cache ADD COLUMN expiration_changed_at TIMESTAMPTZ",
     },
 }
 
@@ -412,6 +424,23 @@ def init_db():
         # without one) — fall back to id order, which is what they sorted by
         # already.
         conn.execute("UPDATE firewall_rules SET position = id WHERE position IS NULL")
+        # Rows from before expiration_changed_at existed — best-effort
+        # backfill from the display string itself, so existing clients keep
+        # their current relative (day-level) order instead of all tying at
+        # whatever moment this migration happens to run. A parse failure
+        # just leaves it NULL (sorts last, see clients-page.js); the next
+        # actual renew/create for that client sets a real value regardless.
+        for row in conn.execute(
+            "SELECT name, expiration FROM client_status_cache WHERE expiration_changed_at IS NULL"
+        ).fetchall():
+            try:
+                parsed = datetime.strptime(row["expiration"], "%b %d %Y").replace(tzinfo=timezone.utc)
+            except (ValueError, TypeError):
+                continue
+            conn.execute(
+                "UPDATE client_status_cache SET expiration_changed_at = %s WHERE name = %s",
+                (parsed, row["name"]),
+            )
         # One-time bootstrap: this app used to have exactly one hardcoded
         # account, authenticated against ADMIN_USERNAME/ADMIN_PASSWORD_HASH
         # in .env (see config.py). The first time this runs against a users
@@ -559,6 +588,7 @@ def _client_status_row_to_dict(row) -> dict:
         "status": row["status"],
         "name": row["name"],
         "expiration": row["expiration"],
+        "expiration_changed_at": row["expiration_changed_at"],
         "ip": row["ip"],
         "session": session,
     }
@@ -645,12 +675,24 @@ def replace_client_status_cache(rows: list[dict], session_snapshot_started_at=No
             conn.execute(
                 "INSERT INTO client_status_cache "
                 "(name, status, expiration, list_position, ip, session_real_address, "
-                " session_virtual_address, session_bytes_recv, session_bytes_sent, session_since, updated_at, session_updated_at) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, to_char(now(), 'YYYY-MM-DD HH24:MI:SS'), clock_timestamp()) "
+                " session_virtual_address, session_bytes_recv, session_bytes_sent, session_since, updated_at, "
+                " session_updated_at, expiration_changed_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, to_char(now(), 'YYYY-MM-DD HH24:MI:SS'), "
+                " clock_timestamp(), clock_timestamp()) "
                 "ON CONFLICT (name) DO UPDATE SET "
                 "status = EXCLUDED.status, expiration = EXCLUDED.expiration, "
                 "list_position = EXCLUDED.list_position, ip = EXCLUDED.ip, "
                 + conflict_session_sql
+                # A brand new client's or fresh renew's cert expiration
+                # differs from whatever was last stored (or there was no
+                # prior row at all, on the INSERT path above) — bumped only
+                # then, so an untouched client's timestamp survives every
+                # routine 10s re-ingest unchanged. This is what
+                # clients-page.js's compareClientOrder actually sorts by;
+                # see that migration's own comment for why the display
+                # string (day granularity) isn't enough on its own.
+                + "expiration_changed_at = CASE WHEN EXCLUDED.expiration IS DISTINCT FROM client_status_cache.expiration "
+                  "THEN clock_timestamp() ELSE client_status_cache.expiration_changed_at END, "
                 + "updated_at = EXCLUDED.updated_at",
                 (
                     r["name"], r["status"], r["expiration"], r["list_position"], r["ip"],

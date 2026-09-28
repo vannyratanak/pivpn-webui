@@ -70,6 +70,84 @@ def test_apply_client_connection_snapshot_updates_and_clears_session(tmp_path, m
     assert db.get_client_status_cache("client1")["session"] is None
 
 
+# --- expiration_changed_at: a real per-client timestamp bumped only when
+# the cert itself actually changes (create/renew) — the visible `expiration`
+# string is day-granularity, so two clients touched hours apart on the same
+# day are otherwise indistinguishable for the Clients page's "most recently
+# created/renewed first" ordering. Reported live: a same-day renew didn't
+# move to the top of the table.
+
+def _status_row(**overrides):
+    row = {
+        "name": "client1", "status": "Valid", "expiration": "Sep 09 2029", "list_position": 0,
+        "ip": "10.8.0.2", "session_real_address": None,
+        "session_virtual_address": None, "session_bytes_recv": None,
+        "session_bytes_sent": None, "session_since": None,
+    }
+    row.update(overrides)
+    return row
+
+
+def test_replace_client_status_cache_sets_expiration_changed_at_on_first_insert(tmp_path, monkeypatch):
+    _use_temp_db(tmp_path, monkeypatch)
+    db.replace_client_status_cache([_status_row()])
+    assert db.get_client_status_cache("client1")["expiration_changed_at"] is not None
+
+
+def test_replace_client_status_cache_preserves_timestamp_when_expiration_unchanged(tmp_path, monkeypatch):
+    _use_temp_db(tmp_path, monkeypatch)
+    db.replace_client_status_cache([_status_row()])
+    first = db.get_client_status_cache("client1")["expiration_changed_at"]
+
+    # A routine re-ingest tick — same expiration, nothing renewed.
+    db.replace_client_status_cache([_status_row()])
+    second = db.get_client_status_cache("client1")["expiration_changed_at"]
+    assert second == first
+
+
+def test_replace_client_status_cache_bumps_timestamp_when_expiration_changes(tmp_path, monkeypatch):
+    _use_temp_db(tmp_path, monkeypatch)
+    db.replace_client_status_cache([_status_row(expiration="Sep 09 2029")])
+    before = db.get_client_status_cache("client1")["expiration_changed_at"]
+
+    # A renew: pivpn_ctl reissues the cert, expiration moves out.
+    db.replace_client_status_cache([_status_row(expiration="Sep 12 2029")])
+    after = db.get_client_status_cache("client1")["expiration_changed_at"]
+    assert after > before
+
+
+def test_init_db_backfills_expiration_changed_at_from_display_string(tmp_path, monkeypatch):
+    _use_temp_db(tmp_path, monkeypatch)
+    conn = db.get_conn()
+    conn.execute(
+        "INSERT INTO client_status_cache (name, status, expiration, list_position) VALUES (%s, %s, %s, %s)",
+        ("oldclient", "Valid", "Sep 09 2029", 0),
+    )
+    conn.commit()
+    conn.close()
+    assert db.get_client_status_cache("oldclient")["expiration_changed_at"] is None
+
+    db.init_db()  # re-run migrations/backfill, same as a real app restart after this deploy
+
+    changed_at = db.get_client_status_cache("oldclient")["expiration_changed_at"]
+    assert (changed_at.year, changed_at.month, changed_at.day) == (2029, 9, 9)
+
+
+def test_init_db_backfill_leaves_unparseable_expiration_null(tmp_path, monkeypatch):
+    _use_temp_db(tmp_path, monkeypatch)
+    conn = db.get_conn()
+    conn.execute(
+        "INSERT INTO client_status_cache (name, status, expiration, list_position) VALUES (%s, %s, %s, %s)",
+        ("weirdclient", "Valid", "not-a-date", 0),
+    )
+    conn.commit()
+    conn.close()
+
+    db.init_db()  # must not crash the whole startup migration over one bad row
+
+    assert db.get_client_status_cache("weirdclient")["expiration_changed_at"] is None
+
+
 def test_add_audit_and_query(tmp_path, monkeypatch):
     _use_temp_db(tmp_path, monkeypatch)
     db.add_audit("admin", "login", result="ok", detail="from 127.0.0.1")

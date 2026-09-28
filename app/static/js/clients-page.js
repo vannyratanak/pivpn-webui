@@ -28,39 +28,43 @@ document.addEventListener('DOMContentLoaded', () => {
     return div.innerHTML;
   }
 
-  // Online clients first, then most recently created/renewed first. There's
-  // no separate "created/renewed at" field to sort by directly — a later
-  // cert expiration is used as a proxy instead, since PIVPN_CERT_DAYS is a
-  // fixed offset from creation/renewal time, so it sorts the same way.
-  // Unparseable/missing expiration sorts last rather than throwing.
-  function parseExpirationMs(expiration) {
-    const ms = Date.parse(expiration || '');
+  // Online clients first, then most recently created/renewed first, via
+  // expiration_changed_at — a real per-client timestamp the server bumps
+  // only when a cert is actually (re)issued (see app/db.py's
+  // replace_client_status_cache). The visible `expiration` column is day-
+  // granularity display text ("Sep 12 2029") and was tried as the sort
+  // signal first, but two clients renewed hours apart on the same day are
+  // indistinguishable by that string alone — reported live when a same-day
+  // renew didn't move to the top. Unparseable/missing timestamp sorts last
+  // rather than throwing (covers rows never touched since before this
+  // field existed and failed to backfill — see that migration's comment).
+  function parseTimestampMs(value) {
+    const ms = Date.parse(value || '');
     return Number.isNaN(ms) ? -Infinity : ms;
   }
 
   function orderInfoFromClient(c) {
-    return { online: !!c.session, expirationMs: parseExpirationMs(c.expiration) };
+    return { online: !!c.session, touchedMs: parseTimestampMs(c.expiration_changed_at) };
   }
 
   function orderInfoFromRow(row) {
     return {
       online: !!row.querySelector('.badge-connected'),
-      expirationMs: parseExpirationMs(row.children[3] && row.children[3].textContent),
+      touchedMs: parseTimestampMs(row.dataset.expirationChangedAt),
     };
   }
 
   function compareClientOrder(a, b) {
     if (a.online !== b.online) return a.online ? -1 : 1;
-    return b.expirationMs - a.expirationMs;
+    return b.touchedMs - a.touchedMs;
   }
 
   // Moves `row` to its correct position among its current siblings per
   // compareClientOrder — used both for a freshly inserted row (always
-  // offline, but with the newest expiration of anyone) and for an
-  // existing row whose sort-relevant fields just changed (a renew, which
-  // reissues the cert with a fresh expiration). Pagination has already
-  // sliced the table by DOM order, so the caller still needs to refresh
-  // it after this moves anything.
+  // offline, but with the newest expiration_changed_at of anyone) and for
+  // an existing row whose sort-relevant fields just changed (a renew).
+  // Pagination has already sliced the table by DOM order, so the caller
+  // still needs to refresh it after this moves anything.
   function repositionRow(row, info) {
     const rows = Array.from(tbody.querySelectorAll('tr:not(.empty-row):not(.skeleton-row)')).filter((r) => r !== row);
     const before = rows.find((sibling) => compareClientOrder(info, orderInfoFromRow(sibling)) < 0);
@@ -76,7 +80,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const blockBtnClass = c.blocked ? 'btn-ok' : 'btn-warn';
     const name = escapeHtml(c.name);
     return `
-      <tr${blockedClass} data-client-name="${name}">
+      <tr${blockedClass} data-client-name="${name}" data-expiration-changed-at="${escapeHtml(c.expiration_changed_at || '')}">
         <td><input type="checkbox" name="client_names" value="${name}" form="bulk-remove-form" class="client-select-checkbox" aria-label="Select client ${name}"></td>
         <td><a href="/clients/${encodeURIComponent(c.name)}">${name}</a></td>
         <td>${escapeHtml(c.status)}</td>
@@ -137,6 +141,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // search state on that row until the next full reload.
   function updateRowInPlace(row, c) {
     row.classList.toggle('blocked-row', !!c.blocked);
+    row.dataset.expirationChangedAt = c.expiration_changed_at || '';
     const cells = row.children;
     cells[2].textContent = c.status;
     cells[3].textContent = c.expiration;
