@@ -41,6 +41,10 @@ from app import db, pivpn_ctl
 
 
 def ingest_client_status() -> int:
+    # Record the database time before the slower hub/agent requests. A live
+    # agent snapshot arriving during those calls is newer and must win over
+    # this potentially stale full snapshot when it is finally committed.
+    snapshot_started_at = db.client_status_snapshot_started_at()
     try:
         clients = [c for c in pivpn_ctl.list_clients() if c["status"].lower() == "valid"]
     except pivpn_ctl.PivpnError as exc:
@@ -68,7 +72,7 @@ def ingest_client_status() -> int:
             "session_bytes_sent": session.get("bytes_sent") if session else None,
             "session_since": session.get("since") if session else None,
         })
-    db.replace_client_status_cache(rows)
+    db.replace_client_status_cache(rows, session_snapshot_started_at=snapshot_started_at)
     return len(rows)
 
 

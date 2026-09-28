@@ -50,6 +50,37 @@ def test_ingest_client_status_no_session_for_disconnected_client(temp_db, monkey
     assert db.get_client_status_cache("laptop-anna")["session"] is None
 
 
+def test_live_disconnect_wins_over_an_older_ingest_snapshot(temp_db, monkeypatch):
+    """A 10-second ingest can finish after the agent's faster status push.
+    Its older connected snapshot must not restore the client to online."""
+    connected = {
+        "real_address": "1.2.3.4:5", "virtual_address": "10.8.0.2",
+        "bytes_recv": "100", "bytes_sent": "200", "since": "2026-09-16 10:00:00",
+    }
+    db.replace_client_status_cache([{
+        "name": "laptop-anna", "status": "Valid", "expiration": "2027-01-01",
+        "list_position": 0, "ip": "10.8.0.2", "session_real_address": "1.2.3.4:5",
+        "session_virtual_address": "10.8.0.2", "session_bytes_recv": "100",
+        "session_bytes_sent": "200", "session_since": "2026-09-16 10:00:00",
+    }])
+    monkeypatch.setattr(pivpn_ctl, "list_clients", lambda: [
+        {"name": "laptop-anna", "status": "Valid", "expiration": "2027-01-01"},
+    ])
+    monkeypatch.setattr(pivpn_ctl, "list_connected_clients", lambda: {"laptop-anna": connected})
+
+    def disconnect_before_ingest_commit():
+        # The live agent push lands after the ingest read its stale connected
+        # snapshot but before it writes that snapshot to the cache.
+        db.apply_client_connection_snapshot({})
+        return {"laptop-anna": "10.8.0.2"}
+
+    monkeypatch.setattr(pivpn_ctl, "list_client_ips", disconnect_before_ingest_commit)
+
+    ingest_clients.ingest_client_status()
+
+    assert db.get_client_status_cache("laptop-anna")["session"] is None
+
+
 def test_ingest_client_status_preserves_pivpn_list_order(temp_db, monkeypatch):
     # Not alphabetical — whatever order `pivpn list` itself returned, so
     # the Clients page's display order doesn't silently change just

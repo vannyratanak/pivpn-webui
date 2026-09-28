@@ -11,9 +11,9 @@ def install():
         BEGIN
           IF TG_TABLE_NAME = 'client_status_cache' AND TG_OP = 'UPDATE' THEN
             -- Byte counters and collection timestamps don't change Overview.
-            IF (to_jsonb(NEW) - ARRAY['updated_at','session_bytes_recv','session_bytes_sent'])
+            IF (to_jsonb(NEW) - ARRAY['updated_at','session_updated_at','session_bytes_recv','session_bytes_sent'])
               IS NOT DISTINCT FROM
-               (to_jsonb(OLD) - ARRAY['updated_at','session_bytes_recv','session_bytes_sent']) THEN
+               (to_jsonb(OLD) - ARRAY['updated_at','session_updated_at','session_bytes_recv','session_bytes_sent']) THEN
               RETURN NULL;
             END IF;
           END IF;

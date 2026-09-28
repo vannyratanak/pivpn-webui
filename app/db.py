@@ -339,6 +339,7 @@ CREATE TABLE IF NOT EXISTS client_status_cache (
     session_bytes_recv TEXT,
     session_bytes_sent TEXT,
     session_since TEXT,
+    session_updated_at TIMESTAMPTZ NOT NULL DEFAULT 'epoch'::timestamptz,
     updated_at TEXT NOT NULL DEFAULT to_char(now(), 'YYYY-MM-DD HH24:MI:SS')
 );
 """
@@ -382,6 +383,12 @@ _MIGRATIONS = {
         # stops matching and is treated as logged out — a one-time forced
         # re-login, not a bug.
         "session_generation": "ALTER TABLE users ADD COLUMN session_generation INTEGER NOT NULL DEFAULT 0",
+    },
+    "client_status_cache": {
+        # Separate freshness for live session fields from the general row
+        # timestamp. The periodic metadata ingest must not overwrite a newer
+        # agent-pushed connection state with a snapshot it fetched earlier.
+        "session_updated_at": "ALTER TABLE client_status_cache ADD COLUMN session_updated_at TIMESTAMPTZ NOT NULL DEFAULT 'epoch'::timestamptz",
     },
 }
 
@@ -583,7 +590,16 @@ def get_client_status_cache(name: str) -> dict | None:
         conn.close()
 
 
-def replace_client_status_cache(rows: list[dict]):
+def client_status_snapshot_started_at():
+    """Database clock value captured before the slower agent RPCs begin."""
+    conn = get_conn()
+    try:
+        return conn.execute("SELECT clock_timestamp() AS started_at").fetchone()["started_at"]
+    finally:
+        conn.close()
+
+
+def replace_client_status_cache(rows: list[dict], session_snapshot_started_at=None):
     """Full-snapshot replace: deploy/ingest_clients.py always re-fetches the
     complete current client list (a full `pivpn list` + status/CCD lookup,
     not a delta), so this deletes whatever's no longer present in `rows`
@@ -603,25 +619,44 @@ def replace_client_status_cache(rows: list[dict]):
         names = [r["name"] for r in rows]
         conn.execute("DELETE FROM client_status_cache WHERE NOT (name = ANY(%s::text[]))", (names,))
         for r in rows:
+            if session_snapshot_started_at is None:
+                conflict_session_sql = (
+                    "session_real_address = EXCLUDED.session_real_address, "
+                    "session_virtual_address = EXCLUDED.session_virtual_address, "
+                    "session_bytes_recv = EXCLUDED.session_bytes_recv, "
+                    "session_bytes_sent = EXCLUDED.session_bytes_sent, "
+                    "session_since = EXCLUDED.session_since, "
+                    "session_updated_at = clock_timestamp(), "
+                )
+                session_params = ()
+            else:
+                conflict_session_sql = "".join(
+                    f"{column} = CASE WHEN client_status_cache.session_updated_at > %s "
+                    f"THEN client_status_cache.{column} ELSE EXCLUDED.{column} END, "
+                    for column in (
+                        "session_real_address", "session_virtual_address",
+                        "session_bytes_recv", "session_bytes_sent", "session_since",
+                    )
+                ) + (
+                    "session_updated_at = CASE WHEN client_status_cache.session_updated_at > %s "
+                    "THEN client_status_cache.session_updated_at ELSE clock_timestamp() END, "
+                )
+                session_params = (session_snapshot_started_at,) * 6
             conn.execute(
                 "INSERT INTO client_status_cache "
                 "(name, status, expiration, list_position, ip, session_real_address, "
-                " session_virtual_address, session_bytes_recv, session_bytes_sent, session_since, updated_at) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, to_char(now(), 'YYYY-MM-DD HH24:MI:SS')) "
+                " session_virtual_address, session_bytes_recv, session_bytes_sent, session_since, updated_at, session_updated_at) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, to_char(now(), 'YYYY-MM-DD HH24:MI:SS'), clock_timestamp()) "
                 "ON CONFLICT (name) DO UPDATE SET "
                 "status = EXCLUDED.status, expiration = EXCLUDED.expiration, "
                 "list_position = EXCLUDED.list_position, ip = EXCLUDED.ip, "
-                "session_real_address = EXCLUDED.session_real_address, "
-                "session_virtual_address = EXCLUDED.session_virtual_address, "
-                "session_bytes_recv = EXCLUDED.session_bytes_recv, "
-                "session_bytes_sent = EXCLUDED.session_bytes_sent, "
-                "session_since = EXCLUDED.session_since, "
-                "updated_at = EXCLUDED.updated_at",
+                + conflict_session_sql
+                + "updated_at = EXCLUDED.updated_at",
                 (
                     r["name"], r["status"], r["expiration"], r["list_position"], r["ip"],
                     r["session_real_address"], r["session_virtual_address"],
                     r["session_bytes_recv"], r["session_bytes_sent"], r["session_since"],
-                ),
+                ) + session_params,
             )
         conn.commit()
     finally:
@@ -638,13 +673,14 @@ def apply_client_connection_snapshot(sessions: dict[str, dict]):
             "UPDATE client_status_cache SET session_real_address=NULL, "
             "session_virtual_address=NULL, session_bytes_recv=NULL, "
             "session_bytes_sent=NULL, session_since=NULL, "
+            "session_updated_at=clock_timestamp(), "
             "updated_at=to_char(now(), 'YYYY-MM-DD HH24:MI:SS')"
         )
         for name, session in sessions.items():
             conn.execute(
                 "UPDATE client_status_cache SET session_real_address=%s, "
                 "session_virtual_address=%s, session_bytes_recv=%s, "
-                "session_bytes_sent=%s, session_since=%s, "
+                "session_bytes_sent=%s, session_since=%s, session_updated_at=clock_timestamp(), "
                 "updated_at=to_char(now(), 'YYYY-MM-DD HH24:MI:SS') "
                 "WHERE lower(name)=lower(%s)",
                 (
