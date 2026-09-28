@@ -788,74 +788,39 @@ isn't something the app can safely assume for you.
 
 ## CD: deploying code changes to a running server
 
-This repo is public and its `Deploy` workflow runs on a **self-hosted**
-runner (has to — the deploy targets are private-network addresses no
-GitHub-hosted runner can reach). That combination is normally the classic
-"fork a public repo, open a PR, get code execution on someone's runner"
-risk — it doesn't apply here because `deploy.yml`'s only trigger is
-`workflow_dispatch`, which requires the invoker to already have write
-access to the repo; a stranger's fork PR can't make it run. Fork PR
-workflows are also disabled repo-wide as a second, independent layer
-(Settings → Actions → General → "Run workflows from fork pull requests"),
-so even a future workflow added with a `pull_request` trigger by mistake
-wouldn't run from a fork without that box being checked first. Deploy
-targets and the SSH username live in GitHub secrets (`DEPLOY_TARGET_1`,
-`DEPLOY_TARGET_2`, ... — one per server, sequentially numbered), not
-hardcoded in the workflow file, so nothing about the network layout is
-visible to a public reader either.
+The Deploy workflow runs on a **self-hosted macOS runner** inside the
+private LAN, because GitHub-hosted runners cannot reach private server
+addresses. Pushes to `main` deploy automatically **after CI succeeds for
+that exact commit**. Deployments are serialized. Each host checks that its
+checkout is clean and that the tested commit is still `origin/main` before
+updating, so it will not overwrite local changes or install newer, untested
+code. Auto-deploy remains disabled until the repository variable
+`AUTO_DEPLOY_READY` is set to `sha-pinned` after server setup is complete.
 
-`.github/workflows/deploy.yml` is a **manual-trigger only** workflow
-(`workflow_dispatch` — nothing runs automatically on push, only `CI`/tests
-do). Running it from GitHub Actions SSHes into each configured server with
-a dedicated deploy key; each server's `authorized_keys` entry has a
-**forced command** on that key, so whatever the workflow actually sends is
-ignored — the server always runs exactly this, regardless:
+Configure `DEPLOY_TARGET_1` as `vpn@<hub-address>` (or a standalone Web UI
+host), `DEPLOY_TARGET_2` as `vpn@<agent-address>` when using hub/agent mode,
+and `DEPLOY_SSH_KEY` as the matching private key. Keep addresses and keys
+in GitHub Actions secrets, not in this public repo. Put the IPs in those
+secrets so they can be changed without editing the workflow.
 
-```
-cd <app dir> && git pull \
-  && sudo -n install -m 0750 -o root -g root deploy/pivpn-webui-ccd-helper.sh /usr/local/sbin/pivpn-webui-ccd-helper.sh \
-  && sudo -n install -m 0750 -o root -g root deploy/pivpn-webui-log-helper.sh /usr/local/sbin/pivpn-webui-log-helper.sh \
-  && sudo -n install -m 0750 -o root -g root deploy/pivpn-webui-routes-helper.sh /usr/local/sbin/pivpn-webui-routes-helper.sh \
-  && sudo -n install -m 0750 -o root -g root deploy/pivpn-webui-client-script-helper.sh /usr/local/sbin/pivpn-webui-client-script-helper.sh \
-  && sudo -n systemctl restart pivpn-webui
+Install the restricted forced-command key on each host once, using the
+public half of `DEPLOY_SSH_KEY`:
+
+```bash
+# Standalone Web UI host:
+./setup-cd-deploy.sh standalone
+
+# Hub and agent in hub/agent mode:
+./setup-cd-deploy.sh hub     # hub, e.g. .52
+./setup-cd-deploy.sh agent   # PiVPN agent, e.g. .51
 ```
 
-**Why the reinstall steps matter**: `git pull` alone only updates files
-inside the repo checkout. It does **not** touch `/usr/local/sbin/` —
-only `setup.sh` (or this forced command) does that. A change to any of the
-4 privileged helper scripts would silently never take effect through
-Deploy without this — the workflow would report success while the live
-server kept running the old script. Hit this for real once; it's why the
-reinstall steps exist.
-
-### Adding a new server to this pipeline
-
-1. `./setup.sh` on the server as usual — the sudoers grants for the
-   `sudo -n install ...` calls above are included automatically (they
-   need `__APP_DIR__` substituted to that server's real checkout path,
-   which `setup.sh` now does).
-2. `./setup-cd-deploy.sh` — installs the forced-command deploy key.
-   Prompts for the public key; use the same one already on other servers
-   (`grep -oP 'ssh-ed25519 \S+ github-actions-deploy@pivpn-webui'
-   ~/.ssh/authorized_keys` on an existing server) so one GitHub secret
-   covers every server. **Not idempotent for updates** — if a server
-   already has this key installed, the script detects the exact key
-   string and skips, even if the forced command itself should change
-   (e.g. after a future edit to the reinstall-steps list above). Remove
-   the old `authorized_keys` line by hand first if the command itself
-   needs to change on an already-configured server.
-3. Add a new GitHub Actions secret for this server (`gh secret set
-   DEPLOY_TARGET_2 --body "vpn@<its IP>"` — same `user@host` format as
-   the existing `DEPLOY_TARGET_1`, keeps real IPs and usernames out
-   of the workflow file itself, so `deploy.yml` stays safe to read in a
-   public repo). Then add a matching `- name: Deploy to target 2` step to
-   `.github/workflows/deploy.yml`, copying the existing step's pattern
-   (same deploy key, `${{ secrets.DEPLOY_TARGET_2 }}` for the host).
-4. Before trusting the button: manually run the exact forced-command
-   sequence over SSH once (steps 1-2 above, pasted directly) — this is
-   the one thing worth verifying by hand rather than assuming, since a
-   path mismatch between the sudoers grant and the forced command fails
-   silently as "needs a password" rather than a clear error.
+The setup script updates an existing matching key's forced command. The
+hub restarts the Web UI and SSE service; the agent restarts only its
+WebSocket connector. Neither deployment restarts OpenVPN, so existing VPN
+clients remain connected. The Web UI/API may be briefly unavailable while
+the hub restarts; the agent reconnects and resumes from its last acknowledged
+log cursor.
 
 ## First login
 

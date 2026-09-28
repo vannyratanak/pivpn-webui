@@ -1,72 +1,88 @@
 #!/usr/bin/env bash
-# Installs the CD Deploy workflow's forced-command SSH key on this server.
-# Run this once per server, in addition to ./setup.sh, as the same user
-# that installed PiVPN — not root. Idempotent: safe to re-run.
-#
-# The forced command is what actually runs when the shared deploy key
-# connects, regardless of what command it sends: pull latest, reinstall
-# the 4 helper scripts (setup.sh's own sudoers grants are what make the
-# `sudo -n install ...` calls below work without a password), restart the
-# service. See deploy/sudoers-pivpn-webui.template for the matching grants.
+# Install or update the restricted CD Deploy SSH key on this server.
+# Run as the app user, not root. Choose standalone, hub, or agent to install
+# only the sudo permissions required by that host's deploy service.
 set -euo pipefail
 
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROLE="${1:-standalone}"
 DEPLOY_PUBKEY=""
-FORCED_CMD=""
 
 require_non_root() {
   if [[ $EUID -eq 0 ]]; then
-    echo "Run this as your normal user (the one PiVPN was installed as), not root/sudo." >&2
+    echo "Run this as your normal application user, not root/sudo." >&2
     exit 1
   fi
 }
 
-read_deploy_pubkey() {
-  read -rp "Deploy public key (shared across servers — copy from an existing server's authorized_keys, or from the GitHub secret's public half): " DEPLOY_PUBKEY
-  [[ -n "$DEPLOY_PUBKEY" ]] || { echo "No key given, aborting." >&2; exit 1; }
-}
-
-build_forced_command() {
-  FORCED_CMD="cd ${APP_DIR} && git pull"
-  for helper in ccd log routes client-script; do
-    # Must be the absolute source path, matching deploy/sudoers-pivpn-webui.template's
-    # __APP_DIR__ substitution exactly — sudoers does literal argv matching, not
-    # path resolution, so a relative path here would silently fall back to
-    # asking for a password no matter how correct the sudoers grant is.
-    FORCED_CMD+=" && sudo -n install -m 0750 -o root -g root ${APP_DIR}/deploy/pivpn-webui-${helper}-helper.sh /usr/local/sbin/pivpn-webui-${helper}-helper.sh"
-  done
-  FORCED_CMD+=" && sudo -n systemctl restart pivpn-webui"
+install_role_sudoers() {
+  local sudoers_tmp user
+  user="$(whoami)"
+  case "$ROLE" in
+    standalone)
+      # setup.sh already grants the exact helper installs and web UI restart.
+      ;;
+    hub)
+      sudoers_tmp="$(mktemp)"
+      {
+        printf '%s ALL=(root) NOPASSWD: /usr/bin/systemctl restart pivpn-webui\n' "$user"
+        printf '%s ALL=(root) NOPASSWD: /usr/bin/systemctl restart pivpn-webui-overview-stream\n' "$user"
+      } > "$sudoers_tmp"
+      sudo visudo -cf "$sudoers_tmp"
+      sudo install -m 0440 -o root -g root "$sudoers_tmp" /etc/sudoers.d/pivpn-webui-cd-deploy
+      rm -f "$sudoers_tmp"
+      ;;
+    agent)
+      sudoers_tmp="$(mktemp)"
+      {
+        for helper in ccd log routes client-script; do
+          printf '%s ALL=(root) NOPASSWD: /usr/bin/install -m 0750 -o root -g root %s/deploy/pivpn-webui-%s-helper.sh /usr/local/sbin/pivpn-webui-%s-helper.sh\n' \
+            "$user" "$APP_DIR" "$helper" "$helper"
+        done
+        printf '%s ALL=(root) NOPASSWD: /usr/bin/systemctl restart pivpn-webui-agent\n' "$user"
+      } > "$sudoers_tmp"
+      sudo visudo -cf "$sudoers_tmp"
+      sudo install -m 0440 -o root -g root "$sudoers_tmp" /etc/sudoers.d/pivpn-webui-agent-deploy
+      rm -f "$sudoers_tmp"
+      ;;
+    *)
+      echo "Usage: $0 [standalone|hub|agent]" >&2
+      exit 2
+      ;;
+  esac
 }
 
 install_authorized_keys_entry() {
-  local line="command=\"${FORCED_CMD}\",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty ${DEPLOY_PUBKEY}"
-
+  local forced_cmd line authorized_keys_tmp
+  forced_cmd="cd ${APP_DIR} && ${APP_DIR}/deploy/deploy-commit.sh ${ROLE}"
+  line="command=\"${forced_cmd}\",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty ${DEPLOY_PUBKEY}"
   mkdir -p ~/.ssh
   chmod 700 ~/.ssh
   touch ~/.ssh/authorized_keys
   chmod 600 ~/.ssh/authorized_keys
-
-  if grep -qF "$DEPLOY_PUBKEY" ~/.ssh/authorized_keys 2>/dev/null; then
-    echo "This key is already installed in authorized_keys — skipping."
-    echo "Remove the old line first if the forced command itself needs to change."
-  else
-    printf '%s\n' "$line" >> ~/.ssh/authorized_keys
-    echo "Deploy key installed."
+  if grep -qF "$DEPLOY_PUBKEY" ~/.ssh/authorized_keys; then
+    # Replace this key's old forced command so deployments are SHA-pinned.
+    authorized_keys_tmp="$(mktemp)"
+    grep -Fv -- "$DEPLOY_PUBKEY" ~/.ssh/authorized_keys > "$authorized_keys_tmp" || true
+    mv "$authorized_keys_tmp" ~/.ssh/authorized_keys
   fi
-}
-
-print_next_steps() {
-  echo
-  echo "Last manual step: add a 'Deploy to $(hostname -I 2>/dev/null | awk '{print $1}')'"
-  echo "step to .github/workflows/deploy.yml, copying the existing steps' pattern."
+  printf '%s\n' "$line" >> ~/.ssh/authorized_keys
+  chmod 600 ~/.ssh/authorized_keys
 }
 
 main() {
   require_non_root
-  read_deploy_pubkey
-  build_forced_command
+  case "$ROLE" in standalone|hub|agent) ;; *) echo "Usage: $0 [standalone|hub|agent]" >&2; exit 2 ;; esac
+  read -rp "Deploy public key (the public half of GitHub's DEPLOY_SSH_KEY secret): " DEPLOY_PUBKEY
+  [[ -n "$DEPLOY_PUBKEY" ]] || { echo "No key given, aborting." >&2; exit 1; }
+  if [[ ! "$DEPLOY_PUBKEY" =~ ^(ssh-ed25519|ssh-rsa|ecdsa-sha2-[^[:space:]]+)[[:space:]][A-Za-z0-9+/=]+([[:space:]][^\",[:cntrl:]]*)?$ ]]; then
+    echo "Expected one valid SSH public key line." >&2
+    exit 1
+  fi
+  install_role_sudoers
   install_authorized_keys_entry
-  print_next_steps
+  echo "Restricted deploy key installed/updated for role: $ROLE."
+  echo "Configure DEPLOY_TARGET_1 for the hub/standalone, and DEPLOY_TARGET_2 for an agent."
 }
 
 main "$@"

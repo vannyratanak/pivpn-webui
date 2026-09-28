@@ -1,21 +1,45 @@
 name: Deploy
 
 on:
-  workflow_dispatch:   # manual trigger only — nothing touches the server automatically
+  # Deploy only after the CI workflow for this exact main-branch commit passes.
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
 
 jobs:
   deploy:
-    # self-hosted, not ubuntu-latest: GitHub's cloud runners can't reach
-    # the deploy targets at all (private-network addresses, confirmed by
-    # a real connection timeout when this ran on ubuntu-latest) — this
-    # has to run from a machine that's already on the same network as
-    # the servers.
+    if: >-
+      vars.AUTO_DEPLOY_READY == 'sha-pinned' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: [self-hosted, macos]
+    concurrency:
+      group: production-deploy
+      cancel-in-progress: false
+    env:
+      DEPLOY_TARGET_HUB: ${{ secrets.DEPLOY_TARGET_1 }}
+      DEPLOY_TARGET_AGENT: ${{ secrets.DEPLOY_TARGET_2 }}
+      DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+      DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
-      - name: Write deploy key
+      - name: Prepare restricted deploy key
         run: |
+          test -n "$DEPLOY_SSH_KEY"
           mkdir -p ~/.ssh
-          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-      - name: Deploy to target 1
-        run: ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no ${{ secrets.DEPLOY_TARGET_1 }} "ignored, server runs a forced command"
+
+      - name: Deploy hub
+        run: |
+          test -n "$DEPLOY_TARGET_HUB"
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no "$DEPLOY_TARGET_HUB" "$DEPLOY_SHA"
+
+      - name: Deploy agent
+        if: env.DEPLOY_TARGET_AGENT != ''
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no "$DEPLOY_TARGET_AGENT" "$DEPLOY_SHA"
