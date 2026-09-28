@@ -56,6 +56,21 @@ def test_traffic_batch_parses_kernel_event_without_live_whois(temp_db, monkeypat
     )]
 
 
+def test_traffic_batch_uses_conntrack_event_timestamp(temp_db, monkeypatch):
+    monkeypatch.setattr(db, "list_client_ip_name_map", lambda: {"10.8.0.2": "mobile"})
+    monkeypatch.setattr(iplookup, "get_cached_ip_orgs", lambda ips: {})
+    events = [{
+        "cursor": "s=boot;i=43;b=boot;m=1;t=2;x=3",
+        "message": "VPNFLOW IN= OUT= SRC=10.8.0.2 DST=64.233.170.108 PROTO=TCP "
+                   "SPT=58719 DPT=993 HOST_REALTIME_US=1790587341484159",
+        "realtime_us": "1790587349000000",
+    }]
+
+    rows, _ = hub_gateway._traffic_batch_rows(events)
+
+    assert rows[0][0] == "2026-09-28 09:22:21"
+
+
 def test_traffic_batch_rejects_invalid_journal_cursor():
     with pytest.raises(ValueError):
         hub_gateway._traffic_batch_rows([{

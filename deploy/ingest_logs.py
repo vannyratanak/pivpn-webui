@@ -34,6 +34,7 @@ deploy/ingest_ip_orgs.py. Flow rows are committed with cached organization
 data when available, then cold destinations are enriched asynchronously.
 """
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -107,6 +108,12 @@ def ingest_traffic_flows() -> int:
             continue
         m = FLOW_RE.search(msg)
         if m:
+            event_us = m.group("host_realtime_us")
+            if event_us:
+                try:
+                    ts = datetime.fromtimestamp(int(event_us) / 1_000_000, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+                except (ValueError, OverflowError, OSError):
+                    pass
             parsed.append((ts, m))
     if not parsed:
         return 0

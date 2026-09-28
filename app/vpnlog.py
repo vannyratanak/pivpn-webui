@@ -70,15 +70,15 @@ JOURNAL_LINE_RE = re.compile(r"^(?P<ts>\S+)\s+\S+\s+\S+?(?:\[\d+\])?:\s?(?P<msg>
 # named/captured — see _split_journal_line_with_process.
 JOURNAL_LINE_WITH_PROCESS_RE = re.compile(r"^(?P<ts>\S+)\s+\S+\s+(?P<process>\S+?)(?:\[\d+\])?:\s?(?P<msg>.*)$")
 
-# One line per new connection from the kernel's netfilter LOG target (see
-# deploy/setup-traffic-log.sh's mangle-table FORWARD rule) — the standard
-# `IN=... OUT=... SRC=... DST=... ... PROTO=... SPT=... DPT=...` shape every
-# iptables/nftables LOG line uses, unlike OpenVPN's own log lines this
-# format is stable/kernel-defined, not something that drifts per version.
+# One line per new VPN connection, normalized by the agent's conntrack
+# collector into the standard `IN=... OUT=... SRC=... DST=... PROTO=...`
+# flow shape. Keeping this format lets the hub parse older netfilter LOG
+# records too when recovering data already present in the journal.
 FLOW_RE = re.compile(
     r"IN=(?P<in_if>\S*)\s+OUT=(?P<out_if>\S*).*?"
     r"SRC=(?P<src>[0-9.]+)\s+DST=(?P<dst>[0-9.]+).*?"
     r"PROTO=(?P<proto>\w+)(?:\s+SPT=(?P<sport>\d+))?(?:\s+DPT=(?P<dport>\d+))?"
+    r"(?:\s+HOST_REALTIME_US=(?P<host_realtime_us>\d+))?"
 )
 
 

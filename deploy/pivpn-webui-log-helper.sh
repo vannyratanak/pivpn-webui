@@ -14,6 +14,7 @@ set -euo pipefail
 # openvpn-server@server.service instead).
 OPENVPN_UNIT="openvpn@server"
 WEBUI_UNIT="pivpn-webui"
+FLOW_UNIT="pivpn-webui-conntrack.service"
 
 # A plain "-n 300" caps *raw journal lines*, not events — one OpenVPN
 # connection alone logs 15-20 lines of cipher/peer-info detail, so a burst
@@ -69,7 +70,7 @@ resolve_since() {
 SINCE_FLOW="6 hours ago"
 LINES_FLOW=5000
 
-# The prefix setup-traffic-log.sh's LOG rule tags every flow line with.
+# The prefix the conntrack collector uses for normalized flow events.
 FLOW_LOG_PREFIX="VPNFLOW"
 
 # deploy/ingest_logs.py's incremental fetch — used by the *-tail actions
@@ -125,7 +126,7 @@ case "$action" in
     # by the app's own line parser, same as any other unparseable line);
     # anything else nonzero is a real problem and should still fail loudly.
     set +e
-    journalctl -k --since "$SINCE_FLOW" -n "$LINES_FLOW" --no-pager -o short-iso -g "$FLOW_LOG_PREFIX"
+    journalctl -u "$FLOW_UNIT" --since "$SINCE_FLOW" -n "$LINES_FLOW" --no-pager -o short-iso -g "$FLOW_LOG_PREFIX"
     rc=$?
     set -e
     [[ $rc -eq 0 || $rc -eq 1 ]] || exit "$rc"
@@ -162,7 +163,7 @@ case "$action" in
     # most ticks, not an error.
     mkdir -p "$STATE_DIR"
     set +e
-    journalctl -k --cursor-file="$FLOW_CURSOR" --since "$BACKFILL_SINCE" --no-pager -o short-iso -g "$FLOW_LOG_PREFIX"
+    journalctl -u "$FLOW_UNIT" --cursor-file="$FLOW_CURSOR" --since "$BACKFILL_SINCE" --no-pager -o short-iso -g "$FLOW_LOG_PREFIX"
     rc=$?
     set -e
     [[ $rc -eq 0 || $rc -eq 1 ]] || exit "$rc"
@@ -181,9 +182,9 @@ case "$action" in
         echo "invalid journal cursor" >&2
         exit 2
       }
-      exec journalctl -k --after-cursor="$cursor" --follow --no-pager -o json
+      exec journalctl -u "$FLOW_UNIT" --after-cursor="$cursor" --follow --no-pager -o json
     fi
-    exec journalctl -k --follow --lines=0 --no-pager -o json
+    exec journalctl -u "$FLOW_UNIT" --follow --lines=0 --no-pager -o json
     ;;
   *)
     usage

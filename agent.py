@@ -240,8 +240,8 @@ async def _push_journal_stream(
                     if (isinstance(event_cursor, str) and len(event_cursor) <= 2048
                             and isinstance(message, str) and len(message) <= 8192
                             and isinstance(realtime_us, str) and realtime_us.isdigit()):
-                        # Follow the kernel without journalctl's grep option
-                        # (it can exit when no matches exist); filter locally.
+                        # Filter the traffic stream locally; journalctl's grep
+                        # option can exit the follower when there are no matches.
                         if action == 'flow-follow' and 'VPNFLOW' not in message:
                             continue
                         if not batch:

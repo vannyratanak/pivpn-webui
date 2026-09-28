@@ -75,7 +75,8 @@ def _traffic_batch_rows(events: list[dict]) -> tuple[list[tuple], str]:
         if not match:
             continue
         try:
-            ts = datetime.fromtimestamp(int(realtime_us) / 1_000_000, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+            event_us = match.group("host_realtime_us") or realtime_us
+            ts = datetime.fromtimestamp(int(event_us) / 1_000_000, timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         except (ValueError, OverflowError, OSError):
             continue
         parsed.append((ts, match))

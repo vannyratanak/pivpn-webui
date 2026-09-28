@@ -941,7 +941,50 @@ controls the cookie's longer sliding expiry. For fast manual testing, a
 short value works too — e.g. `IDLE_TIMEOUT_MINUTES=1.5` for a 90-second
 window — but leave it at the 15-minute default in production.
 
+## CT-local traffic event capture
+
+VPN clients still connect to and send traffic through the agent CT. The
+iptables `LOG` target only emits a kernel message; it does not redirect a
+packet to Proxmox. On an LXC host, that message can appear in the Proxmox
+kernel journal rather than the CT's kernel journal. The agent reads the CT
+The agent CT uses a conntrack event listener, which observes only new
+connections and filters them by the VPN source subnet. It does not depend on
+kernel LOG messages being copied into the container journal and does not
+require Proxmox configuration. To install or update it, run on the agent CT:
+
+```bash
+sudo ./deploy/setup-traffic-log.sh
+```
+
+The installer detects the subnet from `/etc/openvpn/server.conf`, installs
+and starts `pivpn-webui-conntrack.service`, and removes only the old tagged
+non-terminating LOG rule. It does not restart OpenVPN, alter ACCEPT/DROP/NAT
+rules, or touch Proxmox. Confirm records with
+`sudo journalctl -u pivpn-webui-conntrack.service --since '2 min ago'` after
+a VPN client opens a new connection. The existing agent WebSocket forwards
+these records to the hub; existing stored traffic history remains intact,
+but conntrack does not recreate historical records that were never stored.
+If the service reports `Operation not permitted`, the CT lacks conntrack
+event access and host-side forwarding would need separate consideration.
+
 ## Known limitations / things to check
+
+- **Traffic flow collection in Proxmox LXC uses the CT-local conntrack
+  service.** Older deployments used a kernel LOG rule, whose records may
+  appear only in the Proxmox host journal. The current collector reads the
+  CT-local service journal instead. Updating it with
+  `sudo ./deploy/setup-traffic-log.sh` does not restart OpenVPN or change
+  Proxmox settings.
+
+  Confirmed setup under investigation (2026-09-28): Proxmox node
+  `ITS-CN3`; agent CT `10.255.1.239`; route lookup on the node reports
+  `via 172.16.255.1 dev vmbr0 src 172.16.255.5`. The node's management
+  address `172.16.255.3` is not on `vmbr0`; `172.16.255.5` is the address
+  selected as the source when the node routes to the CT. The CT's VPN
+  subnet previously observed was `10.152.217.0/24`; a later CT-local test
+  successfully received conntrack `NEW` events filtered for `10.8.0.0/24`.
+  Verify the actual current subnet from the CT's OpenVPN configuration; the
+  installer detects it automatically.
 
 - The INPUT self-lockout guard only ever protects **the requester's own
   current connection to port 443/tcp** — not other services on the box
