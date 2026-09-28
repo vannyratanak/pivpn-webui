@@ -28,43 +28,43 @@ document.addEventListener('DOMContentLoaded', () => {
     return div.innerHTML;
   }
 
-  // Online clients first, then most recently created/renewed first, via
-  // expiration_changed_at — a real per-client timestamp the server bumps
-  // only when a cert is actually (re)issued (see app/db.py's
-  // replace_client_status_cache). The visible `expiration` column is day-
-  // granularity display text ("Sep 12 2029") and was tried as the sort
-  // signal first, but two clients renewed hours apart on the same day are
-  // indistinguishable by that string alone — reported live when a same-day
-  // renew didn't move to the top. Unparseable/missing timestamp sorts last
-  // rather than throwing (covers rows never touched since before this
-  // field existed and failed to backfill — see that migration's comment).
+  // Most recently created/renewed first, via expiration_changed_at — a
+  // real per-client timestamp the server bumps only when a cert is
+  // actually (re)issued (see app/db.py's replace_client_status_cache).
+  // The visible `expiration` column is day-granularity display text
+  // ("Sep 12 2029") and was tried as the sort signal first, but two
+  // clients renewed hours apart on the same day are indistinguishable by
+  // that string alone — reported live when a same-day renew didn't move
+  // to the top. Unparseable/missing timestamp sorts last rather than
+  // throwing (covers rows never touched since before this field existed
+  // and failed to backfill — see that migration's comment). Online/
+  // offline status is display-only here (the badge) and deliberately
+  // doesn't affect order — a client that connects stays exactly where its
+  // own create/renew recency already put it, rather than jumping around
+  // as it connects and disconnects.
   function parseTimestampMs(value) {
     const ms = Date.parse(value || '');
     return Number.isNaN(ms) ? -Infinity : ms;
   }
 
   function orderInfoFromClient(c) {
-    return { online: !!c.session, touchedMs: parseTimestampMs(c.expiration_changed_at) };
+    return { touchedMs: parseTimestampMs(c.expiration_changed_at) };
   }
 
   function orderInfoFromRow(row) {
-    return {
-      online: !!row.querySelector('.badge-connected'),
-      touchedMs: parseTimestampMs(row.dataset.expirationChangedAt),
-    };
+    return { touchedMs: parseTimestampMs(row.dataset.expirationChangedAt) };
   }
 
   function compareClientOrder(a, b) {
-    if (a.online !== b.online) return a.online ? -1 : 1;
     return b.touchedMs - a.touchedMs;
   }
 
   // Moves `row` to its correct position among its current siblings per
-  // compareClientOrder — used both for a freshly inserted row (always
-  // offline, but with the newest expiration_changed_at of anyone) and for
-  // an existing row whose sort-relevant fields just changed (a renew).
-  // Pagination has already sliced the table by DOM order, so the caller
-  // still needs to refresh it after this moves anything.
+  // compareClientOrder — used both for a freshly inserted row (with the
+  // newest expiration_changed_at of anyone) and for an existing row whose
+  // expiration_changed_at just changed (a renew). Pagination has already
+  // sliced the table by DOM order, so the caller still needs to refresh
+  // it after this moves anything.
   function repositionRow(row, info) {
     const rows = Array.from(tbody.querySelectorAll('tr:not(.empty-row):not(.skeleton-row)')).filter((r) => r !== row);
     const before = rows.find((sibling) => compareClientOrder(info, orderInfoFromRow(sibling)) < 0);
@@ -168,10 +168,9 @@ document.addEventListener('DOMContentLoaded', () => {
       .then(({ ok, data }) => {
         if (!ok) return;
         updateRowInPlace(row, data);
-        // A renew reissues the cert with a fresh expiration, which moves
-        // this row within the online/offline ordering (see
-        // compareClientOrder) — a block/unblock leaves session and
-        // expiration untouched, so this is a no-op move for that case.
+        // A renew reissues the cert with a fresh expiration_changed_at,
+        // which moves this row (see compareClientOrder) — a block/unblock
+        // leaves it untouched, so this is a no-op move for that case.
         repositionRow(row, orderInfoFromClient(data));
         if (clientsPager) clientsPager.refresh();
       });
