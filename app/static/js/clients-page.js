@@ -7,6 +7,31 @@ document.addEventListener('DOMContentLoaded', () => {
   const tbody = document.getElementById('clients-tbody');
   if (!tbody) return;
 
+  const tabsNav = document.getElementById('clients-tabs');
+  const state = { tab: ['connected', 'attention', 'offline'].includes(new URLSearchParams(location.search).get('tab')) ? new URLSearchParams(location.search).get('tab') : 'all' };
+  if (tabsNav) {
+    const syncActiveTab = () => {
+      tabsNav.querySelectorAll('a').forEach((a) => {
+        const active = a.dataset.view === state.tab;
+        a.classList.toggle('active', active);
+        if (active) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+      });
+    };
+    syncActiveTab();
+    tabsNav.addEventListener('click', (e) => {
+      const link = e.target.closest('a[data-view]');
+      if (!link || link.dataset.view === state.tab) { if (link) e.preventDefault(); return; }
+      e.preventDefault();
+      state.tab = link.dataset.view;
+      syncActiveTab();
+      const params = new URLSearchParams(location.search);
+      if (state.tab === 'all') params.delete('tab'); else params.set('tab', state.tab);
+      history.replaceState({}, '', `${location.pathname}${params.toString() ? '?' + params : ''}`);
+      applyTabFilter();
+      if (clientsPager) clientsPager.refresh();
+    });
+  }
+
   const countHint = document.querySelector('.card-header-title-group .hint');
   const addForm = document.querySelector('#add-client-dialog form');
   const renewDialog = document.getElementById('renew-client-dialog');
@@ -28,6 +53,14 @@ document.addEventListener('DOMContentLoaded', () => {
     return div.innerHTML;
   }
 
+  // Same "needs attention" definition as overview-page.js's own tab filter
+  // (blocked, or a certificate that's expired/expiring soon) — kept in
+  // sync by both reading api.py's shared certificate_state field rather
+  // than each recomputing cert-expiry independently.
+  function needsAttention(c) {
+    return !!c.blocked || ['expired', 'expiring'].includes(c.certificate_state);
+  }
+
   function rowHtml(c) {
     const blockedClass = c.blocked ? ' class="blocked-row"' : '';
     const sessionBadge = c.session
@@ -37,7 +70,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const blockBtnClass = c.blocked ? 'btn-ok' : 'btn-warn';
     const name = escapeHtml(c.name);
     return `
-      <tr${blockedClass} data-client-name="${name}">
+      <tr${blockedClass} data-client-name="${name}" data-connected="${c.session ? 1 : 0}" data-attention="${needsAttention(c) ? 1 : 0}">
         <td><input type="checkbox" name="client_names" value="${name}" form="bulk-remove-form" class="client-select-checkbox" aria-label="Select client ${name}"></td>
         <td><a href="/clients/${encodeURIComponent(c.name)}">${name}</a></td>
         <td>${escapeHtml(c.status)}</td>
@@ -90,6 +123,22 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  // Sets dataset.tabMatch (read by pagination.js, alongside its own
+  // filterMatch/selectMatch signals) from each row's already-baked-in
+  // data-connected/data-attention attributes — never needs the original
+  // client objects back, since rowHtml() already recorded what it needs
+  // on the row itself.
+  function applyTabFilter() {
+    tbody.querySelectorAll('tr[data-client-name]').forEach((row) => {
+      const connected = row.dataset.connected === '1';
+      let match = true;
+      if (state.tab === 'connected') match = connected;
+      else if (state.tab === 'offline') match = !connected;
+      else if (state.tab === 'attention') match = row.dataset.attention === '1';
+      row.dataset.tabMatch = match ? '1' : '0';
+    });
+  }
+
   // Applies fresh data to an existing row's cells in place, rather than
   // replacing the <tr> node — outerHTML-replacing (or a full tbody
   // rebuild) would discard whatever inline style attachPagination/
@@ -98,6 +147,8 @@ document.addEventListener('DOMContentLoaded', () => {
   // search state on that row until the next full reload.
   function updateRowInPlace(row, c) {
     row.classList.toggle('blocked-row', !!c.blocked);
+    row.dataset.connected = c.session ? '1' : '0';
+    row.dataset.attention = needsAttention(c) ? '1' : '0';
     const cells = row.children;
     cells[2].textContent = c.status;
     cells[3].textContent = c.expiration;
@@ -111,6 +162,8 @@ document.addEventListener('DOMContentLoaded', () => {
       blockBtn.classList.toggle('btn-ok', !!c.blocked);
       blockBtn.classList.toggle('btn-warn', !c.blocked);
     }
+    applyTabFilter();
+    if (clientsPager) clientsPager.refresh();
   }
 
   // Re-fetches just this one client (not the whole list) and patches its
@@ -148,6 +201,7 @@ document.addEventListener('DOMContentLoaded', () => {
     totalCount += 1;
     if (c.session) connectedCount += 1;
     updateCountHint();
+    applyTabFilter();
     if (clientsPager) {
       clientsPager.refresh();
     } else {
@@ -166,6 +220,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     updateCountHint();
     cacheForDetailPage(clients);
+    applyTabFilter();
 
     if (clientsPager) {
       clientsPager.refresh();

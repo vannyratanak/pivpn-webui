@@ -93,6 +93,20 @@ def test_clients_endpoint_returns_enriched_client_list(client, monkeypatch):
     assert body["connected_count"] == 1
 
 
+def test_clients_endpoint_includes_certificate_state_for_tab_filtering(client, monkeypatch):
+    # The Clients page's Needs-attention tab (and Overview's own) both key
+    # off this exact field — added so the two pages can't independently
+    # drift on what "expiring soon" means. Reuses overview.certificate(),
+    # already covered by test_overview.py's own boundary tests, so this
+    # just confirms the field actually reaches /api/clients at all.
+    token = _login(client).get_json()["access_token"]
+    _seed_client_status_cache([{"name": "laptop-anna", "expiration": "Jan 01 2020"}])
+    monkeypatch.setattr("app.api.db.list_client_blocks", lambda: set())
+
+    resp = client.get("/api/clients", headers=_auth_header(token))
+    assert resp.get_json()["clients"][0]["certificate_state"] == "expired"
+
+
 def test_clients_endpoint_marks_disconnected_clients_session_none(client, monkeypatch):
     token = _login(client).get_json()["access_token"]
     _seed_client_status_cache([{"name": "laptop-anna"}])
@@ -123,6 +137,15 @@ def test_client_status_endpoint_shows_status_ip_and_session(client, monkeypatch)
     assert body["ip"] == "10.202.226.2"
     assert body["blocked"] is False
     assert body["session"]["since"] == "2026-09-16 10:00:00"
+
+
+def test_client_status_endpoint_includes_certificate_state(client, monkeypatch):
+    token = _login(client).get_json()["access_token"]
+    _seed_client_status_cache([{"name": "laptop-anna", "expiration": "Jan 01 2020"}])
+    monkeypatch.setattr("app.api.db.get_client_block", lambda name: None)
+
+    resp = client.get("/api/clients/laptop-anna", headers=_auth_header(token))
+    assert resp.get_json()["certificate_state"] == "expired"
 
 
 def test_client_status_endpoint_matches_name_case_insensitively(client, monkeypatch):

@@ -25,6 +25,8 @@
     </div>
   </div>
 
+  <nav class="tabs" aria-label="Client views" id="clients-tabs"><a href="?tab=connected" data-view="connected">Connected</a><a href="?tab=attention" data-view="attention">Needs attention</a><a href="?tab=all" data-view="all" class="active" aria-current="page">All clients</a><a href="?tab=offline" data-view="offline">Offline</a></nav>
+
   <dialog id="add-client-dialog" class="modal" onclick="closeDialogIfClickedOutside(event, this)">
     <button type="button" class="modal-close-btn" onclick="document.getElementById('add-client-dialog').close()" aria-label="Close">&times;</button>
     <h2>Add client</h2>
