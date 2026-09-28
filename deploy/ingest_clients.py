@@ -40,7 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app import db, pivpn_ctl
 
 
-def ingest_client_status() -> int:
+def ingest_client_status(*, allow_empty: bool = False) -> int:
     # Record the database time before the slower hub/agent requests. A live
     # agent snapshot arriving during those calls is newer and must win over
     # this potentially stale full snapshot when it is finally committed.
@@ -52,6 +52,28 @@ def ingest_client_status() -> int:
         # leave the existing cache in place (stale but present) rather
         # than wiping it on a transient pivpn/agent hiccup.
         print(f"ingest_clients: pivpn list failed, leaving cache as-is: {exc}", file=sys.stderr)
+        return 0
+
+    # list_clients() can also *succeed* with zero rows during a transient
+    # hub/agent link hiccup (a stale or mid-reconnect websocket returning a
+    # technically-ok but empty response) rather than raising PivpnError —
+    # reproduced live: a ~70s agent-side network blip caused several ticks
+    # of this, and since replace_client_status_cache does a full-snapshot
+    # DELETE, every client got wiped and then re-inserted as "brand new"
+    # as they trickled back in over the next few ticks, each getting a
+    # fresh expiration_changed_at — scrambling the Clients page's
+    # create/renew-recency order for every client, not just whichever one
+    # actually triggered the ingest. allow_empty=True is only for callers
+    # that just performed a removal themselves and know zero is plausible
+    # (see app/api.py's remove/bulk-remove routes) — the periodic timer has
+    # no such context, so an unexplained drop to zero there is always
+    # treated as suspicious rather than authoritative.
+    if not clients and not allow_empty and db.list_client_status_cache():
+        print(
+            "ingest_clients: pivpn list returned zero valid clients while the cache is "
+            "non-empty and no removal was expected — leaving cache as-is",
+            file=sys.stderr,
+        )
         return 0
 
     connected = pivpn_ctl.list_connected_clients()

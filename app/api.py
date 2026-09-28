@@ -78,17 +78,22 @@ def _require_admin():
     return None
 
 
-def _refresh_client_status_cache():
+def _refresh_client_status_cache(*, allow_empty: bool = False):
     """Runs one client-status ingest cycle immediately instead of waiting
     for the next timer tick — same pattern as logs_refresh() below, called
     right after add/renew/remove/import so a change made through this API
     shows up on the very next GET /api/clients instead of being up to 10s
     stale. Best-effort: a transient pivpn/agent failure here shouldn't
     turn an already-successful mutation into a 502 response, so errors are
-    swallowed (the next timer tick will just try again)."""
+    swallowed (the next timer tick will just try again).
+
+    allow_empty: only True right after a remove/bulk-remove that could
+    plausibly have taken the client count to zero — see
+    ingest_client_status's own docstring for why an unexplained drop to
+    zero is otherwise treated as a probable hub/agent hiccup, not fact."""
     from deploy import ingest_clients
     try:
-        ingest_clients.ingest_client_status()
+        ingest_clients.ingest_client_status(allow_empty=allow_empty)
     except Exception:
         pass
 
@@ -253,7 +258,7 @@ def remove_client(name):
         _audit("client_remove", name, "error", str(exc))
         return jsonify({"error": str(exc)}), 400
     _audit("client_remove", name)
-    _refresh_client_status_cache()
+    _refresh_client_status_cache(allow_empty=True)
     return jsonify({"removed": name})
 
 
@@ -272,7 +277,7 @@ def bulk_remove_clients():
             errors.append(f"{name}: {exc}")
     _audit("client_bulk_remove", f"{len(removed)} removed, {len(errors)} failed")
     if removed:
-        _refresh_client_status_cache()
+        _refresh_client_status_cache(allow_empty=True)
     return jsonify({"removed": removed, "errors": errors})
 
 

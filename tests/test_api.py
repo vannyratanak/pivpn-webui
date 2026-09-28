@@ -393,7 +393,7 @@ def test_renew_client_partial_failure_still_refreshes_the_cache(client, monkeypa
 def test_remove_client_success(client, monkeypatch):
     token = _login(client).get_json()["access_token"]
     monkeypatch.setattr("app.api.pivpn_ctl.remove_client", lambda name: None)
-    monkeypatch.setattr("app.api._refresh_client_status_cache", lambda: None)
+    monkeypatch.setattr("app.api._refresh_client_status_cache", lambda allow_empty=False: None)
     resp = client.delete("/api/clients/laptop-anna", headers=_auth_header(token))
     assert resp.status_code == 200
     assert resp.get_json() == {"removed": "laptop-anna"}
@@ -413,7 +413,7 @@ def test_remove_client_failure_returns_400(client, monkeypatch):
 def test_bulk_remove_clients_success(client, monkeypatch):
     token = _login(client).get_json()["access_token"]
     monkeypatch.setattr("app.api.pivpn_ctl.remove_client", lambda name: None)
-    monkeypatch.setattr("app.api._refresh_client_status_cache", lambda: None)
+    monkeypatch.setattr("app.api._refresh_client_status_cache", lambda allow_empty=False: None)
     resp = client.post(
         "/api/clients/bulk-remove", json={"names": ["a", "b"]}, headers=_auth_header(token)
     )
@@ -429,7 +429,7 @@ def test_bulk_remove_clients_partial_failure(client, monkeypatch):
             raise pivpn_ctl.PivpnError("no such client")
 
     monkeypatch.setattr("app.api.pivpn_ctl.remove_client", _remove)
-    monkeypatch.setattr("app.api._refresh_client_status_cache", lambda: None)
+    monkeypatch.setattr("app.api._refresh_client_status_cache", lambda allow_empty=False: None)
     resp = client.post(
         "/api/clients/bulk-remove", json={"names": ["a", "ghost"]}, headers=_auth_header(token)
     )

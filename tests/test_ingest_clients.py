@@ -135,6 +135,62 @@ def test_ingest_client_status_removes_entries_no_longer_present(temp_db, monkeyp
     assert {c["name"] for c in db.list_client_status_cache()} == {"keeper"}
 
 
+# --- allow_empty: list_clients() can succeed with zero rows during a
+# transient hub/agent hiccup (a stale/mid-reconnect websocket returning a
+# technically-ok but empty response), not just raise PivpnError. Since
+# replace_client_status_cache does a full-snapshot DELETE, trusting that
+# blindly wipes every client and re-inserts them as "brand new" as they
+# trickle back in — scrambling expiration_changed_at for everyone, not
+# just whoever actually triggered the ingest. Reproduced live from a real
+# ~70s agent-side network blip.
+
+def test_ingest_client_status_ignores_unexpected_empty_result_when_cache_non_empty(temp_db, monkeypatch):
+    monkeypatch.setattr(pivpn_ctl, "list_clients", lambda: [
+        {"name": "keeper", "status": "Valid", "expiration": ""},
+    ])
+    monkeypatch.setattr(pivpn_ctl, "list_client_ips", lambda: {})
+    monkeypatch.setattr(pivpn_ctl, "list_connected_clients", lambda: {})
+    ingest_clients.ingest_client_status()
+
+    # A hiccup: list_clients() returns cleanly, but with nothing in it.
+    monkeypatch.setattr(pivpn_ctl, "list_clients", lambda: [])
+
+    count = ingest_clients.ingest_client_status()
+
+    assert count == 0
+    assert [c["name"] for c in db.list_client_status_cache()] == ["keeper"]
+
+
+def test_ingest_client_status_allow_empty_trusts_a_real_removal(temp_db, monkeypatch):
+    monkeypatch.setattr(pivpn_ctl, "list_clients", lambda: [
+        {"name": "keeper", "status": "Valid", "expiration": ""},
+    ])
+    monkeypatch.setattr(pivpn_ctl, "list_client_ips", lambda: {})
+    monkeypatch.setattr(pivpn_ctl, "list_connected_clients", lambda: {})
+    ingest_clients.ingest_client_status()
+
+    # The caller (app/api.py's remove_client route) just removed the last
+    # client itself and knows zero is plausible here, not a hiccup.
+    monkeypatch.setattr(pivpn_ctl, "list_clients", lambda: [])
+
+    count = ingest_clients.ingest_client_status(allow_empty=True)
+
+    assert count == 0
+    assert db.list_client_status_cache() == []
+
+
+def test_ingest_client_status_empty_result_fine_when_cache_already_empty(temp_db, monkeypatch):
+    # Nothing to protect — nothing is torn down by trusting this.
+    monkeypatch.setattr(pivpn_ctl, "list_clients", lambda: [])
+    monkeypatch.setattr(pivpn_ctl, "list_client_ips", lambda: {})
+    monkeypatch.setattr(pivpn_ctl, "list_connected_clients", lambda: {})
+
+    count = ingest_clients.ingest_client_status()
+
+    assert count == 0
+    assert db.list_client_status_cache() == []
+
+
 def test_ingest_client_status_leaves_cache_untouched_on_pivpn_error(temp_db, monkeypatch):
     monkeypatch.setattr(pivpn_ctl, "list_clients", lambda: [
         {"name": "keeper", "status": "Valid", "expiration": ""},
