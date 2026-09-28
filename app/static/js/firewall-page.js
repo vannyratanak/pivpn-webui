@@ -85,7 +85,16 @@ document.addEventListener('DOMContentLoaded', () => {
         rulesPager && rulesPager.refresh();
         updateEmptyClientMessage();
       });
-      attachLogFilter('rules-filter', '#rules-tbody', rowSelector, '#rules-table thead th:not(:first-child):not(:last-child)', () => {
+      // No headerSelector here, unlike other tables: this table's rows are
+      // grouped under kind-divider-row section headers (FORWARD/INPUT/NAT/
+      // ...), and attachLogFilter's column sort works by moving matched
+      // rows to the end of the container via appendChild — it has no idea
+      // divider rows exist, so it strands every one of them at the top,
+      // permanently wrecking the grouping (even its own "3rd click, back
+      // to unsorted" reset only restores row order, not divider position).
+      // Reproduced live: sort by any column once and the table never
+      // recovers the FORWARD/INPUT/NAT grouping until a full reload.
+      attachLogFilter('rules-filter', '#rules-tbody', rowSelector, null, () => {
         rulesClientFilter && rulesClientFilter.refresh();
         rulesPager && rulesPager.refresh();
         updateEmptyClientMessage();

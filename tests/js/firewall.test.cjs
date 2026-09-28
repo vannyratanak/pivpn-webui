@@ -50,6 +50,21 @@ function page() {
   } };
 }
 
+test('rules table does not wire up column sorting (divider rows would get stranded)', () => {
+  // This table's rows are grouped under kind-divider-row section headers
+  // (FORWARD/INPUT/NAT/...) — attachLogFilter's column sort moves matched
+  // rows via appendChild with no idea dividers exist, permanently
+  // stranding every one of them at the top the first time any column is
+  // sorted (reproduced live: the grouping never recovers, even via its
+  // own "3rd click, back to unsorted" reset, without a full page reload).
+  // A source check, not a behavioral one: the existing DOM mock here
+  // stubs querySelectorAll/appendChild as no-ops, so it can't actually
+  // exercise the real sort-vs-divider interaction either way.
+  const source = fs.readFileSync(path.join(root, 'app/static/js/firewall-page.js'), 'utf8');
+  const call = source.match(/attachLogFilter\('rules-filter',[^)]*\)/s)[0];
+  assert.match(call, /,\s*null\s*,/, 'rules table must pass no headerSelector to attachLogFilter');
+});
+
 test('Apply, Save, and Import use the API without a native form post', async () => {
   const p = page();
   await settle();
