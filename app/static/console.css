@@ -34,6 +34,12 @@ body.client-detail-page.console-page .content {
   min-height: auto;
   overflow: visible;
 }
+/* On short landscape/tablet windows, retain normal page scrolling so the
+   table footer and pagination cannot be clipped by the fixed console shell. */
+@media (max-height: 700px) {
+  body.logs-page.console-page { height: auto; min-height: 100vh; min-height: 100dvh; overflow-y: auto; }
+  body.logs-page.console-page .content { flex: 0 0 auto; min-height: auto; overflow: visible; }
+}
 .console-page .topbar { min-height: 72px; padding: 12px 32px; gap: 28px; border-color: var(--surface-line); }
 .console-brand { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; color: var(--text); white-space: nowrap; font-size: 17px; letter-spacing: -.03em; }
 .console-brand-caption { display: block; font-size: 10px; font-weight: 500; letter-spacing: .08em; color: var(--muted); line-height: 1.3; }

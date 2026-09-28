@@ -345,7 +345,7 @@ def _revoke_client(name: str) -> str | None:
 def remove_client(name: str) -> None:
     name = validate_name(name)
     client_ip = _revoke_client(name)
-    firewall.remove_default_client_block(name, client_ip)
+    firewall.remove_client_rules(name, client_ip)
 
 
 def renew_client(name: str, passphrase: str | None = None) -> Path | None:

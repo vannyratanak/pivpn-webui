@@ -380,6 +380,7 @@ def client_add_rule(name):
             dst=data.get("dst", ""),
             dport=data.get("dport"),
             comment=data.get("comment", ""),
+            client_name=name,
         )
     except firewall.FirewallError as exc:
         _audit("firewall_forward_add", "", "error", str(exc))
@@ -638,7 +639,7 @@ def client_import_rules(name):
         text = upload.read().decode("utf-8")
     except UnicodeDecodeError:
         return jsonify(error="Could not read that file as text (expected UTF-8)."), 400
-    added, errors = firewall.import_client_rules(text, client_ip)
+    added, errors = firewall.import_client_rules(text, client_ip, client_name=name)
     if added:
         try:
             firewall.regenerate_client_script(name, client_ip)

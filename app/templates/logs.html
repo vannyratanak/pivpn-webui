@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Logs — PiVPN Web UI{% endblock %}
+{% block body_class %}logs-page{% endblock %}
 {% block content %}
 
 {% set log_search_labels = {'sessions': 'VPN sessions', 'client_sessions': 'client sessions', 'traffic': 'traffic flows', 'system': 'system log', 'activity': 'activity log', 'auth': 'user auth log'} %}
@@ -196,5 +197,5 @@
 
 <script src="{{ url_for('static', filename='js/api-client.js') }}"></script>
 <script src="{{ url_for('static', filename='js/overview-stream.js', v='2') }}"></script>
-<script src="{{ url_for('static', filename='js/logs-page.js', v='2') }}"></script>
+<script src="{{ url_for('static', filename='js/logs-page.js', v='3') }}"></script>
 {% endblock %}

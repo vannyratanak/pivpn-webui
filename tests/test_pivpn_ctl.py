@@ -89,7 +89,7 @@ def test_remove_client_cleans_default_rules_after_successful_revoke(monkeypatch)
     monkeypatch.setattr(pivpn_ctl, "get_client_ip", lambda name: "10.8.0.5")
     calls = []
     monkeypatch.setattr(pivpn_ctl, "_run_pivpn", lambda argv, timeout=30: _fake_completed(""))
-    monkeypatch.setattr(pivpn_ctl.firewall, "remove_default_client_block",
+    monkeypatch.setattr(pivpn_ctl.firewall, "remove_client_rules",
                         lambda name, ip: calls.append((name, ip)))
 
     pivpn_ctl.remove_client("alice")
@@ -102,7 +102,7 @@ def test_remove_client_does_not_clean_rules_when_revoke_fails(monkeypatch):
     monkeypatch.setattr(pivpn_ctl, "get_client_ip", lambda name: "10.8.0.5")
     monkeypatch.setattr(pivpn_ctl, "_run_pivpn", lambda argv, timeout=30: _fake_completed("failed", returncode=1))
     calls = []
-    monkeypatch.setattr(pivpn_ctl.firewall, "remove_default_client_block",
+    monkeypatch.setattr(pivpn_ctl.firewall, "remove_client_rules",
                         lambda name, ip: calls.append((name, ip)))
 
     try:

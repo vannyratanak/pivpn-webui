@@ -511,6 +511,7 @@ def client_add_rule(name):
                 dst=dst,
                 dport=request.form.get("dport"),
                 comment=request.form.get("comment", ""),
+                client_name=name,
             )
             added += 1
             _audit("firewall_forward_add", f"rule#{rule_id}")

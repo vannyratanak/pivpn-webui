@@ -706,24 +706,44 @@ def add_default_client_block(client_name: str, client_ip: str) -> list[int]:
     ]
 
 
-def remove_default_client_block(client_name: str, client_ip: str | None = None) -> int:
-    """Remove only the automatic RFC1918 rules created for a deleted
-    client. The explicit client_name link handles rules created after this
-    association was added; the exact shape/comment/IP check cleans up older
-    generated rows without touching user-authored rules."""
+def _is_exact_client_ip(value: str | None, client_ip: str | None) -> bool:
+    if not value or not client_ip:
+        return False
+    try:
+        address = ipaddress.ip_address(client_ip)
+        if "/" in value:
+            network = ipaddress.ip_network(value, strict=False)
+            return network.prefixlen == address.max_prefixlen and network.network_address == address
+        return ipaddress.ip_address(value) == address
+    except ValueError:
+        return False
+
+
+def remove_client_rules(client_name: str, client_ip: str | None = None) -> int:
+    """Delete firewall rules owned by a removed VPN client.
+
+    Client-scoped rules carry client_name. For older rows, an exact client
+    host address in a rule's address fields is treated as ownership; broader
+    CIDRs are deliberately left alone because they may be shared policies.
+    The generated-default comment is also recognized for legacy rows when
+    the client's CCD address could not be read before revoke.
+    """
     expected_comment = f"Default: block internal networks ({client_name})"
     rules = db.list_rules()
+    address_fields = ("src", "dst", "target_ip", "client_ip", "snat_ip")
     rule_ids = [
         rule["id"] for rule in rules
-        if rule.get("kind") == "forward"
-        and rule.get("action") == "DROP"
-        and rule.get("protocol") == "all"
-        and rule.get("dport") in (None, "")
-        and rule.get("dst") in RFC1918_RANGES
-        and rule.get("comment") == expected_comment
-        and (
+        if (
             rule.get("client_name") == client_name
-            or (client_ip and rule.get("src") == client_ip)
+            or any(_is_exact_client_ip(rule.get(field), client_ip) for field in address_fields)
+            or (
+                rule.get("kind") == "forward"
+                and rule.get("action") == "DROP"
+                and rule.get("protocol") == "all"
+                and rule.get("dport") in (None, "")
+                and rule.get("dst") in RFC1918_RANGES
+                and rule.get("comment") == expected_comment
+            )
         )
     ]
     for rule_id in rule_ids:
@@ -1056,7 +1076,7 @@ def import_rules(
     return added, errors
 
 
-def import_client_rules(text: str, client_ip: str) -> tuple[int, list[str]]:
+def import_client_rules(text: str, client_ip: str, client_name: str | None = None) -> tuple[int, list[str]]:
     """Bulk-add FORWARD/DROP rules for one client — the client detail
     page's own Import dialog. A narrower file format than import_rules()
     above, to match this page's own narrower Add Rule dialog: every line
@@ -1109,7 +1129,7 @@ def import_client_rules(text: str, client_ip: str) -> tuple[int, list[str]]:
             add_forward_rule(
                 action=fields.get("action"), protocol=fields.get("protocol"),
                 src=client_ip, dst=fields.get("dst", ""), dport=fields.get("dport"),
-                comment=fields.get("comment", ""),
+                comment=fields.get("comment", ""), client_name=client_name,
             )
             added += 1
         except FirewallError as exc:

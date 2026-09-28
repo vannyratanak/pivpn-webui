@@ -25,7 +25,7 @@ from app.firewall import (
     _unapply,
     _would_allow_client,
     add_default_client_block,
-    remove_default_client_block,
+    remove_client_rules,
     add_forward_rule,
     add_input_rule,
     delete_rule,
@@ -1102,7 +1102,7 @@ def test_add_default_client_block_does_not_touch_internet_traffic(tmp_path, monk
     assert all(d in RFC1918_RANGES for d in dsts)
 
 
-def test_remove_default_client_block_removes_only_that_clients_auto_rules(tmp_path, monkeypatch):
+def test_remove_client_rules_removes_client_rules_and_preserves_shared_rules(tmp_path, monkeypatch):
     applied = _setup_forward_db(tmp_path, monkeypatch)
     add_default_client_block("alice", "10.8.0.5")
     add_default_client_block("bob", "10.8.0.6")
@@ -1110,24 +1110,29 @@ def test_remove_default_client_block_removes_only_that_clients_auto_rules(tmp_pa
         action="DROP", protocol="all", src="10.8.0.5", dst="10.0.0.0/8",
         dport=None, comment="Custom rule for Alice",
     )
+    add_forward_rule(
+        action="DROP", protocol="all", src="10.8.0.0/24", dst="192.168.0.0/16",
+        dport=None, comment="Shared VPN subnet policy",
+    )
 
-    assert remove_default_client_block("alice", "10.8.0.5") == 3
+    assert remove_client_rules("alice", "10.8.0.5") == 4
 
     remaining = db.list_rules()
-    assert len(remaining) == 4
+    assert len(remaining) == 4  # Bob's defaults plus the shared subnet rule.
     assert {rule["client_name"] for rule in remaining if rule["client_name"]} == {"bob"}
-    assert any(rule["comment"] == "Custom rule for Alice" for rule in remaining)
-    assert all("-D" in call for call in applied[-3:])
+    assert any(rule["comment"] == "Shared VPN subnet policy" for rule in remaining)
+    assert not any(rule["comment"] == "Custom rule for Alice" for rule in remaining)
+    assert all("-D" in call for call in applied[-4:])
 
 
-def test_remove_default_client_block_cleans_legacy_rows_by_name_comment_and_ip(tmp_path, monkeypatch):
+def test_remove_client_rules_cleans_legacy_default_rows_without_ip(tmp_path, monkeypatch):
     _setup_forward_db(tmp_path, monkeypatch)
     add_forward_rule(
         action="DROP", protocol="all", src="10.8.0.5", dst="10.0.0.0/8",
         dport=None, comment="Default: block internal networks (alice)",
     )
 
-    assert remove_default_client_block("alice", "10.8.0.5") == 1
+    assert remove_client_rules("alice") == 1
     assert db.list_rules() == []
 
 

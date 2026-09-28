@@ -130,6 +130,7 @@
     function showLoadError(cfg, message) {
       const tbody = document.getElementById(cfg.tbodyId);
       tbody.innerHTML = `<tr class="empty-row"><td colspan="${cfg.colCount}" class="empty">${escapeHtml(message)}</td></tr>`;
+      if (window.fitTableScrollHeights) window.fitTableScrollHeights();
     }
 
     function loadLogs(showSkeletonWhileLoading) {
@@ -156,6 +157,10 @@
           nextBtn.disabled = data.page >= totalPages;
           page = data.page;
           syncUrl();
+          // Rows and the shared pagination status arrive after the initial
+          // page layout pass. Refit now so the table leaves enough room for
+          // its footer on tablets and short browser windows.
+          if (window.fitTableScrollHeights) window.fitTableScrollHeights();
         })
         .catch((error) => {
           if (generation !== loadGeneration) return;

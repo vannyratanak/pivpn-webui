@@ -25,7 +25,7 @@
     }
   </script>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-  {% if current_user.is_authenticated %}<link rel="stylesheet" href="{{ url_for('static', filename='console.css', v='15') }}">{% endif %}
+  {% if current_user.is_authenticated %}<link rel="stylesheet" href="{{ url_for('static', filename='console.css', v='16') }}">{% endif %}
   {% block page_head %}{% endblock %}
   <!-- Not deferred: every page's own inline <script> block (search/pagination/
        bulk-select wiring in clients.html, firewall.html, etc.) runs inline,
