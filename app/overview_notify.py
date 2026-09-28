@@ -46,6 +46,13 @@ def install():
             conn.execute(f'DROP TRIGGER IF EXISTS live_log_changed ON {table}')
             conn.execute(f"CREATE TRIGGER live_log_changed AFTER INSERT ON {table} "
                          f"FOR EACH STATEMENT EXECUTE FUNCTION overview_notify('{topic}')")
+        # Traffic is inserted before its asynchronous WHOIS enrichment
+        # finishes. Notify browsers when that worker fills dst_org so the
+        # already-visible row updates without a manual refresh or new flow.
+        conn.execute('DROP TRIGGER IF EXISTS traffic_org_changed ON traffic_flows')
+        conn.execute("""CREATE TRIGGER traffic_org_changed AFTER UPDATE ON traffic_flows
+          FOR EACH ROW WHEN (NEW.dst_org IS DISTINCT FROM OLD.dst_org)
+          EXECUTE FUNCTION overview_notify('traffic_logs')""")
         # Only clock-change evidence affects Overview among system log lines.
         conn.execute('DROP TRIGGER IF EXISTS overview_clock_changed ON system_log_lines')
         conn.execute("""CREATE TRIGGER overview_clock_changed AFTER INSERT ON system_log_lines

@@ -53,6 +53,8 @@ def test_notifications_after_commit_not_counters_or_rollback(temp_db):
         writer.execute("INSERT INTO traffic_flows (ts,src,dst,proto) VALUES (%s,%s,%s,%s)", ('2026-09-25 10:00:04','10.8.0.2','1.1.1.1','UDP'))
         writer.commit()
         assert notifications(listener) == ['traffic_logs']
+        db.update_traffic_flow_orgs({'1.1.1.1': 'Cloudflare, Inc.'})
+        assert notifications(listener) == ['traffic_logs']
         writer.execute("INSERT INTO audit_log (actor,action,result) VALUES (%s,%s,%s)", ('admin','test','ok'))
         writer.commit()
         assert notifications(listener) == ['activity_logs']
