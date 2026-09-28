@@ -1,17 +1,15 @@
 // Client-side pagination layered on top of attachLogFilter (log-filter.js)
-// and, where present, attachSelectFilter (select-filter.js) or a page's own
-// tab-view filter (e.g. the Clients page's Connected/Needs attention/All/
-// Offline tabs). Reads item.dataset.filterMatch (search), .selectMatch (the
+// and, where present, attachSelectFilter (select-filter.js). Reads
+// item.dataset.filterMatch (search) and item.dataset.selectMatch (the
 // select-filter dropdown, only ever set on pages that have one — e.g.
-// Firewall Rules' "Filter by client"), and .tabMatch (a page's own tab
-// filter, if it sets one) as the authoritative "does this row match the
-// current filters" signal, independent of item.style.display — which this
-// file also writes to, to slice the matching set into pages. Each signal
-// defaults to undefined (!== '0' is true) on any page that never sets it,
-// so this composes for free whether a page uses one of these filters, all
-// of them, or none. Keeping these on separate signals from style.display is
-// what lets filtering, sorting, and paging compose correctly instead of
-// fighting over the same property.
+// Firewall Rules' "Filter by client") as the authoritative "does this row
+// match the current filters" signal, independent of item.style.display —
+// which this file also writes to, to slice the matching set into pages.
+// selectMatch defaults to undefined (!== '0' is true) on every page
+// without a select-filter, so this composes for free there too. Keeping
+// these on separate signals from style.display is what lets filtering,
+// sorting, and paging compose correctly instead of fighting over the same
+// property.
 function attachPagination(containerSelector, itemSelector, pageSizeId, controlsId, onChange) {
   const container = document.querySelector(containerSelector);
   const pageSizeSelect = document.getElementById(pageSizeId);
@@ -32,7 +30,7 @@ function attachPagination(containerSelector, itemSelector, pageSizeId, controlsI
   function refresh() {
     const pageSize = parseInt(pageSizeSelect.value, 10) || 10;
     const allItems = Array.from(container.querySelectorAll(itemSelector));
-    const matching = allItems.filter((item) => item.dataset.filterMatch !== '0' && item.dataset.selectMatch !== '0' && item.dataset.tabMatch !== '0');
+    const matching = allItems.filter((item) => item.dataset.filterMatch !== '0' && item.dataset.selectMatch !== '0');
     const totalPages = Math.max(1, Math.ceil(matching.length / pageSize));
     currentPage = Math.min(Math.max(1, currentPage), totalPages);
 

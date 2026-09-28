@@ -101,20 +101,11 @@ def list_clients():
     calling pivpn_ctl live — see that table's own comment for why. blocked
     is still computed live here (db.get_client_block, a local firewall_rules
     read, no agent call), since caching it would add staleness for no
-    speed benefit.
-
-    certificate_state (valid/expiring/expired/unknown) reuses overview.py's
-    own classification so the Clients page's "Needs attention" tab and the
-    Overview dashboard's agree on what that means, instead of two
-    independently-drifting definitions of "expiring soon"."""
-    from datetime import datetime, timezone
-    from app.overview import certificate
+    speed benefit."""
     client_list = db.list_client_status_cache()
     blocked_clients = db.list_client_blocks()
-    today = datetime.now(timezone.utc).date()
     for c in client_list:
         c["blocked"] = c["name"] in blocked_clients
-        c.update(certificate(c, today))
     return jsonify({"clients": client_list, "connected_count": sum(1 for c in client_list if c["session"])})
 
 
@@ -123,9 +114,7 @@ def list_clients():
 def client_status(name):
     """Single-client view of /api/clients, for a caller polling just one
     name instead of fetching the whole list every time. Same cache-backed
-    read as list_clients() above, including its certificate_state field."""
-    from datetime import datetime, timezone
-    from app.overview import certificate
+    read as list_clients() above."""
     try:
         name = pivpn_ctl.validate_name(name)
     except pivpn_ctl.PivpnError as exc:
@@ -134,7 +123,6 @@ def client_status(name):
     if not match:
         return jsonify({"error": f"no valid client named '{name}'"}), 404
     match["blocked"] = db.get_client_block(name) is not None
-    match.update(certificate(match, datetime.now(timezone.utc).date()))
     return jsonify(match)
 
 
