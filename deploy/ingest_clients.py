@@ -40,7 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app import db, pivpn_ctl
 
 
-def ingest_client_status(*, allow_empty: bool = False) -> int:
+def ingest_client_status(*, allow_empty: bool = False, just_touched: str | None = None) -> int:
     # Record the database time before the slower hub/agent requests. A live
     # agent snapshot arriving during those calls is newer and must win over
     # this potentially stale full snapshot when it is finally committed.
@@ -94,7 +94,7 @@ def ingest_client_status(*, allow_empty: bool = False) -> int:
             "session_bytes_sent": session.get("bytes_sent") if session else None,
             "session_since": session.get("since") if session else None,
         })
-    db.replace_client_status_cache(rows, session_snapshot_started_at=snapshot_started_at)
+    db.replace_client_status_cache(rows, session_snapshot_started_at=snapshot_started_at, just_touched=just_touched)
     return len(rows)
 
 

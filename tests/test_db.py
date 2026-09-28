@@ -116,6 +116,39 @@ def test_replace_client_status_cache_bumps_timestamp_when_expiration_changes(tmp
     assert after > before
 
 
+def test_replace_client_status_cache_just_touched_bumps_even_with_same_expiration_string(tmp_path, monkeypatch):
+    # A renewed cert can land on the exact same displayed day as the one it
+    # replaced (both computed as "today + a fixed PIVPN_CERT_DAYS") — the
+    # string-diff check alone would then wrongly see "nothing changed" and
+    # never re-stamp. Reproduced live: a same-day renew never moved to the
+    # top of the Clients page. just_touched bypasses that check entirely
+    # for the one client that's known to have just been (re)issued.
+    _use_temp_db(tmp_path, monkeypatch)
+    db.replace_client_status_cache([_status_row(expiration="Sep 12 2029")])
+    before = db.get_client_status_cache("client1")["expiration_changed_at"]
+
+    db.replace_client_status_cache([_status_row(expiration="Sep 12 2029")], just_touched="client1")
+    after = db.get_client_status_cache("client1")["expiration_changed_at"]
+    assert after > before
+
+
+def test_replace_client_status_cache_just_touched_does_not_affect_other_clients(tmp_path, monkeypatch):
+    _use_temp_db(tmp_path, monkeypatch)
+    db.replace_client_status_cache([
+        _status_row(name="client1", expiration="Sep 09 2029"),
+        _status_row(name="client2", expiration="Sep 09 2029"),
+    ])
+    other_before = db.get_client_status_cache("client2")["expiration_changed_at"]
+
+    db.replace_client_status_cache([
+        _status_row(name="client1", expiration="Sep 09 2029"),
+        _status_row(name="client2", expiration="Sep 09 2029"),
+    ], just_touched="client1")
+
+    other_after = db.get_client_status_cache("client2")["expiration_changed_at"]
+    assert other_after == other_before
+
+
 def test_init_db_backfills_expiration_changed_at_from_display_string(tmp_path, monkeypatch):
     _use_temp_db(tmp_path, monkeypatch)
     conn = db.get_conn()

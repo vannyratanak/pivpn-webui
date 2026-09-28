@@ -629,7 +629,7 @@ def client_status_snapshot_started_at():
         conn.close()
 
 
-def replace_client_status_cache(rows: list[dict], session_snapshot_started_at=None):
+def replace_client_status_cache(rows: list[dict], session_snapshot_started_at=None, just_touched: str | None = None):
     """Full-snapshot replace: deploy/ingest_clients.py always re-fetches the
     complete current client list (a full `pivpn list` + status/CCD lookup,
     not a delta), so this deletes whatever's no longer present in `rows`
@@ -643,7 +643,16 @@ def replace_client_status_cache(rows: list[dict], session_snapshot_started_at=No
     can return repeated historical certificate entries for one name — see
     that function's own docstring), the LAST one wins via ON CONFLICT DO
     UPDATE, matching the old live-lookup's _find_valid_client, which picked
-    matches[-1] for the same reason."""
+    matches[-1] for the same reason.
+
+    just_touched: the one client name (if any) whose add/renew just
+    triggered this refresh — see app/api.py's add_client/renew_client
+    routes. Its expiration_changed_at is bumped unconditionally instead of
+    only when the expiration *string* changed: a renewed cert can land on
+    the exact same displayed day as the one it replaced (both computed as
+    "today + a fixed PIVPN_CERT_DAYS"), which the string-diff check alone
+    would then wrongly treat as "nothing happened" and never re-stamp.
+    Reproduced live: a same-day renew never moved to the top."""
     conn = get_conn()
     try:
         names = [r["name"] for r in rows]
@@ -672,6 +681,22 @@ def replace_client_status_cache(rows: list[dict], session_snapshot_started_at=No
                     "THEN client_status_cache.session_updated_at ELSE clock_timestamp() END, "
                 )
                 session_params = (session_snapshot_started_at,) * 6
+            if r["name"] == just_touched:
+                # Known-fresh: skip the string comparison entirely (see
+                # this function's own docstring for why it can't be
+                # trusted alone).
+                expiration_changed_sql = "expiration_changed_at = clock_timestamp(), "
+            else:
+                # A fresh renew's cert expiration differs from whatever was
+                # last stored (or there was no prior row at all, on the
+                # INSERT path below) — bumped only then, so an untouched
+                # client's timestamp survives every routine 10s re-ingest
+                # unchanged. This is what clients-page.js's
+                # compareClientOrder actually sorts by.
+                expiration_changed_sql = (
+                    "expiration_changed_at = CASE WHEN EXCLUDED.expiration IS DISTINCT FROM client_status_cache.expiration "
+                    "THEN clock_timestamp() ELSE client_status_cache.expiration_changed_at END, "
+                )
             conn.execute(
                 "INSERT INTO client_status_cache "
                 "(name, status, expiration, list_position, ip, session_real_address, "
@@ -683,16 +708,7 @@ def replace_client_status_cache(rows: list[dict], session_snapshot_started_at=No
                 "status = EXCLUDED.status, expiration = EXCLUDED.expiration, "
                 "list_position = EXCLUDED.list_position, ip = EXCLUDED.ip, "
                 + conflict_session_sql
-                # A brand new client's or fresh renew's cert expiration
-                # differs from whatever was last stored (or there was no
-                # prior row at all, on the INSERT path above) — bumped only
-                # then, so an untouched client's timestamp survives every
-                # routine 10s re-ingest unchanged. This is what
-                # clients-page.js's compareClientOrder actually sorts by;
-                # see that migration's own comment for why the display
-                # string (day granularity) isn't enough on its own.
-                + "expiration_changed_at = CASE WHEN EXCLUDED.expiration IS DISTINCT FROM client_status_cache.expiration "
-                  "THEN clock_timestamp() ELSE client_status_cache.expiration_changed_at END, "
+                + expiration_changed_sql
                 + "updated_at = EXCLUDED.updated_at",
                 (
                     r["name"], r["status"], r["expiration"], r["list_position"], r["ip"],

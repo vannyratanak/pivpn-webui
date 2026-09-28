@@ -78,7 +78,7 @@ def _require_admin():
     return None
 
 
-def _refresh_client_status_cache(*, allow_empty: bool = False):
+def _refresh_client_status_cache(*, allow_empty: bool = False, just_touched: str | None = None):
     """Runs one client-status ingest cycle immediately instead of waiting
     for the next timer tick — same pattern as logs_refresh() below, called
     right after add/renew/remove/import so a change made through this API
@@ -90,10 +90,14 @@ def _refresh_client_status_cache(*, allow_empty: bool = False):
     allow_empty: only True right after a remove/bulk-remove that could
     plausibly have taken the client count to zero — see
     ingest_client_status's own docstring for why an unexplained drop to
-    zero is otherwise treated as a probable hub/agent hiccup, not fact."""
+    zero is otherwise treated as a probable hub/agent hiccup, not fact.
+
+    just_touched: the client name right after its own add/renew succeeded
+    — see replace_client_status_cache's own docstring for why this can't
+    just be inferred from whether the expiration string changed."""
     from deploy import ingest_clients
     try:
-        ingest_clients.ingest_client_status(allow_empty=allow_empty)
+        ingest_clients.ingest_client_status(allow_empty=allow_empty, just_touched=just_touched)
     except Exception:
         pass
 
@@ -209,13 +213,13 @@ def add_client():
         # a warning the frontend surfaces without blocking the "client
         # created" flow.
         _audit("client_add_partial", name, "error", str(exc))
-        _refresh_client_status_cache()
+        _refresh_client_status_cache(just_touched=name)
         return jsonify({"created": name, "warning": str(exc)}), 201
     except pivpn_ctl.PivpnError as exc:
         _audit("client_add", name, "error", str(exc))
         return jsonify({"error": str(exc)}), 400
     _audit("client_add", name)
-    _refresh_client_status_cache()
+    _refresh_client_status_cache(just_touched=name)
     return jsonify({"created": name}), 201
 
 
@@ -244,7 +248,7 @@ def renew_client(name):
         _audit("client_renew", name, "error", str(exc))
         return jsonify({"error": str(exc)}), 400
     _audit("client_renew", name)
-    _refresh_client_status_cache()
+    _refresh_client_status_cache(just_touched=name)
     return jsonify({"renewed": name})
 
 

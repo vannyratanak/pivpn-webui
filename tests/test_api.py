@@ -222,7 +222,7 @@ def test_add_client_creates_and_audits(client, monkeypatch):
     token = _login(client).get_json()["access_token"]
     calls = {}
     monkeypatch.setattr("app.api.pivpn_ctl.add_client", lambda name, passphrase=None: calls.update(name=name, passphrase=passphrase))
-    monkeypatch.setattr("app.api._refresh_client_status_cache", lambda: None)
+    monkeypatch.setattr("app.api._refresh_client_status_cache", lambda **kwargs: None)
 
     resp = client.post("/api/clients", json={"name": "laptop-anna", "passphrase": "s3cret"}, headers=_auth_header(token))
     assert resp.status_code == 201
@@ -242,11 +242,27 @@ def test_add_client_refreshes_the_client_status_cache(client, monkeypatch):
     token = _login(client).get_json()["access_token"]
     monkeypatch.setattr("app.api.pivpn_ctl.add_client", lambda name, passphrase=None: None)
     calls = []
-    monkeypatch.setattr("app.api._refresh_client_status_cache", lambda: calls.append(True))
+    monkeypatch.setattr("app.api._refresh_client_status_cache", lambda **kwargs: calls.append(True))
 
     resp = client.post("/api/clients", json={"name": "laptop-anna"}, headers=_auth_header(token))
     assert resp.status_code == 201
     assert calls == [True]
+
+
+def test_add_client_marks_the_new_client_as_just_touched(client, monkeypatch):
+    # See replace_client_status_cache's own docstring: without this, a
+    # brand new client's expiration_changed_at relies on its expiration
+    # string differing from nothing (always true for a first insert) — this
+    # asserts the route actually plumbs the name through rather than just
+    # happening to work today.
+    token = _login(client).get_json()["access_token"]
+    monkeypatch.setattr("app.api.pivpn_ctl.add_client", lambda name, passphrase=None: None)
+    calls = []
+    monkeypatch.setattr("app.api._refresh_client_status_cache", lambda **kwargs: calls.append(kwargs))
+
+    resp = client.post("/api/clients", json={"name": "laptop-anna"}, headers=_auth_header(token))
+    assert resp.status_code == 201
+    assert calls == [{"just_touched": "laptop-anna"}]
 
 
 def test_add_client_failure_does_not_refresh_the_cache(client, monkeypatch):
@@ -291,7 +307,7 @@ def test_add_client_partial_failure_returns_201_with_warning(client, monkeypatch
         )
 
     monkeypatch.setattr("app.api.pivpn_ctl.add_client", _partial)
-    monkeypatch.setattr("app.api._refresh_client_status_cache", lambda: None)
+    monkeypatch.setattr("app.api._refresh_client_status_cache", lambda **kwargs: None)
 
     resp = client.post("/api/clients", json={"name": "laptop-anna"}, headers=_auth_header(token))
     assert resp.status_code == 201
@@ -309,7 +325,7 @@ def test_add_client_partial_failure_still_refreshes_the_cache(client, monkeypatc
     monkeypatch.setattr("app.api.pivpn_ctl.add_client",
                          lambda name, passphrase=None: (_ for _ in ()).throw(pivpn_ctl.PivpnAddPartialFailure("boom")))
     calls = []
-    monkeypatch.setattr("app.api._refresh_client_status_cache", lambda: calls.append(True))
+    monkeypatch.setattr("app.api._refresh_client_status_cache", lambda **kwargs: calls.append(True))
 
     resp = client.post("/api/clients", json={"name": "laptop-anna"}, headers=_auth_header(token))
     assert resp.status_code == 201
@@ -319,10 +335,24 @@ def test_add_client_partial_failure_still_refreshes_the_cache(client, monkeypatc
 def test_renew_client_success(client, monkeypatch):
     token = _login(client).get_json()["access_token"]
     monkeypatch.setattr("app.api.pivpn_ctl.renew_client", lambda name, passphrase=None: None)
-    monkeypatch.setattr("app.api._refresh_client_status_cache", lambda: None)
+    monkeypatch.setattr("app.api._refresh_client_status_cache", lambda **kwargs: None)
     resp = client.post("/api/clients/laptop-anna/renew", headers=_auth_header(token))
     assert resp.status_code == 200
     assert resp.get_json() == {"renewed": "laptop-anna"}
+
+
+def test_renew_client_marks_the_renewed_client_as_just_touched(client, monkeypatch):
+    # The actual bug this fixes: a renewed cert can land on the exact same
+    # displayed expiration day as before, which the ingest's own string-diff
+    # check alone can't tell apart from "nothing happened" — this asserts
+    # the route tells it explicitly instead of relying on that diff.
+    token = _login(client).get_json()["access_token"]
+    monkeypatch.setattr("app.api.pivpn_ctl.renew_client", lambda name, passphrase=None: None)
+    calls = []
+    monkeypatch.setattr("app.api._refresh_client_status_cache", lambda **kwargs: calls.append(kwargs))
+    resp = client.post("/api/clients/laptop-anna/renew", headers=_auth_header(token))
+    assert resp.status_code == 200
+    assert calls == [{"just_touched": "laptop-anna"}]
 
 
 def test_renew_client_passes_a_new_passphrase_through(client, monkeypatch):
@@ -332,7 +362,7 @@ def test_renew_client_passes_a_new_passphrase_through(client, monkeypatch):
         "app.api.pivpn_ctl.renew_client",
         lambda name, passphrase=None: calls.update(name=name, passphrase=passphrase),
     )
-    monkeypatch.setattr("app.api._refresh_client_status_cache", lambda: None)
+    monkeypatch.setattr("app.api._refresh_client_status_cache", lambda **kwargs: None)
     resp = client.post(
         "/api/clients/laptop-anna/renew", json={"passphrase": "new-s3cret"}, headers=_auth_header(token)
     )
@@ -347,7 +377,7 @@ def test_renew_client_with_no_passphrase_is_passwordless(client, monkeypatch):
         "app.api.pivpn_ctl.renew_client",
         lambda name, passphrase=None: calls.update(name=name, passphrase=passphrase),
     )
-    monkeypatch.setattr("app.api._refresh_client_status_cache", lambda: None)
+    monkeypatch.setattr("app.api._refresh_client_status_cache", lambda **kwargs: None)
     resp = client.post("/api/clients/laptop-anna/renew", headers=_auth_header(token))
     assert resp.status_code == 200
     assert calls == {"name": "laptop-anna", "passphrase": None}
