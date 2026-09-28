@@ -28,6 +28,45 @@ document.addEventListener('DOMContentLoaded', () => {
     return div.innerHTML;
   }
 
+  // Online clients first, then most recently created/renewed first. There's
+  // no separate "created/renewed at" field to sort by directly — a later
+  // cert expiration is used as a proxy instead, since PIVPN_CERT_DAYS is a
+  // fixed offset from creation/renewal time, so it sorts the same way.
+  // Unparseable/missing expiration sorts last rather than throwing.
+  function parseExpirationMs(expiration) {
+    const ms = Date.parse(expiration || '');
+    return Number.isNaN(ms) ? -Infinity : ms;
+  }
+
+  function orderInfoFromClient(c) {
+    return { online: !!c.session, expirationMs: parseExpirationMs(c.expiration) };
+  }
+
+  function orderInfoFromRow(row) {
+    return {
+      online: !!row.querySelector('.badge-connected'),
+      expirationMs: parseExpirationMs(row.children[3] && row.children[3].textContent),
+    };
+  }
+
+  function compareClientOrder(a, b) {
+    if (a.online !== b.online) return a.online ? -1 : 1;
+    return b.expirationMs - a.expirationMs;
+  }
+
+  // Moves `row` to its correct position among its current siblings per
+  // compareClientOrder — used both for a freshly inserted row (always
+  // offline, but with the newest expiration of anyone) and for an
+  // existing row whose sort-relevant fields just changed (a renew, which
+  // reissues the cert with a fresh expiration). Pagination has already
+  // sliced the table by DOM order, so the caller still needs to refresh
+  // it after this moves anything.
+  function repositionRow(row, info) {
+    const rows = Array.from(tbody.querySelectorAll('tr:not(.empty-row):not(.skeleton-row)')).filter((r) => r !== row);
+    const before = rows.find((sibling) => compareClientOrder(info, orderInfoFromRow(sibling)) < 0);
+    if (before) before.before(row); else tbody.appendChild(row);
+  }
+
   function rowHtml(c) {
     const blockedClass = c.blocked ? ' class="blocked-row"' : '';
     const sessionBadge = c.session
@@ -122,7 +161,14 @@ document.addEventListener('DOMContentLoaded', () => {
     return ApiClient.call(`/api/clients/${encodeURIComponent(name)}`)
       .then((resp) => resp.json().then((data) => ({ ok: resp.ok, data })))
       .then(({ ok, data }) => {
-        if (ok) updateRowInPlace(row, data);
+        if (!ok) return;
+        updateRowInPlace(row, data);
+        // A renew reissues the cert with a fresh expiration, which moves
+        // this row within the online/offline ordering (see
+        // compareClientOrder) — a block/unblock leaves session and
+        // expiration untouched, so this is a no-op move for that case.
+        repositionRow(row, orderInfoFromClient(data));
+        if (clientsPager) clientsPager.refresh();
       });
   }
 
@@ -145,6 +191,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const emptyRow = tbody.querySelector('.empty-row');
     if (emptyRow) emptyRow.remove();
     tbody.insertAdjacentHTML('beforeend', rowHtml(c));
+    repositionRow(tbody.lastElementChild, orderInfoFromClient(c));
     totalCount += 1;
     if (c.session) connectedCount += 1;
     updateCountHint();
@@ -162,7 +209,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!clients.length) {
       tbody.innerHTML = '<tr class="empty-row"><td colspan="7" class="empty">No clients found (or `pivpn list` returned nothing parseable — check the server logs).</td></tr>';
     } else {
-      tbody.innerHTML = clients.map(rowHtml).join('');
+      const sorted = clients.slice().sort((a, b) => compareClientOrder(orderInfoFromClient(a), orderInfoFromClient(b)));
+      tbody.innerHTML = sorted.map(rowHtml).join('');
     }
     updateCountHint();
     cacheForDetailPage(clients);
