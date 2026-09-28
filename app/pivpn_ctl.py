@@ -327,12 +327,25 @@ def import_clients(text: str) -> tuple[int, list[str]]:
     return added, errors
 
 
-def remove_client(name: str) -> None:
+def _revoke_client(name: str) -> str | None:
     name = validate_name(name)
     _require_pivpn_binary()
+    # Keep the address before revoke removes the CCD assignment. This allows
+    # cleanup of older auto-block rows that predate the client_name link.
+    try:
+        client_ip = get_client_ip(name)
+    except Exception:
+        client_ip = None
     result = _run_pivpn(["pivpn", "revoke", "-y", name])
     if result.returncode != 0:
         raise PivpnError((result.stdout + result.stderr).strip() or "pivpn revoke failed")
+    return client_ip
+
+
+def remove_client(name: str) -> None:
+    name = validate_name(name)
+    client_ip = _revoke_client(name)
+    firewall.remove_default_client_block(name, client_ip)
 
 
 def renew_client(name: str, passphrase: str | None = None) -> Path | None:
@@ -357,7 +370,9 @@ def renew_client(name: str, passphrase: str | None = None) -> Path | None:
     this client already has custom rules, the default ones, or none at
     all."""
     name = validate_name(name)
-    remove_client(name)
+    # Renewing preserves this client's firewall policy; only a permanent
+    # removal should delete its automatically-created default rules.
+    _revoke_client(name)
     try:
         return add_client(name, passphrase=passphrase, apply_default_block=False)
     except PivpnError as exc:

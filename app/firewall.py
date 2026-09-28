@@ -655,7 +655,7 @@ def _insert_and_apply(rule: dict) -> int:
     return rule_id
 
 
-def add_forward_rule(action, protocol, src, dst, dport, comment=""):
+def add_forward_rule(action, protocol, src, dst, dport, comment="", client_name=None):
     protocol = _valid_proto(protocol)
     dport = _valid_port(dport)
     _require_proto_for_dport(protocol, dport)
@@ -667,6 +667,7 @@ def add_forward_rule(action, protocol, src, dst, dport, comment=""):
         "dst": _valid_addr(dst),
         "dport": dport,
         "comment": (comment or "")[:200],
+        "client_name": client_name,
         "enabled": 1,
     }
     _check_not_unrestricted_forward_drop(rule)
@@ -699,9 +700,35 @@ def add_default_client_block(client_name: str, client_ip: str) -> list[int]:
         add_forward_rule(
             action="DROP", protocol="all", src=client_ip, dst=cidr, dport=None,
             comment=f"Default: block internal networks ({client_name})",
+            client_name=client_name,
         )
         for cidr in RFC1918_RANGES
     ]
+
+
+def remove_default_client_block(client_name: str, client_ip: str | None = None) -> int:
+    """Remove only the automatic RFC1918 rules created for a deleted
+    client. The explicit client_name link handles rules created after this
+    association was added; the exact shape/comment/IP check cleans up older
+    generated rows without touching user-authored rules."""
+    expected_comment = f"Default: block internal networks ({client_name})"
+    rules = db.list_rules()
+    rule_ids = [
+        rule["id"] for rule in rules
+        if rule.get("kind") == "forward"
+        and rule.get("action") == "DROP"
+        and rule.get("protocol") == "all"
+        and rule.get("dport") in (None, "")
+        and rule.get("dst") in RFC1918_RANGES
+        and rule.get("comment") == expected_comment
+        and (
+            rule.get("client_name") == client_name
+            or (client_ip and rule.get("src") == client_ip)
+        )
+    ]
+    for rule_id in rule_ids:
+        delete_rule(rule_id)
+    return len(rule_ids)
 
 
 def add_input_rule(action, protocol, src, dport, comment="", client_ip: str | None = None):

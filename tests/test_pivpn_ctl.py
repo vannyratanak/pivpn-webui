@@ -84,6 +84,35 @@ def _renew_run_pivpn(fake_path, revoke_rc=0, add_rc=0, add_stdout="boom"):
     return fake
 
 
+def test_remove_client_cleans_default_rules_after_successful_revoke(monkeypatch):
+    monkeypatch.setattr(pivpn_ctl, "_require_pivpn_binary", lambda: None)
+    monkeypatch.setattr(pivpn_ctl, "get_client_ip", lambda name: "10.8.0.5")
+    calls = []
+    monkeypatch.setattr(pivpn_ctl, "_run_pivpn", lambda argv, timeout=30: _fake_completed(""))
+    monkeypatch.setattr(pivpn_ctl.firewall, "remove_default_client_block",
+                        lambda name, ip: calls.append((name, ip)))
+
+    pivpn_ctl.remove_client("alice")
+
+    assert calls == [("alice", "10.8.0.5")]
+
+
+def test_remove_client_does_not_clean_rules_when_revoke_fails(monkeypatch):
+    monkeypatch.setattr(pivpn_ctl, "_require_pivpn_binary", lambda: None)
+    monkeypatch.setattr(pivpn_ctl, "get_client_ip", lambda name: "10.8.0.5")
+    monkeypatch.setattr(pivpn_ctl, "_run_pivpn", lambda argv, timeout=30: _fake_completed("failed", returncode=1))
+    calls = []
+    monkeypatch.setattr(pivpn_ctl.firewall, "remove_default_client_block",
+                        lambda name, ip: calls.append((name, ip)))
+
+    try:
+        pivpn_ctl.remove_client("alice")
+        raise AssertionError("expected revoke failure")
+    except pivpn_ctl.PivpnError:
+        pass
+    assert calls == []
+
+
 def test_renew_client_success_returns_new_path(monkeypatch):
     monkeypatch.setattr(pivpn_ctl, "_require_pivpn_binary", lambda: None)
     fake_path = _FakeOvpnPath()
