@@ -673,6 +673,37 @@ def add_forward_rule(action, protocol, src, dst, dport, comment=""):
     return _insert_and_apply(rule)
 
 
+# The three RFC1918 private-address blocks — deliberately not just this
+# box's own detected LAN subnet, since a client could otherwise still
+# reach some *other* private range this box happens to route to (a
+# second office subnet, a different VLAN, etc.). Internet access is
+# untouched: any destination outside these three ranges is simply never
+# matched by add_default_client_block's rules below.
+RFC1918_RANGES = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+
+
+def add_default_client_block(client_name: str, client_ip: str) -> list[int]:
+    """One DROP rule per RFC1918 range, scoped to this one client's VPN
+    IP — "internet yes, every other private network no" as the default
+    for a brand new client (see pivpn_ctl.add_client, the only caller).
+    Deliberately does not touch any existing client: this only ever runs
+    once, at creation time, not retroactively.
+
+    Not atomic across the three inserts — if one fails partway through,
+    whichever ranges already got their rule stay blocked rather than
+    being rolled back, since partial protection beats none. The caller
+    (add_client) surfaces a failure here as a distinct partial-failure
+    case: the client itself was already created successfully before this
+    ever runs."""
+    return [
+        add_forward_rule(
+            action="DROP", protocol="all", src=client_ip, dst=cidr, dport=None,
+            comment=f"Default: block internal networks ({client_name})",
+        )
+        for cidr in RFC1918_RANGES
+    ]
+
+
 def add_input_rule(action, protocol, src, dport, comment="", client_ip: str | None = None):
     """Unlike forward/portforward/snat, this can lock the caller out of the
     web UI itself (INPUT is exactly what gates port 443) — a new rule

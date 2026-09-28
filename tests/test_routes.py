@@ -321,6 +321,39 @@ def test_renew_ordinary_failure_keeps_plain_audit_tag(client, monkeypatch):
     assert latest["result"] == "error"
 
 
+def test_add_client_partial_failure_gets_distinct_audit_tag(client, monkeypatch):
+    # The no-JS fallback form: same "client really was created" distinction
+    # as the JSON API route (app/api.py's add_client), just flashed instead
+    # of returned as JSON.
+    client.post("/login", data={"username": "admin", "password": TEST_PASSWORD})
+
+    def fake_add(name, passphrase=None):
+        raise pivpn_ctl.PivpnAddPartialFailure(f"'{name}' was created, but its default internal-network block could not be applied: boom")
+
+    monkeypatch.setattr("app.routes.pivpn_ctl.add_client", fake_add)
+    resp = client.post("/clients/add", data={"name": "testclient"})
+    assert resp.status_code == 302
+
+    latest = db.list_audit(limit=1)[0]
+    assert latest["action"] == "client_add_partial"
+    assert latest["result"] == "error"
+
+
+def test_add_client_ordinary_failure_keeps_plain_audit_tag(client, monkeypatch):
+    client.post("/login", data={"username": "admin", "password": TEST_PASSWORD})
+
+    def fake_add(name, passphrase=None):
+        raise pivpn_ctl.PivpnError("name already in use")
+
+    monkeypatch.setattr("app.routes.pivpn_ctl.add_client", fake_add)
+    resp = client.post("/clients/add", data={"name": "testclient"})
+    assert resp.status_code == 302
+
+    latest = db.list_audit(limit=1)[0]
+    assert latest["action"] == "client_add"
+    assert latest["result"] == "error"
+
+
 # --- user management: CRUD, password change, and RBAC (admin vs. moderator).
 # The `client` fixture's own login always uses the bootstrapped admin
 # (username "admin", TEST_PASSWORD) — _add_moderator inserts a second

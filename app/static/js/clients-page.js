@@ -316,6 +316,11 @@ document.addEventListener('DOMContentLoaded', () => {
           if (!ok) { showRowError(tbody, data.error || `Could not create ${name}.`); return; }
           document.getElementById('add-client-dialog').close();
           addForm.reset();
+          // Client creation itself succeeded even when this is present —
+          // e.g. its default internal-network block failed to apply (see
+          // pivpn_ctl.PivpnAddPartialFailure) — so this is a non-blocking
+          // notice, not the error path above.
+          if (data.warning) showRowError(tbody, data.warning);
           ApiClient.call(`/api/clients/${encodeURIComponent(name)}`)
             .then((resp) => (resp.ok ? resp.json() : Promise.reject()))
             .then((c) => insertRow(c))

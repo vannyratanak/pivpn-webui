@@ -148,7 +148,93 @@ def test_add_client_returns_none_in_hub_mode_not_a_hub_local_path(monkeypatch):
     monkeypatch.setattr(pivpn_ctl, "client_ovpn_path",
                          lambda name: (_ for _ in ()).throw(AssertionError("must not be called in hub mode")))
     monkeypatch.setattr(pivpn_ctl, "_run_pivpn", lambda argv, timeout=30: _fake_completed(""))
+    # Not this test's concern (see the add_client firewall-hook tests
+    # below) — just needs to not blow up the HUB_MODE/path assertion.
+    monkeypatch.setattr(pivpn_ctl, "get_client_ip", lambda name: "10.8.0.9")
+    monkeypatch.setattr(pivpn_ctl.firewall, "add_default_client_block", lambda name, ip: [1, 2, 3])
     assert pivpn_ctl.add_client("hubtest") is None
+
+
+# --- add_client's firewall hook: the boss-mandated "block every other
+# private network by default" policy (see firewall.add_default_client_block)
+# is wired into add_client itself, right after pivpn genuinely created the
+# client — so a failure here must never look like the client wasn't
+# created (see PivpnAddPartialFailure's own docstring).
+
+def _new_client_run_pivpn(fake_path):
+    def fake(argv, timeout=30):
+        fake_path.created = True
+        return _fake_completed("", returncode=0)
+    return fake
+
+
+def test_add_client_success_applies_default_block_with_the_new_ip(monkeypatch):
+    monkeypatch.setattr(pivpn_ctl, "_require_pivpn_binary", lambda: None)
+    fake_path = _FakeOvpnPath()
+    monkeypatch.setattr(pivpn_ctl, "client_ovpn_path", lambda name: fake_path)
+    monkeypatch.setattr(pivpn_ctl, "_run_pivpn", _new_client_run_pivpn(fake_path))
+    monkeypatch.setattr(pivpn_ctl, "get_client_ip", lambda name: "10.8.0.42")
+    block_calls = []
+    monkeypatch.setattr(pivpn_ctl.firewall, "add_default_client_block",
+                         lambda name, ip: block_calls.append((name, ip)))
+    assert pivpn_ctl.add_client("freshclient") is fake_path
+    assert block_calls == [("freshclient", "10.8.0.42")]
+
+
+def test_add_client_no_ip_found_raises_partial_failure_not_plain_error(monkeypatch):
+    # The client is real at this point (pivpn add already succeeded) —
+    # this must be distinguishable from an ordinary add failure so callers
+    # don't tell the admin the client doesn't exist when it does.
+    monkeypatch.setattr(pivpn_ctl, "_require_pivpn_binary", lambda: None)
+    fake_path = _FakeOvpnPath()
+    monkeypatch.setattr(pivpn_ctl, "client_ovpn_path", lambda name: fake_path)
+    monkeypatch.setattr(pivpn_ctl, "_run_pivpn", _new_client_run_pivpn(fake_path))
+    monkeypatch.setattr(pivpn_ctl, "get_client_ip", lambda name: None)
+    monkeypatch.setattr(pivpn_ctl.firewall, "add_default_client_block",
+                         lambda name, ip: (_ for _ in ()).throw(AssertionError("must not be called without an IP")))
+    try:
+        pivpn_ctl.add_client("freshclient")
+        raise AssertionError("expected PivpnAddPartialFailure")
+    except pivpn_ctl.PivpnAddPartialFailure as exc:
+        assert "freshclient" in str(exc)
+        assert "VPN IP couldn't be looked up" in str(exc)
+
+
+def test_add_client_firewall_error_raises_partial_failure(monkeypatch):
+    monkeypatch.setattr(pivpn_ctl, "_require_pivpn_binary", lambda: None)
+    fake_path = _FakeOvpnPath()
+    monkeypatch.setattr(pivpn_ctl, "client_ovpn_path", lambda name: fake_path)
+    monkeypatch.setattr(pivpn_ctl, "_run_pivpn", _new_client_run_pivpn(fake_path))
+    monkeypatch.setattr(pivpn_ctl, "get_client_ip", lambda name: "10.8.0.42")
+
+    def _boom(name, ip):
+        raise pivpn_ctl.firewall.FirewallError("iptables blew up")
+
+    monkeypatch.setattr(pivpn_ctl.firewall, "add_default_client_block", _boom)
+    try:
+        pivpn_ctl.add_client("freshclient")
+        raise AssertionError("expected PivpnAddPartialFailure")
+    except pivpn_ctl.PivpnAddPartialFailure as exc:
+        assert "freshclient" in str(exc)
+        assert "iptables blew up" in str(exc)
+
+
+def test_renew_client_never_applies_default_block(monkeypatch):
+    # Renewing is revoke+reissue of the SAME client, not a new one — the
+    # default-block policy is new-clients-only (see add_client's own
+    # apply_default_block docstring). If this regresses, every renew would
+    # silently start slapping first-time-only rules onto existing clients,
+    # including the pre-existing ones this policy was explicitly scoped to
+    # leave alone.
+    monkeypatch.setattr(pivpn_ctl, "_require_pivpn_binary", lambda: None)
+    fake_path = _FakeOvpnPath()
+    monkeypatch.setattr(pivpn_ctl, "client_ovpn_path", lambda name: fake_path)
+    monkeypatch.setattr(pivpn_ctl, "_run_pivpn", _renew_run_pivpn(fake_path))
+    monkeypatch.setattr(pivpn_ctl, "get_client_ip",
+                         lambda name: (_ for _ in ()).throw(AssertionError("must not be called on renew")))
+    monkeypatch.setattr(pivpn_ctl.firewall, "add_default_client_block",
+                         lambda name, ip: (_ for _ in ()).throw(AssertionError("must not be called on renew")))
+    assert pivpn_ctl.renew_client("renewtest") is fake_path
 
 
 def test_renew_client_partial_failure_raises_distinct_error(monkeypatch):
@@ -206,6 +292,45 @@ def test_import_clients_one_bad_line_does_not_stop_the_rest(monkeypatch):
     assert "line 1" in errors[0]
 
 
+def test_import_clients_counts_a_partial_failure_client_as_added(monkeypatch):
+    # The client from that line really was created (pivpn add succeeded) —
+    # only its default-block firewall rules failed. Undercounting it as a
+    # failure would tell the admin the client doesn't exist when it does.
+    def fake_add_client(name, passphrase=None):
+        raise pivpn_ctl.PivpnAddPartialFailure(
+            f"'{name}' was created, but its default internal-network block "
+            "could not be applied: boom"
+        )
+
+    monkeypatch.setattr(pivpn_ctl, "add_client", fake_add_client)
+    added, errors = pivpn_ctl.import_clients("name=partialclient\n")
+    assert added == 1
+    assert len(errors) == 1
+    assert "line 1" in errors[0]
+    assert "partialclient" in errors[0]
+
+
+def test_import_clients_partial_failure_mixed_with_a_genuine_failure(monkeypatch):
+    def fake_add_client(name, passphrase=None):
+        if name == "partialclient":
+            raise pivpn_ctl.PivpnAddPartialFailure(f"'{name}' partial boom")
+        if name == "brokenclient":
+            raise pivpn_ctl.PivpnError(f"'{name}' totally failed")
+        return None
+
+    monkeypatch.setattr(pivpn_ctl, "add_client", fake_add_client)
+    text = "name=goodclient\nname=partialclient\nname=brokenclient\n"
+    added, errors = pivpn_ctl.import_clients(text)
+    # goodclient and partialclient both really exist now; brokenclient does
+    # not. partialclient still surfaces its own warning in errors (line 2)
+    # alongside brokenclient's genuine failure (line 3) — added counts both
+    # real clients, errors reports both messages, for different reasons.
+    assert added == 2
+    assert len(errors) == 2
+    assert any("line 2" in e and "partialclient" in e for e in errors)
+    assert any("line 3" in e and "brokenclient" in e for e in errors)
+
+
 # --- add_client: a real TOCTOU race — two near-simultaneous calls for the
 # same name (a double-click on "Create client" is the realistic trigger;
 # the button isn't disabled while the request is in flight) could both
@@ -228,6 +353,10 @@ def test_add_client_race_never_produces_a_confusing_error(tmp_path, monkeypatch)
     # pre-fix code too (where this attribute doesn't exist yet) to prove
     # the race is real, not just theoretical.
     monkeypatch.setattr(pivpn_ctl, "_ADD_CLIENT_LOCK_PATH", tmp_path / ".add-client.lock", raising=False)
+    # Not this test's concern (see the add_client firewall-hook tests
+    # below) — just needs the winning thread to reach a normal return.
+    monkeypatch.setattr(pivpn_ctl, "get_client_ip", lambda name: "10.8.0.9")
+    monkeypatch.setattr(pivpn_ctl.firewall, "add_default_client_block", lambda name, ip: [1, 2, 3])
 
     def _slow_run_pivpn(argv, timeout=30):
         time.sleep(0.2)  # simulate pivpn add's real cert-generation latency

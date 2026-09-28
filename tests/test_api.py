@@ -276,6 +276,46 @@ def test_add_client_failure_returns_400_with_message(client, monkeypatch):
     assert resp.get_json()["error"] == "name already in use"
 
 
+def test_add_client_partial_failure_returns_201_with_warning(client, monkeypatch):
+    # The client really was created (only its default internal-network
+    # block failed) — must stay a 201 success, distinct from the 400 a
+    # genuine add failure gets, with the warning surfaced for the frontend
+    # to show without blocking the "client created" flow (see
+    # clients-page.js's addForm submit handler).
+    token = _login(client).get_json()["access_token"]
+
+    def _partial(name, passphrase=None):
+        raise pivpn_ctl.PivpnAddPartialFailure(
+            f"'{name}' was created, but its default internal-network block "
+            "could not be applied: boom"
+        )
+
+    monkeypatch.setattr("app.api.pivpn_ctl.add_client", _partial)
+    monkeypatch.setattr("app.api._refresh_client_status_cache", lambda: None)
+
+    resp = client.post("/api/clients", json={"name": "laptop-anna"}, headers=_auth_header(token))
+    assert resp.status_code == 201
+    body = resp.get_json()
+    assert body["created"] == "laptop-anna"
+    assert "laptop-anna" in body["warning"]
+
+    from app import db
+    audit = db.list_audit(limit=5)
+    assert any(a["action"] == "client_add_partial" and a["actor"] == "admin" for a in audit)
+
+
+def test_add_client_partial_failure_still_refreshes_the_cache(client, monkeypatch):
+    token = _login(client).get_json()["access_token"]
+    monkeypatch.setattr("app.api.pivpn_ctl.add_client",
+                         lambda name, passphrase=None: (_ for _ in ()).throw(pivpn_ctl.PivpnAddPartialFailure("boom")))
+    calls = []
+    monkeypatch.setattr("app.api._refresh_client_status_cache", lambda: calls.append(True))
+
+    resp = client.post("/api/clients", json={"name": "laptop-anna"}, headers=_auth_header(token))
+    assert resp.status_code == 201
+    assert calls == [True]
+
+
 def test_renew_client_success(client, monkeypatch):
     token = _login(client).get_json()["access_token"]
     monkeypatch.setattr("app.api.pivpn_ctl.renew_client", lambda name, passphrase=None: None)

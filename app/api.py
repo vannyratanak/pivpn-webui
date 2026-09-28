@@ -197,6 +197,15 @@ def add_client():
     passphrase = (data.get("passphrase") or "").strip() or None
     try:
         pivpn_ctl.add_client(name, passphrase=passphrase)
+    except pivpn_ctl.PivpnAddPartialFailure as exc:
+        # Distinct from a generic add failure: the client really was
+        # created (see pivpn_ctl.add_client's own reasoning) — just
+        # missing its default internal-network block. Still a 201, with
+        # a warning the frontend surfaces without blocking the "client
+        # created" flow.
+        _audit("client_add_partial", name, "error", str(exc))
+        _refresh_client_status_cache()
+        return jsonify({"created": name, "warning": str(exc)}), 201
     except pivpn_ctl.PivpnError as exc:
         _audit("client_add", name, "error", str(exc))
         return jsonify({"error": str(exc)}), 400

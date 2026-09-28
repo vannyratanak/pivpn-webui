@@ -10,6 +10,7 @@ from app.privileged import PrivilegedCommandError
 from tests.conftest import _configure_test_db
 from app.firewall import (
     _IMPORT_ADDERS,
+    RFC1918_RANGES,
     FirewallError,
     _apply,
     _check_client_block_self_lockout,
@@ -23,6 +24,7 @@ from app.firewall import (
     _rule_from_parsed,
     _unapply,
     _would_allow_client,
+    add_default_client_block,
     add_forward_rule,
     add_input_rule,
     delete_rule,
@@ -1063,6 +1065,39 @@ def test_add_forward_rule_allows_unrestricted_accept(tmp_path, monkeypatch):
     add_forward_rule(action="ACCEPT", protocol="all", src=None, dst=None, dport=None)
     assert len(db.list_rules()) == 1
     assert len(applied) == 1
+
+
+# --- add_default_client_block: the boss-mandated new-client default —
+# "block any protocol/port to anywhere inside the network, except the
+# internet" — one DROP rule per RFC1918 range, scoped to the one new
+# client's VPN IP. Only ever called from pivpn_ctl.add_client, and only
+# for brand new clients (see tests/test_pivpn_ctl.py for that wiring).
+
+def test_add_default_client_block_creates_one_drop_rule_per_rfc1918_range(tmp_path, monkeypatch):
+    applied = _setup_forward_db(tmp_path, monkeypatch)
+    rule_ids = add_default_client_block("alice", "10.8.0.5")
+    assert len(rule_ids) == 3
+    rules = db.list_rules()
+    assert len(rules) == 3
+    assert len(applied) == 3
+    assert {r["dst"] for r in rules} == set(RFC1918_RANGES)
+    for r in rules:
+        assert r["kind"] == "forward"
+        assert r["action"] == "DROP"
+        assert r["protocol"] == "all"
+        assert r["src"] == "10.8.0.5"
+        assert r["dport"] is None
+        assert "alice" in r["comment"]
+
+
+def test_add_default_client_block_does_not_touch_internet_traffic(tmp_path, monkeypatch):
+    # Nothing outside the three RFC1918 ranges is ever matched — a
+    # destination like 8.8.8.8 (internet) never appears as a dst here.
+    _setup_forward_db(tmp_path, monkeypatch)
+    add_default_client_block("alice", "10.8.0.5")
+    dsts = {r["dst"] for r in db.list_rules()}
+    assert "0.0.0.0/0" not in dsts
+    assert all(d in RFC1918_RANGES for d in dsts)
 
 
 # --- import_client_rules: the client detail page's own narrower Import

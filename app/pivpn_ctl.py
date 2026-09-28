@@ -31,7 +31,7 @@ import subprocess
 from pathlib import Path
 
 import config
-from app import hub_client
+from app import firewall, hub_client
 from app.privileged import PrivilegedCommandError, run_root
 
 CLIENT_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
@@ -82,6 +82,17 @@ class PivpnRenewPartialFailure(PivpnError):
     point of PKI revocation), so there's no rollback here, only a louder
     warning. Callers should surface this distinctly rather than as a
     generic renew failure."""
+
+
+class PivpnAddPartialFailure(PivpnError):
+    """Raised only by add_client: the client itself was created
+    successfully, but its automatic default-block firewall rules (see
+    firewall.add_default_client_block) failed to apply. Unlike a generic
+    add failure, the client is real and usable — it's just missing the
+    "no LAN access by default" protection a fresh client normally gets.
+    No rollback (same reasoning as PivpnRenewPartialFailure): removing an
+    otherwise-good client over a firewall hiccup would be a worse
+    outcome. Callers should surface this distinctly."""
 
 
 def validate_name(name: str) -> str:
@@ -214,13 +225,20 @@ def _client_ovpn_exists(name: str) -> bool:
         return False
 
 
-def add_client(name: str, passphrase: str | None = None) -> Path | None:
+def add_client(name: str, passphrase: str | None = None, apply_default_block: bool = True) -> Path | None:
     """Returns the new .ovpn's local path — except in HUB_MODE, where the
     file lives on the agent's disk, not this (hub) machine's, so
     client_ovpn_path(name) would just be a path to nothing here; callers
     that actually need the bytes must go through read_client_ovpn(name)
     instead, which already knows to ask the agent. Returns None in that
-    case rather than a Path that merely looks valid."""
+    case rather than a Path that merely looks valid.
+
+    apply_default_block: only False for renew_client's reissue-under-the
+    -same-name call. The default-block policy is new-clients-only, not
+    retroactive (see firewall.add_default_client_block) — renewing an
+    existing client's cert must never be the backdoor that silently
+    slaps first-time-only rules onto a client that was deliberately left
+    alone, or duplicates them if it already has its own."""
     name = validate_name(name)
     _require_pivpn_binary()
     with _add_client_lock():
@@ -241,6 +259,31 @@ def add_client(name: str, passphrase: str | None = None) -> Path | None:
                 f"pivpn add reported success but {name}.ovpn was not found — "
                 "check PIVPN_OVPN_DIR in the agent's .env."
             )
+
+        if not apply_default_block:
+            return None if config.HUB_MODE else client_ovpn_path(name)
+
+        # Every new client starts blocked from every other private network
+        # by default, internet access untouched (see
+        # firewall.add_default_client_block) — a boss-mandated policy, not
+        # something an admin has to remember to set up per client by hand.
+        # The client itself already exists at this point regardless of
+        # what happens next — see PivpnAddPartialFailure's own docstring
+        # for why a failure here doesn't unwind it.
+        client_ip = get_client_ip(name)
+        if not client_ip:
+            raise PivpnAddPartialFailure(
+                f"'{name}' was created, but its VPN IP couldn't be looked up — "
+                "its default internal-network block was not applied."
+            )
+        try:
+            firewall.add_default_client_block(name, client_ip)
+        except (firewall.FirewallError, PrivilegedCommandError) as exc:
+            raise PivpnAddPartialFailure(
+                f"'{name}' was created, but its default internal-network block "
+                f"could not be applied: {exc}"
+            ) from exc
+
         return None if config.HUB_MODE else client_ovpn_path(name)
 
 
@@ -273,6 +316,12 @@ def import_clients(text: str) -> tuple[int, list[str]]:
                 raise PivpnError("Missing name=... .")
             add_client(name, passphrase=fields.get("passphrase") or None)
             added += 1
+        except PivpnAddPartialFailure as exc:
+            # The client from this line really was created — count it as
+            # added, not failed, but still surface the warning distinctly
+            # from a genuine per-line failure.
+            added += 1
+            errors.append(f"line {i}: {exc}")
         except PivpnError as exc:
             errors.append(f"line {i}: {exc}")
     return added, errors
@@ -300,11 +349,17 @@ def renew_client(name: str, passphrase: str | None = None) -> Path | None:
 
     Not atomic: if add_client fails after remove_client already succeeded,
     the client is left with zero valid access rather than just stuck on
-    the old cert — see PivpnRenewPartialFailure."""
+    the old cert — see PivpnRenewPartialFailure.
+
+    apply_default_block=False: this is the SAME client, not a new one —
+    the default-block policy only ever applies at first creation (see
+    add_client's own docstring), so a renew must never add it, whether
+    this client already has custom rules, the default ones, or none at
+    all."""
     name = validate_name(name)
     remove_client(name)
     try:
-        return add_client(name, passphrase=passphrase)
+        return add_client(name, passphrase=passphrase, apply_default_block=False)
     except PivpnError as exc:
         raise PivpnRenewPartialFailure(
             f"'{name}' was revoked, but issuing the new certificate failed: {exc} "

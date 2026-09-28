@@ -393,6 +393,11 @@ def add_client():
         pivpn_ctl.add_client(name, passphrase=passphrase)
         flash(f"Client '{name}' created.", "success")
         _audit("client_add", name)
+    except pivpn_ctl.PivpnAddPartialFailure as exc:
+        # The client was created — say so, distinctly from a real failure,
+        # same reasoning as PivpnRenewPartialFailure below.
+        flash(f"Client '{name}' created, but {exc}", "error")
+        _audit("client_add_partial", name, "error", str(exc))
     except pivpn_ctl.PivpnError as exc:
         flash(str(exc), "error")
         _audit("client_add", name, "error", str(exc))
