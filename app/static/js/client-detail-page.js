@@ -469,12 +469,23 @@ document.addEventListener('DOMContentLoaded', () => {
   let detailStreamConnected = false;
   const detailStream = OverviewStream((event, topics) => {
     if (event === 'ready') {
-      if (detailStreamConnected) loadClient();
+      if (detailStreamConnected) {
+        loadClient();
+        scheduleActivityRefresh();
+      }
       detailStreamConnected = true;
-    } else if (event === 'changed' && topics.includes('snapshot')) loadClient();
+    } else if (event === 'changed') {
+      if (topics.includes('snapshot')) loadClient();
+      if (topics.some((topic) => (ACTIVITY_TOPICS[activityTab] || []).includes(topic))) {
+        scheduleActivityRefresh();
+      }
+    }
   }, () => {});
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) detailStream.stop(); else detailStream.start();
+    if (document.hidden) {
+      detailStream.stop();
+      clearTimeout(activityRefreshTimer);
+    } else detailStream.start();
   });
   window.addEventListener('pagehide', () => detailStream.stop());
   window.addEventListener('pageshow', () => { if (!document.hidden) detailStream.start(); });
@@ -492,6 +503,22 @@ document.addEventListener('DOMContentLoaded', () => {
   const activityStatusEl = document.querySelector('[data-activity-page-status]');
   let activityTab = 'client_sessions';
   let activityPage = 1;
+  const ACTIVITY_TOPICS = { client_sessions: ['vpn_logs'], traffic: ['traffic_logs'] };
+  let lastActivityRefresh = 0;
+  let activityRefreshTimer = null;
+
+  // One notification covers an ingest transaction. Coalesce bursts and
+  // refresh only the selected activity view, at most once every two seconds.
+  function scheduleActivityRefresh() {
+    if (document.visibilityState === 'hidden') return;
+    const wait = Math.max(0, 2000 - (Date.now() - lastActivityRefresh));
+    clearTimeout(activityRefreshTimer);
+    activityRefreshTimer = setTimeout(() => {
+      lastActivityRefresh = Date.now();
+      loadActivity(false);
+      loadActivityChart();
+    }, wait);
+  }
 
   function activitySection(tab) {
     return document.querySelector(`[data-activity-section="${tab}"]`);
