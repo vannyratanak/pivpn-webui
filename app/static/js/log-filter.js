@@ -35,7 +35,16 @@ function attachLogFilter(inputId, containerSelector, itemSelector, headerSelecto
   if (!headerSelector) return;
   const headers = Array.from(document.querySelectorAll(headerSelector));
   let sortColumn = null;
-  let sortAsc = true;
+  let sortDir = null; // null (unsorted) | 'asc' | 'desc' — a 3-state cycle per column
+  // Snapshot of row order, taken the moment a column *starts* a new sort
+  // cycle (not once at page load) — restored verbatim as that cycle's
+  // third click ("back to normal"). Taking it lazily like this means a
+  // table whose rows changed since the page loaded (Clients' insert/
+  // remove, Firewall Rules' Add Rule, etc.) still restores to how things
+  // actually looked right before this column started sorting, not a
+  // stale page-load-time layout. A row removed from the table before the
+  // restore is skipped (isConnected check) rather than resurrected.
+  let originalOrder = null;
 
   // th.cellIndex (its actual position among ALL cells in its row) rather
   // than its position within the filtered `headers` array — headerSelector
@@ -45,21 +54,40 @@ function attachLogFilter(inputId, containerSelector, itemSelector, headerSelecto
   // a.children[...] regardless of what got excluded.
   function activate(th) {
     const index = th.cellIndex;
-    sortAsc = sortColumn === index ? !sortAsc : true;
-    sortColumn = index;
+    if (sortColumn !== index) {
+      originalOrder = Array.from(container.querySelectorAll(itemSelector));
+      sortColumn = index;
+      sortDir = 'asc';
+    } else if (sortDir === 'asc') {
+      sortDir = 'desc';
+    } else if (sortDir === 'desc') {
+      sortDir = null;
+    } else {
+      originalOrder = Array.from(container.querySelectorAll(itemSelector));
+      sortDir = 'asc';
+    }
+
     headers.forEach((h) => {
       h.classList.remove('sort-asc', 'sort-desc');
       h.setAttribute('aria-sort', 'none');
     });
-    th.classList.add(sortAsc ? 'sort-asc' : 'sort-desc');
-    th.setAttribute('aria-sort', sortAsc ? 'ascending' : 'descending');
+
+    if (sortDir === null) {
+      originalOrder.forEach((row) => { if (row.isConnected) container.appendChild(row); });
+      sortColumn = null;
+      onChange && onChange();
+      return;
+    }
+
+    th.classList.add(sortDir === 'asc' ? 'sort-asc' : 'sort-desc');
+    th.setAttribute('aria-sort', sortDir === 'asc' ? 'ascending' : 'descending');
 
     const rows = Array.from(container.querySelectorAll(itemSelector));
     rows.sort((a, b) => {
       const at = (a.children[index]?.textContent || '').trim();
       const bt = (b.children[index]?.textContent || '').trim();
       const cmp = at.localeCompare(bt, undefined, { numeric: true, sensitivity: 'base' });
-      return sortAsc ? cmp : -cmp;
+      return sortDir === 'asc' ? cmp : -cmp;
     });
     rows.forEach((row) => container.appendChild(row));
     onChange && onChange();
