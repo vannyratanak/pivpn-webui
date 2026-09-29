@@ -63,7 +63,7 @@ button.ov-metric { justify-content: stretch; justify-items: start; }
 .ov-metric:focus-visible, .ov-legend button:focus-visible, .ov-data summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .ov-metric strong, .ov-legend strong { line-height: 1.15; font-variant-numeric: tabular-nums; }
 .ov-status { display: flex; flex-direction: column; }
-.ov-status .ov-donut-wrap { flex: 1; align-items: center; }
+.ov-status .ov-donut-wrap { flex: 0 0 auto; align-items: flex-start; }
 .ov-health > div { flex: 1 1 180px; }
 .ov-data summary { padding: 8px 0; }
 .ov-clients .card-header-row { align-items: center; }
